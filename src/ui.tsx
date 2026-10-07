@@ -1,0 +1,901 @@
+// HTML overlays: title, how to play, deck, hand levels, run over + challenge sharing, menus, coach.
+import { render } from "preact";
+import { useEffect, useState } from "preact/hooks";
+import { BOSSES, FINAL_BOSS, HANDS, INSIDERS, MOVES, BLIND_NAME, ANTE_BASE } from "../shared/content.js";
+import { ENH, RANK_LABEL, SUITS, facePath, tokenUrl, type Card, type PoolCard } from "../shared/data.js";
+import { audioState, setMusic, setSfx, unlock } from "./audio.js";
+import { local, setUi, subscribe, toast, ui } from "./store.js";
+import { cleanName, nameProblem } from "../shared/names.js";
+
+export interface UiActions {
+  newRun(): void;
+  continueRun(): void;
+  playSeed(raw: string): Promise<boolean>;
+  restartSeed(): void;
+  abandon(): void;
+  acceptChallenge(): void;
+  share(name: string): Promise<{ id: string; url: string } | null>;
+  seedLink(): string;
+  hint(): void;
+  hasSaved(): boolean;
+  playEntry(h: { id: string; name: string; ante: number; cleared: number; won: boolean; total: number; handName: string; seed: string; edition: number }): void;
+}
+
+let A: UiActions;
+
+const SUIT_HEX = ["#5ad7ff", "#ff7a3d", "#ff4fb4", "#ffd43b"];
+const SUIT_SHAPE = ["◆", "▲", "●", "■"];
+const fmt = (n: number) => Math.floor(n).toLocaleString("en-US");
+
+function useUi() {
+  const [, set] = useState(0);
+  useEffect(() => {
+    const off = subscribe(() => set((x) => x + 1));
+    return () => {
+      off();
+    };
+  }, []);
+  return ui;
+}
+
+function close() {
+  setUi({ overlay: ui.run && !(ui.run.s.phase === "over" || ui.run.s.phase === "won") ? null : ui.run ? "over" : "title" });
+}
+
+function Modal(props: { title: string; children: preact.ComponentChildren; wide?: boolean; onClose?: () => void; accent?: string }) {
+  return (
+    <div class="ov-backdrop" onClick={(e) => e.target === e.currentTarget && (props.onClose || close)()}>
+      <div class={"ov-panel" + (props.wide ? " wide" : "")} style={props.accent ? { borderColor: props.accent } : undefined} role="dialog" aria-label={props.title}>
+        <div class="ov-head">
+          <h2>{props.title}</h2>
+          <button class="x" aria-label="Close" onClick={() => (props.onClose || close)()}>
+            ×
+          </button>
+        </div>
+        <div class="ov-body">{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SoundToggles() {
+  const [st, set] = useState(audioState());
+  return (
+    <div class="toggles">
+      <button
+        class={"chip" + (st.music ? " on" : "")}
+        onClick={() => {
+          unlock();
+          setMusic(!st.music);
+          set(audioState());
+        }}
+      >
+        Music {st.music ? "on" : "off"}
+      </button>
+      <button
+        class={"chip" + (st.sfx ? " on" : "")}
+        onClick={() => {
+          unlock();
+          setSfx(!st.sfx);
+          set(audioState());
+        }}
+      >
+        Sound {st.sfx ? "on" : "off"}
+      </button>
+    </div>
+  );
+}
+
+function ago(iso: string) {
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+}
+
+// ------------------------------------------------------------ title
+/** vibe/vibe vibers, redrawn in the game palette, strolling above and below the logo. */
+function Parade() {
+  const [names, setNames] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/vibers/index.json")
+      .then((r) => r.json())
+      .then((all: string[]) => setNames(all.slice().sort(() => Math.random() - 0.5).slice(0, 16)))
+      .catch(() => setNames([]));
+  }, []);
+  if (!names.length) return null;
+  const row = (list: string[], cls: string) => (
+    <div class={"parade " + cls} aria-hidden="true">
+      <div class="track">
+        {[...list, ...list, ...list, ...list].map((n, i) => (
+          <img src={`/vibers/${n}.png`} alt="" width={96} height={96} style={{ animationDelay: `${(i % list.length) * 0.17}s` }} />
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <>
+      {row(names.slice(0, 8), "up")}
+      {row(names.slice(8), "down")}
+    </>
+  );
+}
+function Title() {
+  const u = useUi();
+  const ed = u.edition;
+  const ch = u.challenge;
+  const saved = A.hasSaved();
+  return (
+    <div class="title-screen">
+      <Parade />
+      <div class="logo" aria-label="KICKER">
+        {"KICKER".split("").map((ch, i) => (
+          <span style={{ animationDelay: `${i * 0.12}s` }}>{ch}</span>
+        ))}
+      </div>
+      <p class="tag">A poker roguelike where every card is a live vibe/vibe launch.</p>
+      {ch && (
+        <div class="challenge">
+          <p>
+            <b class="who">{ch.name || "Someone"}</b> challenged you on this seed: {ch.won ? "cleared all 8 antes" : `reached ante ${ch.ante}`}, best hand{" "}
+            <b class="m">{fmt(ch.best)}</b>
+            {ch.handName ? ` (${ch.handName})` : ""}.
+          </p>
+          <button class="btn gold" onClick={() => A.acceptChallenge()}>
+            Take the challenge
+          </button>
+        </div>
+      )}
+      <div class="menu">
+        {saved && (
+          <button class="btn teal big" onClick={() => A.continueRun()}>
+            Continue run
+          </button>
+        )}
+        <button class={"btn big " + (saved ? "pink" : "teal")} disabled={!ed} onClick={() => A.newRun()}>
+          {ed ? "New run" : u.editionError ? "Deck unavailable" : "Cutting the deck..."}
+        </button>
+        <div class="row">
+          <button class="btn" onClick={() => setUi({ overlay: "how" })}>
+            How to play
+          </button>
+          <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
+            Hall of hands
+          </button>
+        </div>
+        <div class="row">
+          <button class="btn" disabled={!ed} onClick={() => setUi({ overlay: "deck" })}>
+            This hour's cards
+          </button>
+        </div>
+        <div class="row minor">
+          <button class="chip" onClick={() => setUi({ overlay: "seed" })}>
+            Play a friend's seed
+          </button>
+          <SoundToggles />
+        </div>
+      </div>
+      <div class="fresh">
+        {ed ? (
+          <>
+            Fresh deck: <b>{ed.pool.reduce((n, p) => n + p.length, 0)}</b> live launches from vibe/vibe, reshuffled every hour.
+          </>
+        ) : u.editionError ? (
+          "The launch index is not answering. Try again in a minute."
+        ) : (
+          "Shuffling the newest launches..."
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ how to play
+function How() {
+  return (
+    <Modal title="How to play" wide>
+      <section>
+        <h3>The goal</h3>
+        <p>
+          Each round is a <b>blind</b> with a target score. You get 4 hands and 3 discards to reach it. Play 1 to 5 cards: they form a poker-style hand. Your hand
+          scores <b class="c">Chips</b> x <b class="m">Mult</b>. Clear the Small, Big and Boss blind to move up an ante. Survive ante 8 to win. Lose all your hands
+          short of the target and the run is over.
+        </p>
+      </section>
+      <section>
+        <h3>Your cards are real launches</h3>
+        <p>When a run starts, 52 launches from vibe/vibe (Robinhood Chain testnet) become your deck. Numbers are frozen at the moment the deck was cut:</p>
+        <table class="map">
+          <tbody>
+            <tr>
+              <td>Suit</td>
+              <td>
+                What the launch is paired with.{" "}
+                {SUITS.map((s, i) => (
+                  <span class="suit" style={{ color: SUIT_HEX[i] }}>
+                    {SUIT_SHAPE[i]} {s.name}
+                  </span>
+                ))}
+                <br />
+                <small>
+                  {SUITS.map((s) => `${s.name}: ${s.pairs}`).join(". ")}.
+                </small>
+              </td>
+            </tr>
+            <tr>
+              <td>Rank</td>
+              <td>
+                Inside each suit, the 13 launches are lined up by bonding-curve progress (reserve vs graduation target), then 24h trades, then holders. The furthest
+                along is the <b>Ace</b>, the least is the <b>2</b>. Card chips: 2-10 face value, J/Q/K 10, A 11.
+              </td>
+            </tr>
+            <tr>
+              <td>Badges</td>
+              <td>
+                {(Object.keys(ENH) as (keyof typeof ENH)[]).map((k) => (
+                  <div>
+                    <b>{ENH[k].name}</b>: {ENH[k].text} <small>({ENH[k].why})</small>
+                  </div>
+                ))}
+              </td>
+            </tr>
+            <tr>
+              <td>Art</td>
+              <td>The token's own picture and ticker. Open "Deck" during a run to see every card's numbers and jump to its launch page.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h3>Hands</h3>
+        <table class="hands">
+          <thead>
+            <tr>
+              <th>Hand</th>
+              <th>Chips x Mult</th>
+              <th>What it takes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {HANDS.map((h) => (
+              <tr>
+                <td>{h.name}</td>
+                <td>
+                  <span class="c">{h.chips}</span> x <span class="m">{h.mult}</span>
+                </td>
+                <td>{h.rule}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p>
+          Only the cards that make the hand score their chips (for Index: the best card of each suit). Hands can be levelled up with Alpha leaks from the shop.
+        </p>
+      </section>
+      <section>
+        <h3>Blinds</h3>
+        <p>
+          Ante 1 targets: {ANTE_BASE[0]} / {ANTE_BASE[0] * 1.5} / {ANTE_BASE[0] * 2}. Ante 8: {fmt(ANTE_BASE[7])} / {fmt(ANTE_BASE[7] * 1.5)} / {fmt(ANTE_BASE[7] * 4)}.
+          Every Boss blind bends a rule:
+        </p>
+        <ul class="bosses">
+          {[...BOSSES, FINAL_BOSS].map((b) => (
+            <li>
+              <b>{b.name}</b>: {b.text}
+              {b.id === "bell" ? " (ante 8 only)" : ""}
+            </li>
+          ))}
+        </ul>
+        <p>Clearing a blind pays its reward ($3 / $4 / $5), $1 per unused hand and $1 interest per $5 you hold (max $5).</p>
+      </section>
+      <section>
+        <h3>The shop</h3>
+        <p>
+          <b>Insiders</b> ({INSIDERS.length} of them, 5 slots) are your jokers: they add Chips or Mult, many of them reading the launch numbers behind a card (holders,
+          24h trades, curve progress, age, ticker length). They fire left to right. Tap one to sell it for half price. <b>Alpha leaks</b> level up a hand. <b>Moves</b> (
+          {MOVES.length} kinds, 2 slots) are one-shot tricks: select cards in hand, then tap the move and Use.
+        </p>
+      </section>
+      <section>
+        <h3>Seeds and challenges</h3>
+        <p>
+          A run is fixed by its <b>seed</b> and its <b>deck number</b>: the same pair always deals the same cards in the same sequence and offers the same shop. Send a
+          seed link to a friend and they play your exact run. When a run ends, make a challenge link: the server plays every move you made again to check the score,
+          then draws a card for X. Whoever opens it plays the same seed against your result.
+        </p>
+      </section>
+      <section>
+        <h3>Where the cards come from</h3>
+        <p>
+          Once an hour the game reads the newest ~1,300 launches from the vibe/vibe v6 index. Farm-bot launches (templated descriptions, generated names, numeric
+          tickers, never-traded tokens, more than two launches from one creator) are left out. Per suit, the 10 liveliest launches plus the newest ones make the
+          pool of 30; your seed draws 13 of them. Desktop keys: Enter plays, X discards, S sorts. Hold a card in hand (or tap it in Deck) for its full details.
+        </p>
+        {ui.edition && (
+          <p class="note">
+            Current deck #{ui.edition.id}: cut {ago(ui.edition.at)} at block {ui.edition.block}, {ui.edition.scanned.toLocaleString("en-US")} launches read,{" "}
+            {ui.edition.dropped.toLocaleString("en-US")} left out as farm bots or dead tokens, {ui.edition.pool.reduce((n, p) => n + p.length, 0)} in the pool.
+          </p>
+        )}
+      </section>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ deck view
+function DeckCard(props: { l: PoolCard; rank?: number; suit?: number; enh?: string | null; dim?: boolean; bridged?: boolean }) {
+  const { l } = props;
+  const suit = props.suit ?? l.u;
+  const ch = l.x === null ? "n/a" : `${l.x >= 0 ? "+" : ""}${(l.x / 100).toFixed(1)}%`;
+  return (
+    <div
+      class={"dcard" + (props.dim ? " dim" : "")}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("a")) return;
+        setUi({ detail: { l, rank: props.rank, suit, enh: props.enh, q: l.q, bridged: props.bridged } });
+      }}
+    >
+      <div class="dtop" style={{ color: SUIT_HEX[suit] }}>
+        <span class="rk">{props.rank ? RANK_LABEL(props.rank) : ""}</span>
+        <span>{SUIT_SHAPE[suit]}</span>
+        {props.enh && <span class={"badge " + props.enh}>{props.enh.toUpperCase()}</span>}
+      </div>
+      <img src={facePath(l.c, l.s)} alt="" loading="lazy" width={64} height={64} />
+      <div class="dsym">${l.s}</div>
+      <div class="dname">{l.n}</div>
+      <div class="dstats">
+        {props.bridged ? "bridged" : l.q} · curve {(l.p / 100).toFixed(l.p < 1000 ? 1 : 0)}%
+        <br />
+        {ch} · {l.k} trades · {l.h} holders
+      </div>
+      <a href={tokenUrl(l.t)} target="_blank" rel="noopener">
+        See the launch ↗
+      </a>
+    </div>
+  );
+}
+
+function Deck() {
+  const u = useUi();
+  const run = u.run;
+  const [tab, setTab] = useState(0);
+  if (run) {
+    const s = run.s;
+    const inHand = new Set(s.hand);
+    const left = new Set(s.draw);
+    const cards = s.deck.slice().sort((a: Card, b: Card) => a.suit - b.suit || b.rank - a.rank);
+    const shown = cards.filter((c) => c.suit === tab);
+    return (
+      <Modal title={`Your deck · ${s.deck.length} cards`} wide>
+        <div class="tabs">
+          {SUITS.map((x, i) => (
+            <button class={"chip" + (tab === i ? " on" : "")} style={{ color: SUIT_HEX[i] }} onClick={() => setTab(i)}>
+              {SUIT_SHAPE[i]} {x.name} ({cards.filter((c) => c.suit === i).length})
+            </button>
+          ))}
+        </div>
+        <p class="note">
+          {s.phase === "round" ? `${s.draw.length} still in the draw pile. Faded cards are already played or in your hand.` : "Ranks are by curve progress inside each suit."} Seed{" "}
+          {s.seed} · deck #{s.edition}.
+        </p>
+        <div class="dgrid">
+          {shown.map((c) => (
+            <DeckCard l={c.l} rank={c.rank} suit={c.suit} enh={c.enh} bridged={c.bridged} dim={s.phase === "round" && !left.has(c.id) && !inHand.has(c.id)} />
+          ))}
+        </div>
+      </Modal>
+    );
+  }
+  const ed = u.edition;
+  if (!ed) return null;
+  const pool = ed.pool[tab] || [];
+  return (
+    <Modal title={`This hour's pool · deck #${ed.id}`} wide>
+      <div class="tabs">
+        {SUITS.map((x, i) => (
+          <button class={"chip" + (tab === i ? " on" : "")} style={{ color: SUIT_HEX[i] }} onClick={() => setTab(i)}>
+            {SUIT_SHAPE[i]} {x.name} ({ed.pool[i].length})
+          </button>
+        ))}
+      </div>
+      <p class="note">Every seed draws 13 of these per suit. Cut {ago(ed.at)} at block {ed.block}.</p>
+      <div class="dgrid">
+        {pool.map((l) => (
+          <DeckCard l={l} />
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ hand levels
+function Levels() {
+  const u = useUi();
+  const run = u.run;
+  if (!run) return null;
+  return (
+    <Modal title="Hands">
+      <table class="hands">
+        <thead>
+          <tr>
+            <th>Hand</th>
+            <th>Lvl</th>
+            <th>Chips x Mult</th>
+          </tr>
+        </thead>
+        <tbody>
+          {HANDS.map((h) => {
+            const v = run.handValue(h.id);
+            return (
+              <tr title={h.rule}>
+                <td>
+                  {h.name}
+                  <br />
+                  <small>{h.rule}</small>
+                </td>
+                <td>{run.s.levels[h.id]}</td>
+                <td>
+                  <span class="c">{v.chips}</span> x <span class="m">{v.mult}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ menu
+function Options() {
+  const u = useUi();
+  const run = u.run;
+  const [copied, setCopied] = useState(false);
+  return (
+    <Modal title="Menu">
+      {run && (
+        <p class="note">
+          Seed <b>{run.s.seed}</b> · deck #{run.s.edition} · ante {run.s.ante}
+        </p>
+      )}
+      <div class="menu">
+        <button class="btn teal" onClick={() => setUi({ overlay: null })}>
+          Resume
+        </button>
+        {run && (
+          <button
+            class="btn"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(A.seedLink());
+                setCopied(true);
+              } catch {
+                toast(A.seedLink());
+              }
+            }}
+          >
+            {copied ? "Seed copied" : "Copy seed"}
+          </button>
+        )}
+        <button class="btn" onClick={() => setUi({ overlay: "how" })}>
+          How to play
+        </button>
+        <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
+          Hall of hands
+        </button>
+        {run && (
+          <button class="btn" onClick={() => A.restartSeed()}>
+            Restart this seed
+          </button>
+        )}
+        <button class="btn pink" onClick={() => A.abandon()}>
+          Back to title
+        </button>
+        <SoundToggles />
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ seed entry
+function SeedEntry() {
+  const [v, set] = useState("");
+  const [err, setErr] = useState("");
+  return (
+    <Modal title="Play a friend's seed">
+      <p>Got a seed from a friend? Paste their link or code here.</p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setErr("");
+          const ok = await A.playSeed(v);
+          if (!ok) setErr("That doesn't look like a seed, or its deck is gone.");
+        }}
+      >
+        <input class="field" value={v} onInput={(e) => set((e.target as HTMLInputElement).value)} placeholder="Link or code" autoFocus aria-label="Seed" />
+        <button class="btn teal" type="submit">
+          Deal
+        </button>
+      </form>
+      {err && <p class="err">{err}</p>}
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ best hands (local)
+export interface HallEntry {
+  total: number;
+  hand: string;
+  seed: string;
+  edition: number;
+  ante: number;
+  cleared: number;
+  cards: { s: string; c: string | null; rank: number; suit: number; t: string }[];
+  at: number;
+}
+
+interface DayEntry {
+  id: string;
+  name: string;
+  total: number;
+  handName: string;
+  ante: number;
+  cleared: number;
+  won: boolean;
+  seed: string;
+  edition: number;
+  cards: { s: string; c: string | null; rank: number; suit: number; t: string }[];
+}
+
+function HandCards(props: { cards: HallEntry["cards"] }) {
+  return (
+    <div class="hcards">
+      {props.cards.map((c) => (
+        <a href={tokenUrl(c.t)} target="_blank" rel="noopener" title={`$${c.s}`}>
+          <img src={facePath(c.c, c.s)} alt={c.s} width={36} height={36} />
+          <span style={{ color: SUIT_HEX[c.suit] }}>
+            {RANK_LABEL(c.rank)}
+            {SUIT_SHAPE[c.suit]}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function Hall() {
+  const [tab, setTab] = useState<"day" | "mine">("day");
+  const [day, setDay] = useState<{ day: string; entries: DayEntry[] } | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    fetch("/api/hall")
+      .then((r) => r.json())
+      .then(setDay)
+      .catch(() => setErr(true));
+  }, []);
+  const mine = local.get<HallEntry[]>("kk.hall", []);
+  return (
+    <Modal title="Hall of hands" wide>
+      <div class="tabs">
+        <button class={"chip" + (tab === "day" ? " on" : "")} onClick={() => setTab("day")}>
+          Today, everyone
+        </button>
+        <button class={"chip" + (tab === "mine" ? " on" : "")} onClick={() => setTab("mine")}>
+          Mine
+        </button>
+      </div>
+      {tab === "day" ? (
+        <>
+          <p class="note">
+            Best single hands of {day?.day || "today"} (UTC), from runs the server played back move by move. Finish a run and make a challenge link with a name to get in.
+          </p>
+          {err && <p class="err">The hall is not answering right now.</p>}
+          {day && !day.entries.length && <p>No hands yet today. Be the first.</p>}
+          <ol class="hall">
+            {day?.entries.map((h, i) => (
+              <li class="hrow">
+                <div class="hpos">{i + 1}</div>
+                <div class="hscore">{fmt(h.total)}</div>
+                <div class="hmain">
+                  <b class="who">{h.name}</b> · {h.handName} · {h.won ? "won the run" : `ante ${h.ante}`}
+                  <HandCards cards={h.cards} />
+                </div>
+                <button class="btn small teal" onClick={() => A.playEntry(h)}>
+                  Play this seed
+                </button>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : (
+        <>
+          {!mine.length && <p>Nothing yet. Your best hand of each run lands here (kept in this browser only).</p>}
+          <div class="hall">
+            {mine.map((h) => (
+              <div class="hrow">
+                <div class="hscore">{fmt(h.total)}</div>
+                <div class="hmain">
+                  <b>{h.hand}</b> · ante {h.ante} · seed {h.seed}
+                  <HandCards cards={h.cards} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ card detail
+function CardDetail() {
+  const u = useUi();
+  const d = u.detail;
+  if (!d) return null;
+  const l = d.l;
+  const suit = d.suit ?? l.u;
+  const col = SUIT_HEX[suit];
+  const ch = l.x === null ? null : l.x / 100;
+  const age = ui.edition ? Math.max(0, (Date.parse(ui.edition.at) / 1000 - l.a) / 3600) : null;
+  const ageS = age === null ? "n/a" : age < 1 ? `${Math.max(1, Math.round(age * 60))} min` : age < 48 ? `${Math.round(age)} h` : `${Math.round(age / 24)} days`;
+  const badges: string[] = [];
+  if (d.enh) badges.push(d.enh);
+  if (l.g && d.enh !== "grad") badges.push("grad");
+  if (l.d) badges.push("gifts");
+  const enh = d.enh ? ENH[d.enh as keyof typeof ENH] : null;
+  return (
+    <div class="ov-backdrop top" onClick={(e) => e.target === e.currentTarget && setUi({ detail: null })}>
+      <div class="ov-panel detail" style={{ borderColor: col }} role="dialog" aria-label={`$${l.s} details`}>
+        <div class="ov-head">
+          <h2 style={{ color: col }}>
+            {d.rank ? `${RANK_LABEL(d.rank)} ${SUIT_SHAPE[suit]} ` : ""}${l.s}
+          </h2>
+          <button class="x" aria-label="Close" onClick={() => setUi({ detail: null })}>
+            ×
+          </button>
+        </div>
+        <div class="ov-body">
+          <div class="dhead">
+            <img src={facePath(l.c, l.s) + "&z=card"} alt={l.n} width={140} height={140} />
+            <div>
+              <div class="dn">{l.n}</div>
+              <div class="dq">
+                {SUITS[suit].name} suit · {d.bridged ? "bridged by a move" : `paired with ${l.q}`}
+              </div>
+              <div class="badges">
+                {badges.map((b) => (
+                  <span class={"badge " + b}>{b === "gifts" ? "GIFT LIST" : b.toUpperCase()}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div class="meter" aria-label="Bonding curve progress">
+            <div class="mfill" style={{ width: `${Math.min(100, l.p / 100)}%`, background: col }} />
+            <span>
+              Curve {(l.p / 100).toFixed(l.p < 1000 ? 1 : 0)}%{l.g ? " · graduated" : ""}
+            </span>
+          </div>
+          <div class="dfacts">
+            <div>
+              <small>Price</small>
+              <b class={ch === null ? "" : ch >= 0 ? "up" : "down"}>{ch === null ? "n/a" : `${ch >= 0 ? "+" : ""}${ch.toFixed(1)}%`}</b>
+            </div>
+            <div>
+              <small>Trades 24h</small>
+              <b>{l.k.toLocaleString("en-US")}</b>
+            </div>
+            <div>
+              <small>Holders</small>
+              <b>{l.h.toLocaleString("en-US")}</b>
+            </div>
+            <div>
+              <small>Age at the deal</small>
+              <b>{ageS}</b>
+            </div>
+          </div>
+          {enh && (
+            <p class="note">
+              <b>{enh.name}</b>: {enh.text}, because {enh.why}.
+            </p>
+          )}
+          <p class="note">Numbers as of the hourly deck cut. Rank comes from curve progress inside the suit.</p>
+          <a class="btn gold wide" href={tokenUrl(l.t)} target="_blank" rel="noopener">
+            Open ${l.s} on vibe/vibe ↗
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ run over
+function Over() {
+  const u = useUi();
+  const run = u.run;
+  const [name, setName] = useState(local.get<string>("kk.name", ""));
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState<{ id: string; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [nameErr, setNameErr] = useState("");
+  const [seedCopied, setSeedCopied] = useState(false);
+  if (!run) return null;
+  const s = run.s;
+  const won = s.phase === "won";
+  const ch = u.challenge;
+  const beat = ch && (s.cleared > ch.cleared || (s.cleared === ch.cleared && (s.best?.total || 0) > ch.best));
+  const full = link ? `${location.origin}${link.url}` : "";
+  const brag = `${won ? "Cleared all 8 antes" : `Reached ante ${s.ante}`} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Best hand: ${fmt(s.best?.total || 0)}${s.best ? ` (${HANDS.find((h) => h.id === s.best!.hand)?.name})` : ""}. Same seed, same deal. Beat it:`;
+  return (
+    <Modal title={won ? "Graduated!" : "Rugged"} accent={won ? "#ffc23d" : "#ff3d7f"} onClose={() => setUi({ overlay: "over" })}>
+      <div class="over">
+        <div class="ostats">
+          <div>
+            <small>Ante</small>
+            <b>{Math.min(s.ante, 8)}</b>
+          </div>
+          <div>
+            <small>Blinds cleared</small>
+            <b>{s.cleared}</b>
+          </div>
+          <div>
+            <small>Best hand</small>
+            <b class="m">{fmt(s.best?.total || 0)}</b>
+          </div>
+        </div>
+        <p class="note">
+          {won ? "You beat the Closing Bell." : `Out at the ${s.blind === 2 ? "Boss" : BLIND_NAME[s.blind]} of ante ${s.ante}.`}
+        </p>
+        <div class="seedline">
+          <span>
+            Seed <b>{s.seed}</b> · deck #{s.edition}
+          </span>
+          <button
+            class="chip"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(A.seedLink());
+                setSeedCopied(true);
+              } catch {
+                toast(A.seedLink());
+              }
+            }}
+          >
+            {seedCopied ? "Seed copied" : "Copy seed"}
+          </button>
+        </div>
+        {ch && <p class={"vs " + (beat ? "win" : "")}>{beat ? `You beat ${ch.name || "the challenger"}!` : `${ch.name || "The challenger"} still leads: ante ${ch.ante}, best ${fmt(ch.best)}.`}</p>}
+        {!link ? (
+          <form
+            class="share"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const problem = name.trim() ? nameProblem(name) : null;
+              if (problem) {
+                setNameErr(problem);
+                return;
+              }
+              setNameErr("");
+              setBusy(true);
+              local.set("kk.name", cleanName(name));
+              const r = await A.share(name);
+              setBusy(false);
+              if (r) setLink(r);
+            }}
+          >
+            <input
+              class="field"
+              maxLength={12}
+              value={name}
+              placeholder="Your name, 3-12 letters"
+              aria-label="Name"
+              onInput={(e) => {
+                setName((e.target as HTMLInputElement).value);
+                setNameErr("");
+              }}
+            />
+            <small class="hint">{nameErr ? <span class="err">{nameErr}</span> : "With a name, your best hand also enters today's Hall of hands."}</small>
+            <button class="btn gold" disabled={busy} type="submit">
+              {busy ? "Checking your run..." : "Make a challenge link"}
+            </button>
+          </form>
+        ) : (
+          <div class="shared">
+            <img src={`/api/felt?id=${link.id}`} alt="Challenge card" width={600} height={315} />
+            <input class="field" readOnly value={full} onFocus={(e) => (e.target as HTMLInputElement).select()} aria-label="Challenge link" />
+            <div class="row">
+              <button
+                class="btn"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(full);
+                    setCopied(true);
+                  } catch {
+                    toast("Copy the link above");
+                  }
+                }}
+              >
+                {copied ? "Copied" : "Copy challenge link"}
+              </button>
+              <a class="btn" href={`/api/felt?id=${link.id}`} download={`kicker-${s.seed}.png`}>
+                Download
+              </a>
+              <a class="btn gold" target="_blank" rel="noopener" href={`https://x.com/intent/post?text=${encodeURIComponent(brag)}&url=${encodeURIComponent(full)}`}>
+                Post on X
+              </a>
+            </div>
+          </div>
+        )}
+        <div class="row">
+          <button class="btn teal" onClick={() => A.restartSeed()}>
+            Same seed again
+          </button>
+          <button class="btn pink" onClick={() => A.newRun()}>
+            New run
+          </button>
+        </div>
+        <div class="row">
+          <button class="btn" onClick={() => setUi({ overlay: "deck" })}>
+            See the deck
+          </button>
+          <button class="btn" onClick={() => setUi({ overlay: "title" })}>
+            Title
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Coach() {
+  const u = useUi();
+  if (!u.coach || u.overlay) return null;
+  return (
+    <div class={"coach " + (u.run?.s.phase === "round" ? "in-round" : "in-menu")} role="status">
+      <p>{u.coach.text}</p>
+      <div class="row">
+        {u.coach.step === 1 && u.run?.s.phase === "round" && (
+          <button class="btn teal small" onClick={() => A.hint()}>
+            Show me a good hand
+          </button>
+        )}
+        <button class="btn small" onClick={() => setUi({ coach: null })}>
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Toast() {
+  const u = useUi();
+  return u.toast ? <div class="toast">{u.toast}</div> : null;
+}
+
+function App() {
+  const u = useUi();
+  return (
+    <>
+      {u.overlay === "title" && <Title />}
+      {u.overlay === "how" && <How />}
+      {u.overlay === "deck" && <Deck />}
+      {u.overlay === "levels" && <Levels />}
+      {u.overlay === "options" && <Options />}
+      {u.overlay === "seed" && <SeedEntry />}
+      {u.overlay === "hall" && <Hall />}
+      {u.overlay === "over" && <Over />}
+      <CardDetail />
+      <Coach />
+      <Toast />
+      {u.overlay === null && u.run && (u.run.s.phase === "over" || u.run.s.phase === "won") && (
+        <button class="btn gold floating" onClick={() => setUi({ overlay: "over" })}>
+          Results
+        </button>
+      )}
+    </>
+  );
+}
+
+export function mountUi(el: HTMLElement, actions: UiActions) {
+  A = actions;
+  render(<App />, el);
+}

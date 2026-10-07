@@ -1,0 +1,28 @@
+import { Run, encodeTrail } from "../shared/engine.js";
+import { botStep } from "../shared/bot.js";
+import type { Edition } from "../shared/data.js";
+const B = "https://kickerhq.vercel.app";
+const t0 = Date.now();
+const ed = (await (await fetch(B + "/api/shuffle")).json()) as Edition;
+console.info("edition", ed.id, "suits", ed.pool.map((s) => s.length), "ms", Date.now() - t0);
+const r2 = await fetch(B + "/api/shuffle?e=" + ed.id);
+console.info("frozen", r2.status, r2.headers.get("cache-control"), JSON.stringify(await r2.json()) === JSON.stringify(ed));
+const seed = "QA7K-2026";
+const run = new Run(ed, seed);
+let n = 0;
+while (botStep(run) && n++ < 3000);
+console.info("bot run: cleared", run.s.cleared, "ante", run.s.ante, "best", run.s.best?.total, run.s.phase);
+const res = await fetch(B + "/api/showdown", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ seed, edition: ed.id, trail: encodeTrail(run.trail), name: "qa-bot" }) });
+const j = await res.json();
+console.info("showdown", res.status, j.id, "server cleared", j.showdown?.cleared, "server best", j.showdown?.best?.total, "match", j.showdown?.best?.total === run.s.best?.total && j.showdown?.cleared === run.s.cleared);
+// tampered trail must fail
+const bad = await fetch(B + "/api/showdown", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ seed, edition: ed.id, trail: "g_p0.1.2.3.4.5.6", name: "x" }) });
+console.info("tampered", bad.status, (await bad.json()).error);
+const png = await fetch(B + "/api/felt?id=" + j.id);
+const buf = Buffer.from(await png.arrayBuffer());
+console.info("felt", png.status, png.headers.get("content-type"), buf.length, "sig", buf.subarray(1, 4).toString(), "w", buf.readUInt32BE(16), "h", buf.readUInt32BE(20));
+const { writeFileSync } = await import("node:fs");
+writeFileSync("qa/prod-felt.png", buf);
+const pg = await (await fetch(B + "/c/" + j.id)).text();
+console.info("page og:image", (pg.match(/og:image" content="([^"]+)/) || [])[1]);
+console.info("ID", j.id);

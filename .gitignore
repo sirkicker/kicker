@@ -1,0 +1,10 @@
+node_modules
+dist
+.vercel
+.env*
+qa/
+scripts/edition.json
+scripts/dev.log
+*.log
+scripts/*.txt
+scripts/*.log
