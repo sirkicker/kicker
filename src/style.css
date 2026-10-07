@@ -915,3 +915,69 @@ ol.hall {
     padding-bottom: 108px;
   }
 }
+
+/* ---------------------------------------------------------- game token chip */
+.token-chip {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--num);
+  font-size: 22px;
+  color: var(--money);
+  text-decoration: none;
+  background: var(--ink);
+  border: 3px solid var(--money);
+  border-radius: 999px;
+  padding: 4px 16px 4px 6px;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
+}
+.token-chip:hover {
+  filter: brightness(1.15);
+}
+.tc-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--mult);
+  color: var(--cream);
+  border: 3px dashed var(--cream);
+  display: inline-grid;
+  place-items: center;
+  font-size: 17px;
+}
+.ov-body section a {
+  color: var(--money);
+}
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.chips-row .token-chip {
+  margin-top: 0;
+}
+.token-chip.src {
+  color: var(--cream);
+  border-color: var(--chips);
+  padding: 4px 16px 4px 10px;
+}
+.token-chip .gh {
+  color: var(--chips);
+}
+/* the parade walks behind everything clickable on the title */
+.title-screen .parade {
+  z-index: 0;
+}
+.title-screen > :not(.parade) {
+  position: relative;
+  z-index: 2;
+}
+.token-chip,
+.title-screen .chip,
+.fresh {
+  background-color: var(--ink);
+  isolation: isolate;
+}

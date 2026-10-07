@@ -2,7 +2,7 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { BOSSES, FINAL_BOSS, HANDS, INSIDERS, MOVES, BLIND_NAME, ANTE_BASE } from "../shared/content.js";
-import { ENH, RANK_LABEL, SUITS, facePath, tokenUrl, type Card, type PoolCard } from "../shared/data.js";
+import { ENH, GAME_TOKEN, RANK_LABEL, SOURCE_URL, SUITS, facePath, tokenUrl, type Card, type PoolCard } from "../shared/data.js";
 import { audioState, setMusic, setSfx, unlock } from "./audio.js";
 import { local, setUi, subscribe, toast, ui } from "./store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
@@ -184,6 +184,20 @@ function Title() {
           "Shuffling the newest launches..."
         )}
       </div>
+      <div class="chips-row">
+        <a class="token-chip" href={GAME_TOKEN.url} target="_blank" rel="noopener" aria-label={`$${GAME_TOKEN.symbol} on vibe/vibe`}>
+          <span class="tc-dot" aria-hidden="true">K</span>${GAME_TOKEN.symbol} ↗
+        </a>
+        <a class="token-chip src" href={SOURCE_URL} target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg class="gh" viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          Source ↗
+        </a>
+      </div>
     </div>
   );
 }
@@ -300,6 +314,19 @@ function How() {
           A run is fixed by its <b>seed</b> and its <b>deck number</b>: the same pair always deals the same cards in the same sequence and offers the same shop. Send a
           seed link to a friend and they play your exact run. When a run ends, make a challenge link: the server plays every move you made again to check the score,
           then draws a card for X. Whoever opens it plays the same seed against your result.
+        </p>
+      </section>
+      <section>
+        <h3>Token and source</h3>
+        <p>
+          KICKER has its own launch on vibe/vibe:{" "}
+          <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
+            ${GAME_TOKEN.symbol} ↗
+          </a>
+          . Source code:{" "}
+          <a href={SOURCE_URL} target="_blank" rel="noopener">
+            github.com/sirkicker/kicker ↗
+          </a>
         </p>
       </section>
       <section>

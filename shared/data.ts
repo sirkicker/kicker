@@ -193,5 +193,15 @@ export function buildDeck(ed: Edition, seed: string): Card[] {
 }
 
 export const tokenUrl = (t: string) => `https://testnet.vibevibe.fun/token/${t}`;
+
+/** The game's own launch on vibe/vibe. */
+export const GAME_TOKEN = {
+  symbol: "KICKER",
+  address: "0x0e76e43c28E1094dD0912c33BFf34004E110c323",
+  url: tokenUrl("0x0e76e43c28E1094dD0912c33BFf34004E110c323"),
+};
+
+/** Where the game's source lives. */
+export const SOURCE_URL = "https://github.com/sirkicker/kicker";
 export const facePath = (cid: string | null, sym: string) =>
   `/api/facecard?c=${encodeURIComponent(cid || "")}&s=${encodeURIComponent(sym.slice(0, 6))}`;
