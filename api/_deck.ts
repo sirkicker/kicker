@@ -12,11 +12,13 @@ const PER_CREATOR = 2;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function page(cursor: string | null): Promise<{ items: RawLaunch[]; next: string | null } | null> {
+async function page(cursor: string | null, deadline: number): Promise<{ items: RawLaunch[]; next: string | null } | null> {
   const url = `${INDEX}?limit=${PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
   for (let attempt = 0; attempt < 3; attempt++) {
+    const left = deadline - Date.now();
+    if (left < 1500) return null;
     try {
-      const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
+      const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(Math.min(9000, left)) });
       if (res.status === 429 || res.status >= 500) {
         await sleep(700 * (attempt + 1));
         continue;
@@ -36,7 +38,8 @@ async function page(cursor: string | null): Promise<{ items: RawLaunch[]; next: 
 /** Liveliness used to choose which launches make the cut for a suit. */
 const lively = (c: PoolCard) => c.k * 2 + c.h + (c.g ? 40 : 0) + c.p / 500;
 
-export async function cutEdition(id: number): Promise<Edition> {
+/** Cuts from the index until the deadline; a slow index gives a shallower cut, never a timeout. */
+export async function cutEdition(id: number, deadline = Date.now() + 20000): Promise<Edition> {
   const suits: PoolCard[][] = [[], [], [], []];
   const perCreator = new Map<string, number>();
   let cursor: string | null = null;
@@ -44,7 +47,7 @@ export async function cutEdition(id: number): Promise<Edition> {
   let dropped = 0;
   let block = "0";
   for (let i = 0; i < MAX_PAGES; i++) {
-    const p = await page(cursor);
+    const p = await page(cursor, deadline);
     if (!p) break;
     for (const raw of p.items) {
       scanned++;
@@ -108,13 +111,19 @@ export async function currentEdition(): Promise<Edition> {
   const have = await getEdition(id);
   if (have) return have;
   const ed = await cutEdition(id);
+  const prev = await storedEdition(id - 1, 48);
   if (ed.pool.reduce((n, s) => n + s.length, 0) < 20) {
     // the index is down: fall back to the newest stored edition
-    for (let back = 1; back <= 48; back++) {
-      const old = await getEdition(id - back);
-      if (old) return old;
-    }
+    if (prev) return prev;
     throw new Error("index unavailable");
+  }
+  // a shallow cut (slow index) leaves rare suits thin: top them up from the previous deck
+  if (prev) {
+    ed.pool = ed.pool.map((list, u) => {
+      if (list.length >= 13) return list;
+      const have = new Set(list.map((c) => c.t));
+      return list.concat((prev.pool[u] || []).filter((c) => !have.has(c.t))).slice(0, PER_SUIT);
+    });
   }
   try {
     await save(key(id), ed);
@@ -123,6 +132,15 @@ export async function currentEdition(): Promise<Edition> {
     throw e;
   }
   return ed;
+}
+
+/** The newest stored edition at or before `id`, looking back up to `hours`. */
+export async function storedEdition(id: number, hours: number): Promise<Edition | null> {
+  for (let back = 0; back <= hours; back++) {
+    const ed = await getEdition(id - back);
+    if (ed) return ed;
+  }
+  return null;
 }
 
 /** The freshest stored edition (within a few hours), without waiting on the index. */

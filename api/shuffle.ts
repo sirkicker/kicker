@@ -2,7 +2,7 @@
 // GET /api/shuffle?e=<id>   -> a frozen snapshot, for replaying a shared seed
 import { waitUntil } from "@vercel/functions";
 import { editionNow } from "../shared/data.js";
-import { currentEdition, getEdition, recentEdition } from "./_deck.js";
+import { currentEdition, getEdition, recentEdition, storedEdition } from "./_deck.js";
 
 const json = (body: unknown, status: number, cache: string) =>
   new Response(JSON.stringify(body), {
@@ -20,7 +20,7 @@ export async function GET(req: Request): Promise<Response> {
       if (!ed) return json({ error: "deck not found" }, 404, "public, max-age=30, s-maxage=30");
       return json(ed, 200, "public, max-age=31536000, s-maxage=31536000, immutable");
     }
-    const recent = await recentEdition();
+    const recent = (await recentEdition()) || (await storedEdition(editionNow() - 4, 44));
     if (recent && recent.id === editionNow()) return json(recent, 200, "public, max-age=60, s-maxage=120, stale-while-revalidate=900");
     if (recent) {
       waitUntil(currentEdition().catch(() => null));
