@@ -65,16 +65,40 @@ When a run ends, KICKER makes a **challenge link**. The server replays every mov
 
 Verified runs with a name go into the **Hall of hands**, the day's top 50 best hands across all players (UTC). Only runs the server has replayed move by move can get in.
 
+## Daily Deal
+
+One deal a day, the same for everybody. The seed comes from the date alone, and the deck is pinned once: the first deck cut after 00:00 UTC. The hourly decks keep rolling, the day's deal doesn't move.
+
+Finish it, make a challenge link with a name, and it lands on the **Daily board** in the Hall of hands: the top 50 of the UTC day, one line per name, your best run counts. The check is the same as for any challenge, every move replayed on the server. The share card reads like a ticker: `Daily Deal · Oct 14 · 41,250`. Finish it on consecutive days and your device keeps a streak.
+
+<p align="center">
+  <img src="docs/daily.png" alt="Daily Deal share card" width="49%">
+  <img src="docs/house.png" alt="House colours" width="49%">
+</p>
+
+## House colours
+
+Hold any `$KICKER` on Robinhood Chain testnet and you can dress the table: three card backs and felts (**Closing Bell**, **Ticker Tape**, **Pink Sheets**) and a small house mark next to your name in the Hall of hands and on share cards.
+
+To switch it on, your browser wallet signs a plain text message. No gas, no transaction, no approval: nothing moves. The server checks the signature, reads your `balanceOf` on the token, and hands back a claim tied to your name for the UTC day. Wallets are found through EIP-6963, with no SDKs in between. KICKER never asks for a seed phrase or a private key.
+
+Without a wallet nothing is missing. Every hand plays the same.
+
+## The token
+
+[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, and it is **cosmetic only**. The token can't touch whether you win: the cards come from the deck, the deck comes from the index, and the score comes from the cards. Holding it changes how the table looks, never the cards, the score or the odds. The engine doesn't know the token exists.
+
 ## Under the hood
 
 - **Client:** PixiJS v8 (WebGL), TypeScript, Vite, Preact overlays, custom shaders for the swirling background and the CRT pass, WebAudio-synthesised sound, touch and portrait layout, `prefers-reduced-motion` respected.
-- **Server:** Vercel Functions for the hourly deck cut, token pictures, run verification and challenge cards (satori + resvg). Responses sit behind the CDN, and nothing polls.
+- **Server:** Vercel Functions for the hourly deck cut, the daily pin and board, token pictures, run verification, house-colour checks (viem `verifyMessage` plus one `balanceOf` read) and challenge cards (satori + resvg). Responses sit behind the CDN, and nothing polls.
 - **Data:** the public vibe/vibe v6 index on Robinhood Chain testnet (chain id 46630).
 
 ```bash
 npm install
 npm run dev     # local dev server
 npm run build   # type-check client and api, then build
+npm test        # daily seed, deck pin, Daily board, house checks (in memory, no network)
 ```
 
 ## Notes

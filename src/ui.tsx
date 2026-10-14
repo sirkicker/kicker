@@ -1,4 +1,5 @@
-// HTML overlays: title, how to play, deck, hand levels, run over + challenge sharing, menus, coach.
+// HTML overlays: title, how to play, deck, hand levels, run over + challenge sharing, menus, coach,
+// the Daily Deal board, house colours and the what's-new note.
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { BOSSES, FINAL_BOSS, HANDS, INSIDERS, MOVES, BLIND_NAME, ANTE_BASE } from "../shared/content.js";
@@ -6,6 +7,17 @@ import { ENH, GAME_TOKEN, RANK_LABEL, SOURCE_URL, SUITS, facePath, tokenUrl, typ
 import { audioState, setMusic, setSfx, unlock } from "./audio.js";
 import { local, setUi, subscribe, toast, ui } from "./store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
+import { dayLabel, liveStreak, utcDay, type Streak } from "../shared/daily.js";
+import { CHAIN_NAME, LOOKS, claimHouse, findWallets, house, look, short, type Look, type Wallet } from "./house.js";
+
+export const VERSION = "1.1.0";
+
+export interface Shared {
+  id: string;
+  url: string;
+  daily: string | null;
+  house: boolean;
+}
 
 export interface UiActions {
   newRun(): void;
@@ -14,7 +26,10 @@ export interface UiActions {
   restartSeed(): void;
   abandon(): void;
   acceptChallenge(): void;
-  share(name: string): Promise<{ id: string; url: string } | null>;
+  share(name: string): Promise<Shared | null>;
+  dailyRun(): void;
+  isDaily(): string | null;
+  lookChanged(): void;
   seedLink(): string;
   hint(): void;
   hasSaved(): boolean;
@@ -29,8 +44,11 @@ const fmt = (n: number) => Math.floor(n).toLocaleString("en-US");
 
 function useUi() {
   const [, set] = useState(0);
+  const seen = ui.version;
   useEffect(() => {
     const off = subscribe(() => set((x) => x + 1));
+    // a change that landed between the render and this subscription would be missed otherwise
+    if (ui.version !== seen) set((x) => x + 1);
     return () => {
       off();
     };
@@ -85,6 +103,18 @@ function SoundToggles() {
     </div>
   );
 }
+
+/** The small mark a $KICKER holder gets next to their name. Cosmetic only. */
+function HouseMark() {
+  return (
+    <span class="hmark" title="$KICKER holder: house colours (cosmetic only)" aria-label="house colours">
+      K
+    </span>
+  );
+}
+
+const streakNow = () => liveStreak(local.get<Streak | null>("kk.streak", null), utcDay());
+const plural = (n: number, one: string, many = one + "s") => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 function ago(iso: string) {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
@@ -150,9 +180,18 @@ function Title() {
             Continue run
           </button>
         )}
-        <button class={"btn big " + (saved ? "pink" : "teal")} disabled={!ed} onClick={() => A.newRun()}>
-          {ed ? "New run" : u.editionError ? "Deck unavailable" : "Cutting the deck..."}
-        </button>
+        <div class="row deal">
+          <button class={"btn big " + (saved ? "pink" : "teal")} disabled={!ed} onClick={() => A.newRun()}>
+            {ed ? "New run" : u.editionError ? "Deck unavailable" : "Cutting the deck..."}
+          </button>
+          <button class="btn big gold daily-btn" disabled={!u.daily && !ed} onClick={() => A.dailyRun()} aria-label="Daily Deal">
+            <span>Daily Deal</span>
+            <small>
+              {u.daily ? `${u.daily.label} · ${u.daily.players ? plural(u.daily.players, "player") + " today" : "same deal for all"}` : dayLabel(utcDay())}
+              {streakNow() > 1 ? ` · streak ${streakNow()}` : ""}
+            </small>
+          </button>
+        </div>
         <div class="row">
           <button class="btn" onClick={() => setUi({ overlay: "how" })}>
             How to play
@@ -171,6 +210,14 @@ function Title() {
             Play a friend's seed
           </button>
           <SoundToggles />
+        </div>
+        <div class="row minor">
+          <button class={"chip" + (house.get() ? " on gold" : "")} onClick={() => setUi({ overlay: "house" })}>
+            House colours
+          </button>
+          <button class="chip" onClick={() => setUi({ overlay: "news" })}>
+            What's new in 1.1
+          </button>
         </div>
       </div>
       <div class="fresh">
@@ -317,13 +364,21 @@ function How() {
         </p>
       </section>
       <section>
+        <h3>Daily Deal</h3>
+        <p>
+          One seed a day, dealt from the first deck cut after 00:00 UTC, the same for everybody. Finish it and make a challenge link with a name to get on the
+          Daily board: one line per name, your best run of the day counts. The server checks it move by move, same as any challenge.
+        </p>
+      </section>
+      <section>
         <h3>Token and source</h3>
         <p>
           KICKER has its own launch on vibe/vibe:{" "}
           <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
             ${GAME_TOKEN.symbol} ↗
           </a>
-          . Source code:{" "}
+          . It is cosmetic only: holders can switch on house colours (a card back, a felt, a small mark by their name). It never changes the cards, the score or
+          the odds. Source code:{" "}
           <a href={SOURCE_URL} target="_blank" rel="noopener">
             github.com/sirkicker/kicker ↗
           </a>
@@ -510,6 +565,14 @@ function Options() {
         <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
           Hall of hands
         </button>
+        <div class="row">
+          <button class="btn" onClick={() => setUi({ overlay: "house" })}>
+            House colours
+          </button>
+          <button class="btn" onClick={() => setUi({ overlay: "news" })}>
+            What's new
+          </button>
+        </div>
         {run && (
           <button class="btn" onClick={() => A.restartSeed()}>
             Restart this seed
@@ -572,6 +635,36 @@ interface DayEntry {
   seed: string;
   edition: number;
   cards: { s: string; c: string | null; rank: number; suit: number; t: string }[];
+  house?: boolean;
+}
+
+interface Board {
+  day: string;
+  seed: string;
+  edition: number | null;
+  players: number;
+  entries: DayEntry[];
+}
+
+function HallRows(props: { entries: DayEntry[] }) {
+  return (
+    <ol class="hall">
+      {props.entries.map((h, i) => (
+        <li class="hrow">
+          <div class="hpos">{i + 1}</div>
+          <div class="hscore">{fmt(h.total)}</div>
+          <div class="hmain">
+            {h.house && <HouseMark />}
+            <b class="who">{h.name}</b> · {h.handName} · {h.won ? "won the run" : `ante ${h.ante}`}
+            <HandCards cards={h.cards} />
+          </div>
+          <button class="btn small teal" onClick={() => A.playEntry(h)}>
+            Play this seed
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function HandCards(props: { cards: HallEntry["cards"] }) {
@@ -591,48 +684,61 @@ function HandCards(props: { cards: HallEntry["cards"] }) {
 }
 
 function Hall() {
-  const [tab, setTab] = useState<"day" | "mine">("day");
+  const [tab, setTab] = useState<"day" | "daily" | "mine">(local.get<string>("kk.hallTab", "day") === "daily" ? "daily" : "day");
   const [day, setDay] = useState<{ day: string; entries: DayEntry[] } | null>(null);
+  const [board, setBoard] = useState<Board | null>(null);
   const [err, setErr] = useState(false);
+  const [boardErr, setBoardErr] = useState(false);
   useEffect(() => {
     fetch("/api/hall")
       .then((r) => r.json())
       .then(setDay)
       .catch(() => setErr(true));
+    fetch("/api/hall?board=daily")
+      .then((r) => r.json())
+      .then(setBoard)
+      .catch(() => setBoardErr(true));
   }, []);
+  const pick = (t: "day" | "daily" | "mine") => {
+    setTab(t);
+    local.set("kk.hallTab", t);
+  };
   const mine = local.get<HallEntry[]>("kk.hall", []);
   return (
     <Modal title="Hall of hands" wide>
       <div class="tabs">
-        <button class={"chip" + (tab === "day" ? " on" : "")} onClick={() => setTab("day")}>
+        <button class={"chip" + (tab === "day" ? " on" : "")} onClick={() => pick("day")}>
           Today, everyone
         </button>
-        <button class={"chip" + (tab === "mine" ? " on" : "")} onClick={() => setTab("mine")}>
+        <button class={"chip" + (tab === "daily" ? " on" : "")} onClick={() => pick("daily")}>
+          Daily Deal
+        </button>
+        <button class={"chip" + (tab === "mine" ? " on" : "")} onClick={() => pick("mine")}>
           Mine
         </button>
       </div>
-      {tab === "day" ? (
+      {tab === "daily" ? (
+        <>
+          <p class="note">
+            Daily Deal · {dayLabel(board?.day || utcDay())} (UTC): seed {board?.seed || "..."}
+            {board?.edition ? ` on deck #${board.edition}` : ""}, the same deal for everybody. One line per name, the best run of the day counts, every one played
+            back move by move on the server.{board && board.players ? ` ${plural(board.players, "player")} so far.` : ""}
+          </p>
+          <button class="btn gold wide" onClick={() => A.dailyRun()}>
+            Play the Daily Deal
+          </button>
+          {boardErr && <p class="err">The Daily board is not answering right now.</p>}
+          {board && !board.entries.length && <p>Nobody has posted today's deal yet. The first line is yours.</p>}
+          {board && <HallRows entries={board.entries} />}
+        </>
+      ) : tab === "day" ? (
         <>
           <p class="note">
             Best single hands of {day?.day || "today"} (UTC), from runs the server played back move by move. Finish a run and make a challenge link with a name to get in.
           </p>
           {err && <p class="err">The hall is not answering right now.</p>}
           {day && !day.entries.length && <p>No hands yet today. Be the first.</p>}
-          <ol class="hall">
-            {day?.entries.map((h, i) => (
-              <li class="hrow">
-                <div class="hpos">{i + 1}</div>
-                <div class="hscore">{fmt(h.total)}</div>
-                <div class="hmain">
-                  <b class="who">{h.name}</b> · {h.handName} · {h.won ? "won the run" : `ante ${h.ante}`}
-                  <HandCards cards={h.cards} />
-                </div>
-                <button class="btn small teal" onClick={() => A.playEntry(h)}>
-                  Play this seed
-                </button>
-              </li>
-            ))}
-          </ol>
+          {day && <HallRows entries={day.entries} />}
         </>
       ) : (
         <>
@@ -741,7 +847,7 @@ function Over() {
   const run = u.run;
   const [name, setName] = useState(local.get<string>("kk.name", ""));
   const [busy, setBusy] = useState(false);
-  const [link, setLink] = useState<{ id: string; url: string } | null>(null);
+  const [link, setLink] = useState<Shared | null>(null);
   const [copied, setCopied] = useState(false);
   const [nameErr, setNameErr] = useState("");
   const [seedCopied, setSeedCopied] = useState(false);
@@ -751,7 +857,13 @@ function Over() {
   const ch = u.challenge;
   const beat = ch && (s.cleared > ch.cleared || (s.cleared === ch.cleared && (s.best?.total || 0) > ch.best));
   const full = link ? `${location.origin}${link.url}` : "";
-  const brag = `${won ? "Cleared all 8 antes" : `Reached ante ${s.ante}`} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Best hand: ${fmt(s.best?.total || 0)}${s.best ? ` (${HANDS.find((h) => h.id === s.best!.hand)?.name})` : ""}. Same seed, same deal. Beat it:`;
+  const daily = A.isDaily();
+  const hs = house.get();
+  const marked = !!hs && !!name.trim() && cleanName(name).toLowerCase() === hs.name.toLowerCase();
+  const streak = streakNow();
+  const brag = daily
+    ? `Daily Deal · ${dayLabel(daily)} · ${fmt(s.best?.total || 0)} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Same deal for everybody today. Beat it:`
+    : `${won ? "Cleared all 8 antes" : `Reached ante ${s.ante}`} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Best hand: ${fmt(s.best?.total || 0)}${s.best ? ` (${HANDS.find((h) => h.id === s.best!.hand)?.name})` : ""}. Same seed, same deal. Beat it:`;
   return (
     <Modal title={won ? "Graduated!" : "Rugged"} accent={won ? "#ffc23d" : "#ff3d7f"} onClose={() => setUi({ overlay: "over" })}>
       <div class="over">
@@ -772,6 +884,12 @@ function Over() {
         <p class="note">
           {won ? "You beat the Closing Bell." : `Out at the ${s.blind === 2 ? "Boss" : BLIND_NAME[s.blind]} of ante ${s.ante}.`}
         </p>
+        {daily && (
+          <p class="daily-tag">
+            Daily Deal · {dayLabel(daily)}
+            {streak > 0 ? ` · streak ${plural(streak, "day")}` : ""}
+          </p>
+        )}
         <div class="seedline">
           <span>
             Seed <b>{s.seed}</b> · deck #{s.edition}
@@ -820,7 +938,16 @@ function Over() {
                 setNameErr("");
               }}
             />
-            <small class="hint">{nameErr ? <span class="err">{nameErr}</span> : "With a name, your best hand also enters today's Hall of hands."}</small>
+            <small class="hint">
+              {nameErr ? (
+                <span class="err">{nameErr}</span>
+              ) : daily ? (
+                "With a name, this run enters the Daily board (your best of the day counts) and today's Hall of hands."
+              ) : (
+                "With a name, your best hand also enters today's Hall of hands."
+              )}
+              {!nameErr && marked ? " Your house mark rides along." : ""}
+            </small>
             <button class="btn gold" disabled={busy} type="submit">
               {busy ? "Checking your run..." : "Make a challenge link"}
             </button>
@@ -828,6 +955,7 @@ function Over() {
         ) : (
           <div class="shared">
             <img src={`/api/felt?id=${link.id}`} alt="Challenge card" width={600} height={315} />
+            {link.daily && <p class="note">Posted to the Daily board for {dayLabel(link.daily)}. The best 50 names of the day are shown.{link.house ? " House mark on." : ""}</p>}
             <input class="field" readOnly value={full} onFocus={(e) => (e.target as HTMLInputElement).select()} aria-label="Challenge link" />
             <div class="row">
               <button
@@ -873,6 +1001,187 @@ function Over() {
   );
 }
 
+// ------------------------------------------------------------ house colours ($KICKER holders, cosmetic only)
+const hex = (n: number) => "#" + n.toString(16).padStart(6, "0");
+
+function Swatch(props: { lk: Look; on: boolean; locked: boolean; onPick: () => void }) {
+  const { lk } = props;
+  return (
+    <button
+      class={"swatch" + (props.on ? " on" : "")}
+      disabled={props.locked}
+      onClick={props.onPick}
+      aria-pressed={props.on}
+      style={{ borderColor: props.on ? hex(lk.frame) : undefined }}
+    >
+      <span
+        class="sw-back"
+        style={{
+          background: `repeating-conic-gradient(${hex(lk.back)} 0 25%, color-mix(in srgb, ${hex(lk.dots)} ${Math.round(lk.dotsAlpha * 100)}%, ${hex(lk.back)}) 0 50%) 0 0 / 12px 12px`,
+        }}
+      >
+        <b style={{ color: hex(lk.frame), borderColor: hex(lk.frame) }}>K</b>
+      </span>
+      <span class="sw-felt" style={{ background: hex(lk.felt), borderColor: hex(lk.feltHi) }} />
+      <span class="sw-name">{lk.name}</span>
+      <small>{props.locked ? "holders" : lk.blurb}</small>
+    </button>
+  );
+}
+
+function House() {
+  useUi();
+  const [name, setName] = useState(local.get<string>("kk.name", ""));
+  const [wallets, setWallets] = useState<Wallet[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [, bump] = useState(0);
+  const hs = house.get();
+  const cur = look();
+  const pickLook = (id: string) => {
+    local.set("kk.look", id);
+    A.lookChanged();
+    bump((x) => x + 1);
+  };
+  const find = async () => {
+    setErr("");
+    const problem = nameProblem(name);
+    if (problem) {
+      setErr(problem);
+      return;
+    }
+    setWallets(await findWallets());
+  };
+  const sign = async (w: Wallet) => {
+    setErr("");
+    setBusy(true);
+    try {
+      const n = cleanName(name);
+      local.set("kk.name", n);
+      await claimHouse(w, n);
+      if (look().id === "house") local.set("kk.look", LOOKS[1].id);
+      A.lookChanged();
+      toast("House colours on. Same cards, same odds, better outfit.");
+    } catch (e) {
+      const m = String((e as { message?: string })?.message || e);
+      setErr((e as { code?: number })?.code === 4001 || /reject|denied|cancel/i.test(m) ? "Signature cancelled. Nothing was sent." : m);
+    }
+    setBusy(false);
+  };
+  const endsIn = hs ? Math.max(1, Math.round((hs.expires - Date.now()) / 3_600_000)) : 0;
+  return (
+    <Modal title="House colours">
+      <p>
+        Hold any amount of <b>${GAME_TOKEN.symbol}</b> and the table gets dressed for you: another card back, another felt, and a small <HouseMark /> next to your
+        name in the Hall of hands and on share cards. Nothing else.
+      </p>
+      <p class="plain">Cosmetic only, never changes the cards, the score or the odds. Without a wallet you lose nothing: every hand plays the same.</p>
+      <div class="swatches">
+        {LOOKS.map((lk) => (
+          <Swatch lk={lk} on={cur.id === lk.id} locked={!hs && lk.id !== "house"} onPick={() => pickLook(lk.id)} />
+        ))}
+      </div>
+      {hs ? (
+        <div class="house-on">
+          <p>
+            <HouseMark /> On for <b class="who">{hs.name}</b> ({short(hs.address)}) for about {plural(endsIn, "hour")}, until the UTC day ends. Use that name on
+            a challenge link and the mark rides along. Tomorrow, sign again.
+          </p>
+          <button
+            class="btn small"
+            onClick={() => {
+              house.set(null);
+              A.lookChanged();
+              bump((x) => x + 1);
+            }}
+          >
+            Switch it off
+          </button>
+        </div>
+      ) : (
+        <form
+          class="share"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void find();
+          }}
+        >
+          <input
+            class="field"
+            maxLength={12}
+            value={name}
+            placeholder="Your name, 3-12 letters"
+            aria-label="Name"
+            onInput={(e) => {
+              setName((e.target as HTMLInputElement).value);
+              setErr("");
+            }}
+          />
+          <small class="hint">The mark is tied to this name for today (UTC).</small>
+          {!wallets ? (
+            <button class="btn gold" type="submit">
+              Find my wallet
+            </button>
+          ) : wallets.length ? (
+            <div class="wallets">
+              {wallets.map((w) => (
+                <button class="btn" type="button" disabled={busy} onClick={() => void sign(w)}>
+                  {w.icon && <img src={w.icon} alt="" width={24} height={24} />}
+                  {busy ? "Waiting for the signature..." : `Sign with ${w.name}`}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p class="note">No browser wallet found on this page. That's fine: everything else plays exactly the same.</p>
+          )}
+        </form>
+      )}
+      {err && <p class="err">{err}</p>}
+      <div class="safety">
+        <b>Plain terms.</b> It's all on {CHAIN_NAME}. You sign a plain text message: no gas, no transaction, no approval, nothing moves. The server reads your{" "}
+        {"$" + GAME_TOKEN.symbol} balance and that's it. KICKER never asks for a seed phrase or a private key. If anything ever does, it isn't us.
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ what's new (once per device, then from the menu)
+function News() {
+  useEffect(() => {
+    local.set("kk.news", VERSION);
+  }, []);
+  return (
+    <Modal title={`What's new · ${VERSION.replace(/\.0$/, "")}`}>
+      <section>
+        <h3>Daily Deal</h3>
+        <p>
+          One deal a day, the same for everybody: a seed fixed by the date, dealt from the first deck cut after 00:00 UTC. Post it with a name and it lands on the
+          Daily board in the Hall of hands, one line per name, your best run of the day counts. Finish it on consecutive days for a streak.
+        </p>
+      </section>
+      <section>
+        <h3>House colours</h3>
+        <p>
+          ${GAME_TOKEN.symbol} holders can sign a plain message (no gas, nothing moves) to dress the table: three card backs and felts, and a small mark next to
+          their name. Cosmetic only, never changes the cards, the score or the odds.
+        </p>
+      </section>
+      <section>
+        <h3>The token</h3>
+        <p>The token can't touch whether you win. The cards come from the deck, the deck comes from the index, and the score comes from the cards.</p>
+      </section>
+      <div class="row">
+        <button class="btn gold" onClick={() => A.dailyRun()}>
+          Play the Daily Deal
+        </button>
+        <button class="btn" onClick={() => close()}>
+          Got it
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function Coach() {
   const u = useUi();
   if (!u.coach || u.overlay) return null;
@@ -910,6 +1219,8 @@ function App() {
       {u.overlay === "seed" && <SeedEntry />}
       {u.overlay === "hall" && <Hall />}
       {u.overlay === "over" && <Over />}
+      {u.overlay === "house" && <House />}
+      {u.overlay === "news" && <News />}
       <CardDetail />
       <Coach />
       <Toast />

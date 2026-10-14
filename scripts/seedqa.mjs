@@ -7,7 +7,7 @@ const mobile = touch === "1";
 const b = await chromium.launch({ channel: "msedge" });
 const mk = async () => {
   const ctx = await b.newContext({ viewport: { width: +w, height: +h }, hasTouch: mobile, isMobile: mobile, deviceScaleFactor: mobile ? 3 : 1 });
-  await ctx.addInitScript(() => localStorage.setItem("kk.coach", "9"));
+  await ctx.addInitScript(() => { localStorage.setItem("kk.coach", "9"); localStorage.setItem("kk.news", JSON.stringify("1.1.0")); });
   const p = await ctx.newPage();
   const errors = [];
   p.on("console", (m) => m.type() === "error" && errors.push(m.text()));

@@ -1,14 +1,17 @@
-// Boot: fonts, Pixi, the deck snapshot, URL seeds/challenges, saved runs, and the tutorial coach.
+// Boot: fonts, Pixi, the deck snapshot, URL seeds/challenges, saved runs, the Daily Deal, and the tutorial coach.
 import { Application } from "pixi.js";
 import { HAND } from "../shared/content.js";
 import type { Edition } from "../shared/data.js";
 import { decodeTrail, encodeTrail, rerun, Run, type Action } from "../shared/engine.js";
 import { newSeed, normSeed } from "../shared/rng.js";
+import { bumpStreak, type Streak } from "../shared/daily.js";
+import { cleanName } from "../shared/names.js";
 import { sfx, unlock } from "./audio.js";
 import { Game } from "./game.js";
 import { attach } from "./tween.js";
-import { local, setUi, toast, ui, type Challenge } from "./store.js";
-import { mountUi, type HallEntry } from "./ui.js";
+import { local, setUi, toast, ui, type Challenge, type Daily } from "./store.js";
+import { house } from "./house.js";
+import { mountUi, VERSION, type HallEntry } from "./ui.js";
 import "./style.css";
 
 interface Saved {
@@ -77,6 +80,21 @@ async function startRun(seed: string, edition: Edition, trail: Action[] = []) {
     coach(0, "Every card here is a live vibe/vibe launch. Suit = the asset it's paired with, rank = how far along its bonding curve it is. Press Play to deal the first blind.");
 }
 
+async function loadDaily(): Promise<Daily | null> {
+  try {
+    const r = await fetch("/api/daily");
+    if (!r.ok) return null;
+    const d = (await r.json()) as Daily;
+    setUi({ daily: d });
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+/** The day, when this run is today's Daily Deal. */
+const dailyOf = (run: Run | null) => (run && ui.daily && ui.daily.seed === run.s.seed && ui.daily.edition === run.s.edition ? ui.daily.day : null);
+
 function hallAdd(run: Run) {
   const b = run.s.best;
   if (!b) return;
@@ -119,6 +137,8 @@ async function boot() {
     },
     onOver(run) {
       hallAdd(run);
+      const day = dailyOf(run);
+      if (day) local.set("kk.streak", bumpStreak(local.get<Streak | null>("kk.streak", null), day));
       save(run);
       setTimeout(() => setUi({ overlay: "over", coach: null }), 300);
     },
@@ -149,6 +169,28 @@ async function boot() {
       } catch (e) {
         toast("Could not load the deck: " + (e as Error).message);
       }
+    },
+    async dailyRun() {
+      const d = (await loadDaily()) || ui.daily;
+      if (!d) {
+        toast("The Daily Deal is not dealt yet. Try again in a minute.");
+        return;
+      }
+      try {
+        const ed = await fetchEdition(d.edition);
+        const sv = local.get<Saved | null>("kk.run", null);
+        setUi({ challenge: null });
+        if (sv && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, decodeTrail(sv.trail));
+        else await startRun(d.seed, ed);
+      } catch (e) {
+        toast("Could not load the daily deck: " + (e as Error).message);
+      }
+    },
+    isDaily() {
+      return dailyOf(ui.run);
+    },
+    lookChanged() {
+      game.applyLook();
     },
     continueRun() {
       const sv = local.get<Saved | null>("kk.run", null);
@@ -221,10 +263,12 @@ async function boot() {
       const run = ui.run;
       if (!run) return null;
       try {
-        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name });
+        const h = house.get();
+        const claim = h && name && cleanName(name).toLowerCase() === h.name.toLowerCase() ? h.claim : undefined;
+        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name, house: claim });
         const j = await postJson("/api/showdown", body);
         sfx.coin();
-        return { id: j.id, url: j.url };
+        return { id: j.id, url: j.url, daily: j.showdown?.daily || null, house: !!j.showdown?.house };
       } catch (e) {
         toast("Could not verify the run: " + (e as Error).message);
         return null;
@@ -297,24 +341,32 @@ async function boot() {
     }
     const ed = await fetchEdition();
     setUi({ edition: ed });
+    // what's new: once per device, on the title screen only
+    if (ui.overlay === "title" && local.get<string>("kk.news", "") !== VERSION) setUi({ overlay: "news" });
   } catch (e) {
     setUi({ editionError: (e as Error).message });
   }
 }
 
-function postJson(url: string, body: string): Promise<{ id: string; url: string }> {
+interface Posted {
+  id: string;
+  url: string;
+  showdown?: { daily?: string; house?: boolean };
+}
+
+function postJson(url: string, body: string): Promise<Posted> {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest();
     x.open("POST", url);
     x.setRequestHeader("content-type", "application/json");
     x.onload = () => {
-      let j: { id?: string; url?: string; error?: string } = {};
+      let j: Partial<Posted> & { error?: string } = {};
       try {
         j = JSON.parse(x.responseText);
       } catch {
         /* not json */
       }
-      if (x.status >= 200 && x.status < 300 && j.id) res(j as { id: string; url: string });
+      if (x.status >= 200 && x.status < 300 && j.id) res(j as Posted);
       else rej(new Error(j.error || `HTTP ${x.status}`));
     };
     x.onerror = () => rej(new Error("network"));
@@ -324,4 +376,5 @@ function postJson(url: string, body: string): Promise<{ id: string; url: string 
 
 let pendingChallenge: { seed: string; edition: number } | null = null;
 
+void loadDaily();
 void boot();

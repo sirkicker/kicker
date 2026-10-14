@@ -4,6 +4,7 @@ import { RANK_LABEL, facePath, type Card } from "../shared/data.js";
 import { INSIDER, INSIDER_VIBER, MOVE, HAND, type HandId } from "../shared/content.js";
 import { hash32 } from "../shared/rng.js";
 import { COL, ENH_COL, FONT, NUM, SUIT_FACE } from "./theme.js";
+import { look } from "./house.js";
 
 export const CW = 112;
 const SHORT_Q: Keyed<string, string> = { VIBEVIBE: "VIBE", ANTHROPIC: "ANTH", OPENAI: "OAI" };
@@ -189,15 +190,19 @@ export class CardView extends Container {
     this.debuffMark.moveTo(-30, -30).lineTo(30, 30).moveTo(30, -30).lineTo(-30, 30).stroke({ width: 8, color: COL.bad, cap: "round" });
   }
 
+  /** The back follows the table's look (house colours are cosmetic only). */
   drawBack() {
+    this.back.removeChildren().forEach((ch) => ch.destroy());
+    const lk = look();
     const g = new Graphics();
     g.roundRect(-CW / 2, -CH / 2, CW, CH, 10).fill(COL.ink);
-    g.roundRect(-CW / 2 + 4, -CH / 2 + 4, CW - 8, CH - 8, 7).fill(0x5b1243);
+    g.roundRect(-CW / 2 + 4, -CH / 2 + 4, CW - 8, CH - 8, 7).fill(lk.back);
     for (let y = -CH / 2 + 10; y < CH / 2 - 10; y += 12)
-      for (let x = -CW / 2 + 10; x < CW / 2 - 10; x += 12) if (((x + y) / 12) % 2 === 0) g.rect(x, y, 6, 6).fill({ color: COL.felt, alpha: 0.9 });
-    g.roundRect(-26, -26, 52, 52, 6).fill(COL.ink).stroke({ width: 3, color: COL.money });
+      for (let x = -CW / 2 + 10; x < CW / 2 - 10; x += 12) if (((x + y) / 12) % 2 === 0) g.rect(x, y, 6, 6).fill({ color: lk.dots, alpha: lk.dotsAlpha });
+    if (lk.id !== "house") g.roundRect(-CW / 2 + 8, -CH / 2 + 8, CW - 16, CH - 16, 5).stroke({ width: 2, color: lk.frame, alpha: 0.7 });
+    g.roundRect(-26, -26, 52, 52, 6).fill(COL.ink).stroke({ width: 3, color: lk.frame });
     this.back.addChild(g);
-    const k = txt("K", { fontFamily: NUM, fontSize: 44, fill: COL.money });
+    const k = txt("K", { fontFamily: NUM, fontSize: 44, fill: lk.frame });
     k.anchor.set(0.5);
     k.position.set(0, -2);
     this.back.addChild(k);

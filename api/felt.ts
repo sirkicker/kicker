@@ -6,6 +6,7 @@ import satori from "satori";
 import sharp from "sharp";
 import { BLIND_NAME } from "../shared/content.js";
 import { RANK_LABEL } from "../shared/data.js";
+import { dayLabel } from "../shared/daily.js";
 import { getShowdown, type Showdown } from "./_runs.js";
 
 const SITE = "https://kickerhq.vercel.app";
@@ -95,6 +96,18 @@ function miniCard(c: { s: string; rank: number; suit: number }, pic: string | nu
   );
 }
 
+/** The small house mark a $KICKER holder gets next to their name. Cosmetic only. */
+function houseMark(size: number): Node {
+  return h(
+    "div",
+    { width: size, height: size, background: C.ink, border: `3px solid ${C.money}`, borderRadius: 6, alignItems: "center", justifyContent: "center", marginRight: 12, fontSize: size * 0.72, color: C.money, lineHeight: 1 },
+    "K",
+  );
+}
+
+/** "Daily Deal · Oct 14 · 41,250" */
+export const dailyLine = (rec: Showdown) => `Daily Deal · ${dayLabel(rec.daily || "")}${rec.best ? ` · ${rec.best.total.toLocaleString("en-US")}` : ""}`;
+
 async function cardPng(rec: Showdown): Promise<Buffer> {
   const cards = (rec.best?.cards.slice(0, 5) || []).sort((a, b) => a.rank - b.rank);
   const pics = await Promise.all(cards.map((c) => art(c.c)));
@@ -119,11 +132,14 @@ async function cardPng(rec: Showdown): Promise<Buffer> {
       h("div", { fontSize: 28, color: C.dim, marginTop: 4, width: 420 }, "poker roguelike dealt from live vibe/vibe launches"),
       h(
         "div",
-        { marginTop: 34, background: C.ink, border: `4px solid ${C.money}`, borderRadius: 10, padding: "10px 18px", alignSelf: "flex-start", fontSize: 30, color: C.money },
-        rec.name ? `${rec.name} dares you: beat my seed` : "Beat my seed",
+        { marginTop: 34, background: C.ink, border: `4px solid ${C.money}`, borderRadius: 10, padding: "10px 18px", alignSelf: "flex-start", fontSize: 30, color: C.money, alignItems: "center" },
+        rec.house && rec.name ? houseMark(30) : null,
+        rec.daily ? (rec.name ? `${rec.name} dares you` : "Beat this deal") : rec.name ? `${rec.name} dares you: beat my seed` : "Beat my seed",
       ),
-      h("div", { marginTop: 22, fontFamily: "Jersey", fontSize: 64, color: C.cream, lineHeight: 1 }, rec.seed),
-      h("div", { marginTop: 10, fontSize: 24, color: C.dim }, `deck #${rec.edition} · ${reached}`),
+      rec.daily
+        ? h("div", { marginTop: 22, fontFamily: "Jersey", fontSize: 58, color: C.cream, lineHeight: 1 }, `Daily Deal · ${dayLabel(rec.daily)}`)
+        : h("div", { marginTop: 22, fontFamily: "Jersey", fontSize: 64, color: C.cream, lineHeight: 1 }, rec.seed),
+      h("div", { marginTop: 10, fontSize: 24, color: C.dim }, rec.daily ? `seed ${rec.seed} · ${rec.won ? "cleared all 8 antes" : `ante ${rec.ante}`}` : `deck #${rec.edition} · ${reached}`),
       rec.best
         ? h(
             "div",
@@ -148,7 +164,7 @@ async function cardPng(rec: Showdown): Promise<Buffer> {
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 function page(rec: Showdown): string {
-  const title = `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} seed ${rec.seed} on KICKER`;
+  const title = rec.daily ? `${esc(dailyLine(rec))} on KICKER` : `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} seed ${rec.seed} on KICKER`;
   const desc = rec.best
     ? `${rec.won ? "Cleared all 8 antes" : `Ante ${rec.ante}`} with a best hand of ${rec.best.total.toLocaleString("en-US")} (${rec.best.handName}). Same deck, same deal: your turn.`
     : `Same deck, same deal: your turn.`;

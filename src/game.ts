@@ -9,6 +9,7 @@ import { setUi, toast, ui } from "./store.js";
 import { CardView, CH, CW, InsiderView, ItemView, tokenTexture, txt } from "./cards.js";
 import { crtFilter, setSwirlColors, swirlFilter, type FxFilter } from "./fx.js";
 import { COL, NUM, SUIT_BRIGHT } from "./theme.js";
+import { look } from "./house.js";
 import { ease, reduced, tween, wait } from "./tween.js";
 import { Button, NumBox, Tip, fmt, fmtMult, panel } from "./widgets.js";
 
@@ -102,6 +103,7 @@ export class Game {
     public hooks: GameHooks,
   ) {
     this.swirl = swirlFilter();
+    this.calmSwirl();
     this.crt = crtFilter();
     this.bg.filters = [this.swirl];
     app.stage.addChild(this.bg, this.root);
@@ -164,6 +166,19 @@ export class Game {
     const dead = this.particles.filter((p) => p.life <= 0);
     for (const p of dead) p.g.destroy();
     if (dead.length) this.particles = this.particles.filter((p) => p.life > 0);
+  }
+
+  /** The background outside boss fights, in the table's look. */
+  calmSwirl() {
+    const [a, b, c] = look().swirl;
+    setSwirlColors(this.swirl, a, b, c);
+  }
+
+  /** Re-dress the table after house colours change. Cosmetic only: the run itself is untouched. */
+  applyLook() {
+    for (const v of this.views.values()) v.drawBack();
+    if (!(this.run && this.run.s.phase === "round" && this.run.bossDef())) this.calmSwirl();
+    this.resize();
   }
 
   // ================================================================ layout
@@ -250,12 +265,13 @@ export class Game {
     });
     this.hud.addChild(this.felt);
     this.felt.clear();
+    const lk = look();
     if (L.mode === "land") {
-      this.felt.roundRect(L.stage.x, 222, L.W - L.stage.x - 20, L.H - 242, 18).fill({ color: COL.felt, alpha: 0.5 }).stroke({ width: 3, color: COL.feltHi, alpha: 0.8 });
+      this.felt.roundRect(L.stage.x, 222, L.W - L.stage.x - 20, L.H - 242, 18).fill({ color: lk.felt, alpha: 0.5 }).stroke({ width: 3, color: lk.feltHi, alpha: 0.8 });
       this.felt.roundRect(L.stage.x, 20, L.W - L.stage.x - 20, 190, 18).fill({ color: COL.ink, alpha: 0.45 }).stroke({ width: 3, color: COL.edge, alpha: 0.8 });
     } else {
       this.felt.roundRect(16, 326, L.W - 32, 150, 16).fill({ color: COL.ink, alpha: 0.45 }).stroke({ width: 3, color: COL.edge, alpha: 0.8 });
-      this.felt.roundRect(16, 488, L.W - 32, L.H - 488 - 76, 18).fill({ color: COL.felt, alpha: 0.5 }).stroke({ width: 3, color: COL.feltHi, alpha: 0.8 });
+      this.felt.roundRect(16, 488, L.W - 32, L.H - 488 - 76, 18).fill({ color: lk.felt, alpha: 0.5 }).stroke({ width: 3, color: lk.feltHi, alpha: 0.8 });
     }
     this.stat = {};
     const port = L.mode === "port";
@@ -1321,7 +1337,7 @@ export class Game {
     if (boss) {
       setSwirlColors(this.swirl, 0x2e0612, 0x3d0b1c, 0xb3123f);
       this.heat = 0.6;
-    } else setSwirlColors(this.swirl, 0x3a0a2c, 0x0e5257, 0xb01a66);
+    } else this.calmSwirl();
     this.showStage();
     this.syncHud();
     void this.syncHand(run.s.hand);
@@ -1331,7 +1347,7 @@ export class Game {
     const run = this.run!;
     const co = run.s.cashout;
     if (!co) return;
-    setSwirlColors(this.swirl, 0x3a0a2c, 0x0e5257, 0xb01a66);
+    this.calmSwirl();
     const port = this.L.mode === "port";
     const h = port ? 470 : 430;
     const { c, w } = this.stageBox(h, "CASH OUT", COL.money);

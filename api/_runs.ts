@@ -6,6 +6,11 @@ import { hash32 } from "../shared/rng.js";
 import { getEdition } from "./_deck.js";
 import { load, loadFresh, save, saveOver, Taken } from "./_store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
+import { utcDay } from "../shared/daily.js";
+import { addToBoard, dailyDayOf } from "./_daily.js";
+import { claimOk } from "./_house.js";
+
+export { utcDay };
 
 export interface ShowCard {
   t: string;
@@ -29,6 +34,8 @@ export interface Showdown {
   best: { total: number; hand: string; handName: string; cards: ShowCard[] } | null;
   hands: number;
   at: string;
+  daily?: string; // the UTC day whose Daily Deal this was
+  house?: boolean; // a $KICKER holder's house mark (cosmetic only)
 }
 
 const B32 = "0123456789abcdefghjkmnpqrstvwxyz";
@@ -46,7 +53,7 @@ function shortId(s: string): string {
 
 export const ID_RE = /^[0-9a-z]{10}$/;
 
-export async function verifyAndStore(input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown }): Promise<Showdown> {
+export async function verifyAndStore(input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown; house?: unknown }, now = Date.now()): Promise<Showdown> {
   const seed = normSeed(String(input.seed || ""));
   const edition = Number(input.edition);
   const trail = String(input.trail || "");
@@ -60,7 +67,10 @@ export async function verifyAndStore(input: { seed?: unknown; edition?: unknown;
   const rawName = typeof input.name === "string" ? cleanName(input.name) : "";
   if (rawName && nameProblem(rawName)) throw new Error(nameProblem(rawName)!);
   const name = rawName || null;
-  const id = shortId(`${edition}|${seed}|${trail}|${name || ""}`);
+  // the house mark rides along only with a valid claim for this very name; it never touches the replay above
+  const house = !!name && claimOk(input.house, name, now);
+  const daily = await dailyDayOf(seed, edition, now);
+  const id = shortId(`${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}`);
   const rec: Showdown = {
     id,
     seed,
@@ -81,14 +91,19 @@ export async function verifyAndStore(input: { seed?: unknown; edition?: unknown;
         }
       : null,
     hands: sum.hands,
-    at: new Date().toISOString(),
+    at: new Date(now).toISOString(),
+    ...(daily ? { daily } : {}),
+    ...(house ? { house } : {}),
   };
   try {
     await save(`showdowns/${id}.json`, rec);
   } catch (e) {
     if (!(e instanceof Taken)) throw e;
   }
-  if (rec.name && rec.over && rec.best && rec.best.total > 0) await addToHall(rec);
+  if (rec.name && rec.over && rec.best && rec.best.total > 0) {
+    await addToHall(rec);
+    if (rec.daily) await addToBoard(rec.daily, rec.edition, hallEntry(rec));
+  }
   return rec;
 }
 
@@ -105,20 +120,17 @@ export interface HallEntry {
   edition: number;
   cards: ShowCard[];
   at: string;
+  house?: boolean;
 }
 export interface Hall {
   day: string;
   entries: HallEntry[];
 }
 export const HALL_SIZE = 50;
-export const utcDay = (d = new Date()) => d.toISOString().slice(0, 10);
 export const hallPath = (day: string) => `hall/${day}.json`;
 
-async function addToHall(rec: Showdown): Promise<void> {
-  const day = utcDay(new Date(rec.at));
-  const hall = (await loadFresh<Hall>(hallPath(day))) || { day, entries: [] };
-  if (hall.entries.some((e) => e.id === rec.id)) return;
-  const entry: HallEntry = {
+export function hallEntry(rec: Showdown): HallEntry {
+  return {
     id: rec.id,
     name: rec.name!,
     total: rec.best!.total,
@@ -130,7 +142,15 @@ async function addToHall(rec: Showdown): Promise<void> {
     edition: rec.edition,
     cards: rec.best!.cards.slice(0, 5).sort((a, b) => a.rank - b.rank),
     at: rec.at,
+    ...(rec.house ? { house: true } : {}),
   };
+}
+
+async function addToHall(rec: Showdown): Promise<void> {
+  const day = utcDay(new Date(rec.at));
+  const hall = (await loadFresh<Hall>(hallPath(day))) || { day, entries: [] };
+  if (hall.entries.some((e) => e.id === rec.id)) return;
+  const entry = hallEntry(rec);
   // one line per player per seed: keep their best
   const others = hall.entries.filter((e) => !(e.name.toLowerCase() === entry.name.toLowerCase() && e.seed === entry.seed && e.total >= entry.total));
   if (others.length !== hall.entries.length) return;

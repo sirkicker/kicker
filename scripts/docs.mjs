@@ -5,7 +5,7 @@ const { chromium } = require("playwright");
 const base = process.argv[2] || "https://kickerhq.vercel.app";
 const b = await chromium.launch({ channel: "msedge" });
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
-await ctx.addInitScript(() => localStorage.setItem("kk.coach", "9"));
+await ctx.addInitScript(() => { localStorage.setItem("kk.coach", "9"); localStorage.setItem("kk.news", JSON.stringify("1.1.0")); });
 const p = await ctx.newPage();
 await p.goto(base + "/", { waitUntil: "networkidle" });
 await p.waitForTimeout(2500);

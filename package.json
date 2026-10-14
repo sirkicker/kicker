@@ -1,13 +1,14 @@
 {
   "name": "kicker",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json && vite build",
     "preview": "vite preview",
+    "test": "tsx scripts/test.ts",
     "vibers": "node scripts/vibers.mjs"
   },
   "dependencies": {
@@ -17,7 +18,8 @@
     "pixi.js": "^8.22.0",
     "preact": "^11.0.0",
     "satori": "^0.35.1",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "viem": "2.56.9"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",

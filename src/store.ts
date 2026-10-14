@@ -2,7 +2,16 @@
 import type { Edition, PoolCard } from "../shared/data.js";
 import type { Run } from "../shared/engine.js";
 
-export type Overlay = null | "title" | "how" | "deck" | "levels" | "over" | "seed" | "options" | "hall";
+export type Overlay = null | "title" | "how" | "deck" | "levels" | "over" | "seed" | "options" | "hall" | "house" | "news";
+
+/** Today's Daily Deal as /api/daily serves it. */
+export interface Daily {
+  day: string;
+  label: string;
+  seed: string;
+  edition: number;
+  players: number;
+}
 
 export interface Challenge {
   id: string;
@@ -38,6 +47,7 @@ export interface UiState {
   coach: Coach | null;
   detail: Detail | null;
   toast: string | null;
+  daily: Daily | null;
   version: number;
 }
 
@@ -51,6 +61,7 @@ export const ui: UiState = {
   coach: null,
   detail: null,
   toast: null,
+  daily: null,
   version: 0,
 };
 
