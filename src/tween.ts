@@ -41,6 +41,11 @@ export function attach(ticker: Ticker) {
     const live = jobs;
     jobs = [];
     for (const j of live) {
+      // a view destroyed mid-animation (a fast play, a new run) just ends its tween
+      if (j.key && (j.key as { destroyed?: boolean }).destroyed) {
+        j.done();
+        continue;
+      }
       const k = Math.min(1, (now - j.t0) / Math.max(1, j.dur));
       j.step(j.ease(k));
       if (k >= 1) j.done();

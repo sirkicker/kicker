@@ -11,6 +11,8 @@ import { Game } from "./game.js";
 import { attach } from "./tween.js";
 import { local, setUi, toast, ui, type Challenge, type Daily } from "./store.js";
 import { house } from "./house.js";
+import { rememberedAddress } from "./signin.js";
+import { me, receipts, refreshProfile } from "./me.js";
 import { mountUi, VERSION, type HallEntry } from "./ui.js";
 import "./style.css";
 
@@ -264,11 +266,16 @@ async function boot() {
       if (!run) return null;
       try {
         const h = house.get();
-        const claim = h && name && cleanName(name).toLowerCase() === h.name.toLowerCase() ? h.claim : undefined;
-        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name, house: claim });
+        const mine = (n: string | undefined) => !!n && !!name && cleanName(name).toLowerCase() === n.toLowerCase();
+        const claim = h && mine(h.name) ? h.claim : undefined;
+        const s = me.get();
+        const session = s && mine(s.name) ? s.session : undefined;
+        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name, house: claim, session });
         const j = await postJson("/api/showdown", body);
+        if (j.receipt && name) receipts.add(name, j.receipt);
+        if (j.showdown?.verified) void refreshProfile();
         sfx.coin();
-        return { id: j.id, url: j.url, daily: j.showdown?.daily || null, house: !!j.showdown?.house };
+        return { id: j.id, url: j.url, daily: j.showdown?.daily || null, house: !!j.showdown?.house, verified: !!j.showdown?.verified };
       } catch (e) {
         toast("Could not verify the run: " + (e as Error).message);
         return null;
@@ -351,7 +358,8 @@ async function boot() {
 interface Posted {
   id: string;
   url: string;
-  showdown?: { daily?: string; house?: boolean };
+  showdown?: { daily?: string; house?: boolean; verified?: boolean };
+  receipt?: string;
 }
 
 function postJson(url: string, body: string): Promise<Posted> {
@@ -376,5 +384,7 @@ function postJson(url: string, body: string): Promise<Posted> {
 
 let pendingChallenge: { seed: string; edition: number } | null = null;
 
+// the chip shows the last address this browser signed in with; Para itself loads only when sign-in is touched
+setUi({ signedIn: rememberedAddress() });
 void loadDaily();
 void boot();

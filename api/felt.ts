@@ -174,7 +174,7 @@ function page(rec: Showdown): string {
 <title>${title}</title><meta name="description" content="${esc(desc)}">
 <meta property="og:type" content="website"><meta property="og:url" content="${SITE}/c/${rec.id}"><meta property="og:title" content="${title}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${imgUrl}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${imgUrl}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:site" content="@kyriektnrv"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${imgUrl}">
 <meta http-equiv="refresh" content="0;url=${to}"><style>body{background:#160611;color:#fff1dc;font-family:monospace;display:grid;place-items:center;height:100vh;margin:0}a{color:#ffc23d}</style>
 </head><body><a href="${to}">Deal me in</a><script>location.replace(${JSON.stringify(to)})</script></body></html>`;
 }

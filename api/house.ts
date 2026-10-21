@@ -1,5 +1,6 @@
 // POST /api/house {name, address, signature} -> {claim, expires, day} for a $KICKER holder.
-// The signature is over a plain text message (no gas, no transaction); the balance is a read call.
+// The signature is over a plain text message (no gas, no transaction), made with the wallet the player signed in
+// with through Para; the balance is a read call. Smart-account signatures are checked with a read call too (ERC-1271).
 // What the claim buys: a card back, a felt and a small mark next to the name. Cosmetic only.
 import { checkHouse, HouseError } from "./_house.js";
 
@@ -10,7 +11,7 @@ export async function POST(req: Request): Promise<Response> {
   let body: Keyed<string, unknown>;
   try {
     const text = await req.text();
-    if (text.length > 4000) return json({ error: "too large" }, 413);
+    if (text.length > 10000) return json({ error: "too large" }, 413);
     body = JSON.parse(text);
   } catch {
     return json({ error: "bad json" }, 400);

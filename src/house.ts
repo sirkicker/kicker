@@ -1,7 +1,6 @@
 // House colours: alternate card backs and felt for $KICKER holders. Cosmetic only: nothing in here is
-// read by the engine, so it never changes the cards, the score or the odds. Without a wallet, the house look stays.
-import { HOUSE_CHAIN, houseMessage } from "../shared/house.js";
-import { utcDay } from "../shared/daily.js";
+// read by the engine, so it never changes the cards, the score or the odds. Without a sign-in, the house look stays.
+import { HOUSE_CHAIN } from "../shared/house.js";
 import { local } from "./store.js";
 
 export interface Look {
@@ -50,55 +49,6 @@ export function look(): Look {
   return LOOKS.find((l) => l.id === id) || LOOKS[0];
 }
 
-// ------------------------------------------------------------ injected wallets (EIP-6963 discovery only)
-interface Eip1193 {
-  request(a: { method: string; params?: unknown[] }): Promise<unknown>;
-}
-export interface Wallet {
-  uuid: string;
-  name: string;
-  icon: string;
-  provider: Eip1193;
-}
-
-const found = new Map<string, Wallet>();
-let listening = false;
-
-/** Asks the page's injected wallets to announce themselves; resolves with whoever answered. */
-export function findWallets(wait = 400): Promise<Wallet[]> {
-  if (!listening) {
-    listening = true;
-    window.addEventListener("eip6963:announceProvider", (e) => {
-      const d = (e as CustomEvent).detail as { info?: { uuid?: string; name?: string; icon?: string }; provider?: Eip1193 } | undefined;
-      if (!d?.info?.uuid || !d.provider || typeof d.provider.request !== "function") return;
-      const icon = typeof d.info.icon === "string" && /^data:image\//.test(d.info.icon) ? d.info.icon : "";
-      found.set(d.info.uuid, { uuid: d.info.uuid, name: String(d.info.name || "Wallet").slice(0, 32), icon, provider: d.provider });
-    });
-  }
-  window.dispatchEvent(new Event("eip6963:requestProvider"));
-  return new Promise((res) => setTimeout(() => res([...found.values()]), wait));
-}
-
-/** Connect, sign the plain message, and trade it for today's claim. No transaction is ever sent. */
-export async function claimHouse(w: Wallet, name: string): Promise<HouseState> {
-  const accounts = (await w.provider.request({ method: "eth_requestAccounts" })) as string[];
-  const address = accounts?.[0];
-  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("the wallet gave no address");
-  const day = utcDay();
-  const message = houseMessage(name, address, day);
-  const hex = "0x" + Array.from(new TextEncoder().encode(message), (b) => b.toString(16).padStart(2, "0")).join("");
-  const signature = (await w.provider.request({ method: "personal_sign", params: [hex, address] })) as string;
-  const res = await fetch("/api/house", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, address, signature }),
-  });
-  const j = (await res.json().catch(() => ({}))) as { claim?: string; expires?: number; day?: string; name?: string; error?: string };
-  if (!res.ok || !j.claim || !j.expires) throw new Error(j.error || `HTTP ${res.status}`);
-  const st: HouseState = { claim: j.claim, name: j.name || name, day: j.day || day, expires: j.expires, address: address.toLowerCase() };
-  house.set(st);
-  return st;
-}
+// The claim itself comes with the day's sign-in (src/me.ts): one signed plain message, through Para.
 
 export const CHAIN_NAME = HOUSE_CHAIN.name;
-export const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;

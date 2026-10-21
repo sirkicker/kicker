@@ -1,4 +1,4 @@
-// GET /api/shuffle          -> the newest deck snapshot (cut from the live index once an hour)
+// GET /api/shuffle          -> the newest deck snapshot (cut from the live index every few hours)
 // GET /api/shuffle?e=<id>   -> a frozen snapshot, for replaying a shared seed
 import { waitUntil } from "@vercel/functions";
 import { editionNow } from "../shared/data.js";
@@ -20,8 +20,9 @@ export async function GET(req: Request): Promise<Response> {
       if (!ed) return json({ error: "deck not found" }, 404, "public, max-age=30, s-maxage=30");
       return json(ed, 200, "public, max-age=31536000, s-maxage=31536000, immutable");
     }
-    const recent = (await recentEdition()) || (await storedEdition(editionNow() - 4, 44));
-    if (recent && recent.id === editionNow()) return json(recent, 200, "public, max-age=60, s-maxage=120, stale-while-revalidate=900");
+    const recent = (await recentEdition()) || (await storedEdition(editionNow() - 4, 20));
+    // a deck lasts three hours: fresh enough for the cards, and a third of the writes
+    if (recent && recent.id >= editionNow() - 2) return json(recent, 200, "public, max-age=120, s-maxage=600, stale-while-revalidate=1800");
     if (recent) {
       waitUntil(currentEdition().catch(() => null));
       return json(recent, 200, "public, max-age=30, s-maxage=30");

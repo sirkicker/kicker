@@ -1,6 +1,8 @@
-// POST /api/showdown {seed, edition, trail, name?} -> re-runs the run on the server and stores it.
+// POST /api/showdown {seed, edition, trail, name?, house?, session?} -> re-runs the run on the server and stores it.
+//   A claimed name needs its owner's session; a named post without one gets a receipt for later claiming the name.
 // GET  /api/showdown?id=<id>                    -> the stored, verified result.
 import { getShowdown, verifyAndStore } from "./_runs.js";
+import { receiptFor } from "./_me.js";
 
 const json = (body: unknown, status = 200, cache = "no-store") =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": cache } });
@@ -16,7 +18,8 @@ export async function POST(req: Request): Promise<Response> {
   }
   try {
     const rec = await verifyAndStore(body);
-    return json({ id: rec.id, url: `/c/${rec.id}`, showdown: rec });
+    const receipt = rec.name && !rec.verified ? receiptFor(rec.name) : undefined;
+    return json({ id: rec.id, url: `/c/${rec.id}`, showdown: rec, ...(receipt ? { receipt } : {}) });
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 422);
   }

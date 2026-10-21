@@ -1,7 +1,7 @@
 {
   "name": "kicker",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,18 +12,26 @@
     "vibers": "node scripts/vibers.mjs"
   },
   "dependencies": {
+    "@getpara/react-sdk": "^3.23.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@tanstack/react-query": "^5.104.5",
     "@vercel/blob": "^2.8.1",
     "@vercel/functions": "^3.9.11",
+    "@wagmi/core": "^2.22.1",
     "pixi.js": "^8.22.0",
     "preact": "^11.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "satori": "^0.35.1",
     "sharp": "^0.35.5",
-    "viem": "2.56.9"
+    "viem": "2.56.9",
+    "wagmi": "^2.19.5"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
     "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "playwright": "^1.57.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

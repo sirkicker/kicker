@@ -4,9 +4,11 @@ import { BLIND_NAME, BLIND_REWARD, BOSS, HAND, INSIDER, MAX_ANTE, MAX_INSIDERS, 
 import { ENH, RANK_LABEL, SUITS, type Card } from "../shared/data.js";
 import { targetFor, type Action, type Run, type Scored, type Step } from "../shared/engine.js";
 import { bestPlay } from "../shared/bot.js";
+import { cardInsider } from "../shared/engine.js";
+import { cardFacts, highlights, shopHint } from "../shared/insight.js";
 import { sfx } from "./audio.js";
 import { setUi, toast, ui } from "./store.js";
-import { CardView, CH, CW, InsiderView, ItemView, tokenTexture, txt } from "./cards.js";
+import { CardView, CH, CW, InsiderView, ItemView, hslHex, tokenTexture, txt } from "./cards.js";
 import { crtFilter, setSwirlColors, swirlFilter, type FxFilter } from "./fx.js";
 import { COL, NUM, SUIT_BRIGHT } from "./theme.js";
 import { look } from "./house.js";
@@ -56,6 +58,11 @@ export class Game {
   table = new Container();
   stageLayer = new Container();
   felt = new Graphics();
+  feltMark = new Container();
+  preview!: Text;
+  btnGo: Button | null = null;
+  /** The Insider being hovered (or tapped): its cards in hand get a frame in its hue. */
+  synFocus: number | null = null;
   insLayer = new Container();
   handLayer = new Container();
   playLayer = new Container();
@@ -123,6 +130,12 @@ export class Game {
     app.ticker.add((tk) => this.frame(tk.deltaMS));
     window.addEventListener("resize", () => this.resize());
     window.addEventListener("keydown", (e) => this.key(e));
+    // the data tag never outlives a scroll
+    const drop = () => {
+      if (this.tip.visible) this.tip.hide();
+    };
+    window.addEventListener("wheel", drop, { passive: true });
+    window.addEventListener("scroll", drop, { passive: true, capture: true });
     this.resize();
   }
 
@@ -205,14 +218,16 @@ export class Game {
     if (mode === "land") {
       const left = 380;
       const cx = (left + W - 20) / 2;
+      // cards grow with the room: squarer and taller screens give the hand more height, up to a cap
+      const handScale = Math.min(1.56, Math.max(1.36, 1.36 + (H - 900) / 700));
       this.L = {
         mode,
         W,
         H,
-        handY: H - 228,
+        handY: H - 128 - (CH * handScale) / 2,
         handX0: left + 100,
         handX1: W - 232,
-        handScale: 1.24,
+        handScale,
         playY: H * 0.5 - 70,
         playX: cx,
         playScale: 1,
@@ -261,20 +276,35 @@ export class Game {
   buildHud() {
     const L = this.L;
     this.hud.removeChildren().forEach((c) => {
-      if (c !== this.felt) c.destroy({ children: true });
+      if (c !== this.felt && c !== this.feltMark) c.destroy({ children: true });
     });
     this.hud.addChild(this.felt);
     this.felt.clear();
     const lk = look();
+    let fr: { x: number; y: number; w: number; h: number };
     if (L.mode === "land") {
-      this.felt.roundRect(L.stage.x, 222, L.W - L.stage.x - 20, L.H - 242, 18).fill({ color: lk.felt, alpha: 0.5 }).stroke({ width: 3, color: lk.feltHi, alpha: 0.8 });
+      fr = { x: L.stage.x, y: 222, w: L.W - L.stage.x - 20, h: L.H - 242 };
       this.felt.roundRect(L.stage.x, 20, L.W - L.stage.x - 20, 190, 18).fill({ color: COL.ink, alpha: 0.45 }).stroke({ width: 3, color: COL.edge, alpha: 0.8 });
     } else {
+      fr = { x: 16, y: 488, w: L.W - 32, h: L.H - 488 - 76 };
       this.felt.roundRect(16, 326, L.W - 32, 150, 16).fill({ color: COL.ink, alpha: 0.45 }).stroke({ width: 3, color: COL.edge, alpha: 0.8 });
-      this.felt.roundRect(16, 488, L.W - 32, L.H - 488 - 76, 18).fill({ color: lk.felt, alpha: 0.5 }).stroke({ width: 3, color: lk.feltHi, alpha: 0.8 });
     }
+    this.felt.roundRect(fr.x, fr.y, fr.w, fr.h, 18).fill({ color: lk.felt, alpha: 0.5 }).stroke({ width: 3, color: lk.feltHi, alpha: 0.8 });
+    // felt shading: a soft lamp over the middle of the table, darker towards the rail
+    for (let i = 0; i < 5; i++) {
+      const k = i / 5;
+      this.felt.roundRect(fr.x + 10 + k * 40, fr.y + 10 + k * 26, fr.w - 20 - k * 80, fr.h - 20 - k * 52, 16).fill({ color: lk.feltHi, alpha: 0.035 });
+    }
+    this.felt.roundRect(fr.x + 8, fr.y + 8, fr.w - 16, fr.h - 16, 14).stroke({ width: 2, color: 0x000000, alpha: 0.18 });
+    this.drawFeltMark(COL.cream);
     this.stat = {};
     const port = L.mode === "port";
+    // the live read of the selected hand, in the middle of the felt
+    this.preview = txt("", { fontFamily: NUM, fontSize: port ? 44 : 50, fill: COL.cream, stroke: { color: COL.ink, width: 6 } });
+    this.preview.anchor.set(0.5);
+    this.preview.position.set(L.playX, L.playY);
+    this.preview.alpha = 0;
+    this.hud.addChild(this.preview);
     const mk = (x: number, y: number, w: number, h: number, fill = COL.panel, edge = COL.edge) => {
       const p = panel(w, h, fill, edge);
       p.position.set(x, y);
@@ -475,6 +505,39 @@ export class Game {
     this.hudMode = L.mode;
   }
 
+  /** A faint woven KICKER mark at the centre of the felt: stitched rings, a weave, the name. Drawn once per layout. */
+  drawFeltMark(tone: number) {
+    const L = this.L;
+    const m = this.feltMark;
+    m.removeChildren().forEach((c) => c.destroy());
+    const rx = L.mode === "land" ? 300 : 300;
+    const ry = L.mode === "land" ? 112 : 118;
+    const g = new Graphics();
+    // the weave: two sets of diagonal threads, clipped to the oval by length
+    for (let t = -rx; t <= rx; t += 14) {
+      const half = ry * Math.sqrt(Math.max(0, 1 - (t * t) / (rx * rx))) * 0.86;
+      if (half < 6) continue;
+      g.moveTo(t - half * 0.5, -half).lineTo(t + half * 0.5, half);
+      g.moveTo(t + half * 0.5, -half).lineTo(t - half * 0.5, half);
+    }
+    g.stroke({ width: 2, color: tone, alpha: 0.035 });
+    g.ellipse(0, 0, rx, ry).stroke({ width: 4, color: tone, alpha: 0.09 });
+    // stitching: a dashed inner ring
+    for (let i = 0; i < 64; i++) {
+      const a0 = (i / 64) * Math.PI * 2;
+      const a1 = a0 + Math.PI / 96;
+      g.moveTo(Math.cos(a0) * (rx - 14), Math.sin(a0) * (ry - 12)).lineTo(Math.cos(a1) * (rx - 14), Math.sin(a1) * (ry - 12));
+    }
+    g.stroke({ width: 3, color: tone, alpha: 0.1 });
+    m.addChild(g);
+    const word = txt("KICKER", { fontFamily: NUM, fontSize: 120, fill: tone, letterSpacing: 18 });
+    word.anchor.set(0.5);
+    word.alpha = 0.075;
+    m.addChild(word);
+    m.position.set(L.playX, L.playY + 6);
+    this.hud.addChild(m);
+  }
+
   // ================================================================ run lifecycle
   start(run: Run) {
     this.root.visible = true;
@@ -515,7 +578,7 @@ export class Game {
     const blindCol = s.blind === 0 ? COL.chips : s.blind === 1 ? COL.money : COL.mult;
     this.blindName.text = boss ? boss.name : BLIND_NAME[s.blind];
     this.blindName.style.fill = blindCol;
-    this.blindText.text = boss ? boss.text : `Reward $${BLIND_REWARD[s.blind]}`;
+    this.blindText.text = boss ? boss.text : `Cash-out $${BLIND_REWARD[s.blind]}`;
     const target = s.phase === "round" ? s.target : targetFor(s.ante, s.blind, s.bosses[s.ante - 1]);
     this.blindTarget.text = fmt(target);
     this.scoreText.text = fmt(s.phase === "round" ? s.score : 0);
@@ -550,12 +613,28 @@ export class Game {
       this.handLevel.text = `level ${run.s.levels[ev.hand]}${run.bossNow() === "wash" && run.s.typesRound.includes(ev.hand) ? " · already played: scores 0" : ""}`;
       this.chipsBox.set(fmt(chips));
       this.multBox.set(fmtMult(mult));
+      this.showPreview(`${HAND[ev.hand].name} · ${fmt(chips)} × ${fmtMult(mult)}`);
     } else {
+      this.showPreview("");
       this.handName.text = run.s.phase === "round" ? "Pick up to 5 cards" : run.s.phase === "shop" ? "Shop" : "";
       this.handLevel.text = "";
       this.chipsBox.set("0");
       this.multBox.set("0");
     }
+  }
+
+  /** The selected hand, named on the felt. Fades, never pops; hidden while the table is scoring. */
+  showPreview(text: string) {
+    const p = this.preview;
+    if (!p) return;
+    if (text && text !== p.text) {
+      p.text = text;
+      p.scale.set(0.94);
+      void tween(p.scale, { x: 1, y: 1 }, 160, ease.outBack);
+    }
+    void tween(p, { alpha: text ? 0.92 : 0 }, text ? 140 : 180);
+    // the woven mark steps back while the read is up, so the two never fight
+    void tween(this.feltMark, { alpha: text ? 0.3 : 1 }, 200);
   }
 
   syncButtons() {
@@ -594,12 +673,19 @@ export class Game {
       const v = new InsiderView(j.id, j.v);
       v.scale.set(L.insScale);
       v.position.set(L.insX + i * L.insStep, L.insY);
-      v.on("pointertap", () => this.insiderTip(i, v));
+      v.on("pointertap", () => {
+        this.insiderTip(i, v);
+        this.focusInsider(i);
+      });
       v.on("pointerover", (e) => {
-        if (e.pointerType === "mouse") this.insiderTip(i, v, false);
+        if (e.pointerType !== "mouse") return;
+        this.insiderTip(i, v, false);
+        this.focusInsider(i);
       });
       v.on("pointerout", (e) => {
-        if (e.pointerType === "mouse" && !this.tipPinned) this.tip.hide();
+        if (e.pointerType !== "mouse") return;
+        if (!this.tipPinned) this.tip.hide();
+        this.focusInsider(null);
       });
       this.insLayer.addChild(v);
       this.insViews.push(v);
@@ -618,6 +704,32 @@ export class Game {
       this.insLayer.addChild(v);
       this.movViews.push(v);
     });
+    this.syncSynergy();
+  }
+
+  /** Marks the cards in hand that a held Insider would reward: exactly the engine's per-card condition. */
+  syncSynergy() {
+    const run = this.run;
+    if (!run) return;
+    const ins = run.s.insiders;
+    for (const v of this.views.values()) {
+      if (v.parent !== this.handLayer) {
+        v.setSynergy([], null);
+        continue;
+      }
+      const hs = highlights(ins, v.card, run.ageHours(v.card));
+      const focus = this.synFocus === null ? null : hs.find((h) => h.slot === this.synFocus);
+      v.setSynergy(
+        hs.map((h) => ({ color: hslHex(h.hue, 0.85, 0.6), strength: h.strength })),
+        focus ? hslHex(focus.hue, 0.85, 0.62) : null,
+      );
+    }
+  }
+
+  focusInsider(i: number | null) {
+    if (this.synFocus === i) return;
+    this.synFocus = i;
+    this.syncSynergy();
   }
 
   tipPinned = false;
@@ -739,6 +851,7 @@ export class Game {
       v.zIndex = i;
     });
     this.handLayer.sortableChildren = true;
+    this.syncSynergy();
     // deal animation
     let k = 0;
     const jobs: Promise<void>[] = [];
@@ -774,28 +887,50 @@ export class Game {
 
   bindCard(v: CardView) {
     // press and hold opens the full card; a short tap selects it
+    // mouse: hover ~300 ms for the data tag, hold ~600 ms for the full launch card.
+    // touch: hold ~400 ms for the data tag (the tap does not select), keep holding for the full card.
     let timer = 0;
+    let timer2 = 0;
+    let hoverT = 0;
     let held = false;
     let start = { x: 0, y: 0 };
+    const stop = () => {
+      clearTimeout(timer);
+      clearTimeout(timer2);
+    };
+    const full = () => {
+      held = true;
+      sfx.tick();
+      this.tip.hide();
+      const c = v.card;
+      setUi({ detail: { l: c.l, rank: c.rank, suit: c.suit, enh: c.enh, q: c.q, bridged: c.bridged } });
+    };
     v.on("pointerdown", (e) => {
       held = false;
       start = { x: e.global.x, y: e.global.y };
-      clearTimeout(timer);
+      stop();
+      clearTimeout(hoverT);
+      if (e.pointerType === "mouse") {
+        timer = window.setTimeout(full, 600);
+        return;
+      }
       timer = window.setTimeout(() => {
         held = true;
         sfx.tick();
-        this.tip.hide();
-        const c = v.card;
-        setUi({ detail: { l: c.l, rank: c.rank, suit: c.suit, enh: c.enh, q: c.q, bridged: c.bridged } });
-      }, 480);
+        this.cardTag(v, true);
+        timer2 = window.setTimeout(full, 700);
+      }, 400);
     });
     v.on("pointermove", (e) => {
-      if (Math.hypot(e.global.x - start.x, e.global.y - start.y) > 12) clearTimeout(timer);
+      if (Math.hypot(e.global.x - start.x, e.global.y - start.y) > 12) stop();
     });
-    v.on("pointerup", () => clearTimeout(timer));
-    v.on("pointerupoutside", () => clearTimeout(timer));
+    v.on("pointerup", () => stop());
+    v.on("pointerupoutside", () => {
+      stop();
+      if (held) this.tip.hide();
+    });
     v.on("pointertap", () => {
-      clearTimeout(timer);
+      stop();
       if (held) {
         held = false;
         return;
@@ -806,10 +941,14 @@ export class Game {
       if (e.pointerType !== "mouse") return;
       void tween(v, { hover: 1 }, 120);
       sfx.tick();
-      this.cardTip(v);
+      clearTimeout(hoverT);
+      hoverT = window.setTimeout(() => {
+        if (v.parent === this.handLayer && !v.destroyed) this.cardTag(v, false);
+      }, 300);
     });
     v.on("pointerout", (e) => {
       if (e.pointerType !== "mouse") return;
+      clearTimeout(hoverT);
       void tween(v, { hover: 0 }, 160);
       if (!this.tipPinned) this.tip.hide();
     });
@@ -833,12 +972,29 @@ export class Game {
     return { title: `${RANK_LABEL(c.rank)} · $${l.s}`, body: lines.join("\n") };
   }
 
-  cardTip(v: CardView) {
-    const { title, body } = this.cardText(v.card);
-    this.tipPinned = false;
+  /** The data tag: what the Insiders read off this card, and what the held ones would pay for it right now. */
+  cardTag(v: CardView, pinned: boolean) {
+    const run = this.run;
+    if (!run || v.destroyed) return;
+    const c = v.card;
+    const age = run.ageHours(c);
+    const f = cardFacts(c, age);
+    const lines = f.lines.map(([k, val]) => `${k}: ${val}`);
+    const pays = run.s.insiders
+      .map((j) => {
+        const st = cardInsider(j.id, c, age);
+        if (!st) return null;
+        const what = st.xmult ? `x${fmtMult(st.xmult)} Mult` : st.mult ? `+${st.mult} Mult` : `+${st.chips} Chips`;
+        return `${INSIDER[j.id].name} ${what}`;
+      })
+      .filter(Boolean);
+    if (pays.length) lines.push(`Your Insiders: ${pays.join(", ")}`);
+    if (run.debuffed(c)) lines.push("Debuffed by the boss: scores nothing");
+    lines.push(pinned ? "Keep holding for the full launch card" : "Hold the card for the full launch card");
+    this.tipPinned = pinned;
     this.tip.hide();
     const at = this.tipAt(v);
-    this.tip.show(title, body, at.x, at.y - 10, { w: this.L.W, h: this.L.H }, SUIT_BRIGHT[v.card.suit], 330);
+    this.tip.show(f.title, lines.join("\n"), at.x, at.y - 10, { w: this.L.W, h: Math.min(this.L.H, this.L.btnY - 50) }, SUIT_BRIGHT[c.suit], 360);
   }
 
   showInfo(c: Card | null) {
@@ -858,6 +1014,7 @@ export class Game {
     if (v.parent !== this.handLayer) return;
     this.tipPinned = false;
     this.tip.hide();
+    if (this.synFocus !== null) this.focusInsider(null);
     const id = v.card.id;
     const i = this.sel.indexOf(id);
     if (i >= 0) {
@@ -872,6 +1029,11 @@ export class Game {
       this.sel.push(id);
       v.setSelected(true);
       sfx.select(v.card.rank);
+      // a small lift-and-settle so the pick reads as a pick
+      if (!reduced()) {
+        v.body.scale.set(1.06);
+        void tween(v.body.scale, { x: 1, y: 1 }, 220, ease.outBack);
+      }
     }
     this.focusCard = v.card;
     this.showInfo(v.card);
@@ -939,6 +1101,7 @@ export class Game {
     this.sel = [];
     this.tip.hide();
     this.syncButtons();
+    this.showPreview("");
     try {
       await this.animatePlay(sc, pre.score);
       const s = run.s;
@@ -970,6 +1133,7 @@ export class Game {
     this.busy = true;
     this.sel = [];
     this.syncButtons();
+    this.showPreview("");
     sfx.whoosh();
     const L = this.L;
     await Promise.all(
@@ -1015,6 +1179,7 @@ export class Game {
       if (v) {
         v.card = run.card(cid);
         v.redraw();
+        v.syn.clear();
         v.scale.set(this.L.handScale * 1.25);
         void tween(v.scale, { x: this.L.handScale, y: this.L.handScale }, 300, ease.outBack);
       }
@@ -1301,7 +1466,7 @@ export class Game {
       const tv = txt(fmt(targetFor(s.ante, b, bossId)), { fontFamily: NUM, fontSize: port ? 36 : 44, fill: COL.mult });
       tv.anchor.set(0.5, 0);
       tv.position.set(x + tw / 2, y + (port ? 160 : 190));
-      const rw = txt(`Reward $${BLIND_REWARD[b]}`, { fontSize: 16, fill: COL.money, fontWeight: "700" });
+      const rw = txt(`Cash-out $${BLIND_REWARD[b]}`, { fontSize: 16, fill: COL.money, fontWeight: "700" });
       rw.anchor.set(0.5, 0);
       rw.position.set(x + tw / 2, y + (port ? 206 : 244));
       c.addChild(tl, tv, rw);
@@ -1315,9 +1480,12 @@ export class Game {
         c.addChild(bt);
       }
       if (cur) {
-        const btn = new Button("Play", Math.min(tw - 24, 180), 64, COL.play, () => this.doGo(), { size: 26 });
-        btn.position.set(x + tw / 2, y + th - 52);
+        const btn = new Button("Play", Math.min(tw - 16, 180), port ? 76 : 64, COL.play, () => this.doGo(), { size: 26 });
+        btn.position.set(x + tw / 2, y + th - (port ? 58 : 52));
+        // the whole lower part of the tile answers a tap, not only the button face
+        btn.hitArea = new Rectangle(-tw / 2 + 4, -(port ? 64 : 56), tw - 8, port ? 120 : 104);
         c.addChild(btn);
+        this.btnGo = btn;
       } else {
         const st = txt(done ? "CLEARED" : "UP NEXT", { fontFamily: NUM, fontSize: 30, fill: done ? COL.good : COL.dim });
         st.anchor.set(0.5);
@@ -1351,7 +1519,7 @@ export class Game {
     const port = this.L.mode === "port";
     const h = port ? 470 : 430;
     const { c, w } = this.stageBox(h, "CASH OUT", COL.money);
-    const rows: [string, number][] = [["Blind reward", co.reward]];
+    const rows: [string, number][] = [["Blind cash-out", co.reward]];
     if (co.handsLeft) rows.push([`Hands left (${co.handsLeft} x $1)`, co.handsLeft]);
     if (co.interest) rows.push([`Interest ($1 per $5 held, max $5)`, co.interest]);
     if (co.extra) rows.push(["Market Maker", co.extra]);
@@ -1388,16 +1556,26 @@ export class Game {
     const run = this.run!;
     const s = run.s;
     const port = this.L.mode === "port";
-    const h = port ? Math.min(this.L.stage.h - 10, 660) : 520;
+    const h = port ? Math.min(this.L.stage.h - 10, 680) : Math.min(this.L.stage.h - 10, 556);
     const { c, w } = this.stageBox(h, "SHOP", COL.chips);
     const money = txt(`You have $${s.money}`, { fontSize: 20, fill: COL.money, fontWeight: "700" });
     money.anchor.set(0.5, 0);
     money.position.set(w / 2, 62);
     c.addChild(money);
+    // one true line about this deck, for the Insiders on offer
+    const hint = shopHint(s.deck, (cd) => run.ageHours(cd), s.offers.filter((o) => o.kind === "insider" && !o.sold).map((o) => o.id));
+    let drop = 0;
+    if (hint) {
+      const ht = txt(hint.text, { fontSize: 15, fill: COL.chips, align: "center", wordWrap: true, wordWrapWidth: w - 60, lineHeight: 19 });
+      ht.anchor.set(0.5, 0);
+      ht.position.set(w / 2, 92);
+      c.addChild(ht);
+      drop = Math.max(0, ht.height - 6);
+    }
     const n = s.offers.length;
     const sc = port ? 1.2 : 1.12;
     const step = Math.min((w - 40) / n, CW * sc + 40);
-    const y0 = port ? 110 + (CH * sc) / 2 : 120 + (CH * sc) / 2;
+    const y0 = (port ? 110 + (CH * sc) / 2 : 120 + (CH * sc) / 2) + drop;
     const descBox = txt("Tap an item to read it. Insiders change how hands score; Alpha leaks level up a hand; Moves are one-shot tricks.", {
       fontSize: port ? 16 : 17,
       fill: COL.cream2,

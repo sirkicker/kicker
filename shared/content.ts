@@ -72,7 +72,7 @@ export const INSIDERS: InsiderDef[] = [
   { id: "paper", name: "Paper Hands", cost: 4, rarity: 1, text: "+20 Chips for every card discarded this round", hue: 45 },
   { id: "gas", name: "Gas Rebate", cost: 4, rarity: 1, text: "+1 discard every round", hue: 175 },
   { id: "copium", name: "Copium", cost: 4, rarity: 1, text: "+15 Mult on the last hand of a round", hue: 300 },
-  { id: "mm", name: "Market Maker", cost: 5, rarity: 1, text: "Earn $3 at the end of every round", hue: 90 },
+  { id: "mm", name: "Market Maker", cost: 5, rarity: 1, text: "+$3 at the end of every round", hue: 90 },
   { id: "moonboy", name: "Moonboy", cost: 6, rarity: 2, text: "+1 Mult per 10% curve progress of each scored card", hue: 270 },
   { id: "pumpchaser", name: "Pump Chaser", cost: 6, rarity: 2, text: "Pump cards also give x1.5 Mult", hue: 340 },
   { id: "diamond", name: "Diamond Hands", cost: 6, rarity: 2, text: "+4 Mult for every discard left", hue: 185 },

@@ -122,6 +122,49 @@ export function targetFor(ante: number, blind: number, boss: string): number {
 
 const has = (s: RunState, id: string) => s.insiders.some((j) => j.id === id);
 
+/** What a scored card is worth to one held Insider, or null when that Insider ignores it. The single source for
+ * the score and for the table's highlights, so what lights up is exactly what scores. */
+export function cardInsider(id: string, c: Card, ageHours: number): Omit<Step, "kind" | "ins"> | null {
+  const e: Enh | null = c.enh;
+  switch (id) {
+    case "maxi0":
+    case "maxi1":
+    case "maxi2":
+    case "maxi3":
+      return c.suit === Number(id[4]) ? { mult: 3 } : null;
+    case "pumpchaser":
+      return e === "pump" ? { xmult: 1.5 } : null;
+    case "dip":
+      return c.l.x !== null && c.l.x < 0 ? { chips: 25 } : null;
+    case "early":
+      return ageHours < 6 ? { chips: 40 } : null;
+    case "oldmoney":
+      return ageHours >= 24 ? { mult: 4 } : null;
+    case "whale": {
+      const v = Math.min(50, 3 * c.l.h);
+      return v > 0 ? { chips: v } : null;
+    }
+    case "volume": {
+      const v = Math.min(60, 2 * c.l.k);
+      return v > 0 ? { chips: v } : null;
+    }
+    case "moonboy": {
+      const v = Math.floor(c.l.p / 1000);
+      return v > 0 ? { mult: v } : null;
+    }
+    case "snob":
+      return c.l.s.length <= 3 ? { mult: 5 } : null;
+    case "airdrop":
+      return c.l.d ? { chips: 25 } : null;
+    case "valedictorian":
+      return c.rank === 14 ? { xmult: 1.5 } : null;
+  }
+  return null;
+}
+
+/** The per-card Insiders, and the cap of each one's reward, for the strength of a highlight. */
+export const CARD_INSIDER_MAX: Keyed<string, number> = { whale: 50, volume: 60, moonboy: 10 };
+
 export class Run {
   s: RunState;
   trail: Action[] = [];
@@ -300,50 +343,8 @@ export class Run {
             if (st.xmult) mult *= st.xmult;
             steps.push({ kind: "insider", ins: ji, card: c.id, ...st });
           };
-          switch (j.id) {
-            case "maxi0":
-            case "maxi1":
-            case "maxi2":
-            case "maxi3":
-              if (c.suit === Number(j.id[4])) add({ mult: 3 });
-              break;
-            case "pumpchaser":
-              if (e === "pump") add({ xmult: 1.5 });
-              break;
-            case "dip":
-              if (c.l.x !== null && c.l.x < 0) add({ chips: 25 });
-              break;
-            case "early":
-              if (this.ageHours(c) < 6) add({ chips: 40 });
-              break;
-            case "oldmoney":
-              if (this.ageHours(c) >= 24) add({ mult: 4 });
-              break;
-            case "whale": {
-              const v = Math.min(50, 3 * c.l.h);
-              if (v > 0) add({ chips: v });
-              break;
-            }
-            case "volume": {
-              const v = Math.min(60, 2 * c.l.k);
-              if (v > 0) add({ chips: v });
-              break;
-            }
-            case "moonboy": {
-              const v = Math.floor(c.l.p / 1000);
-              if (v > 0) add({ mult: v });
-              break;
-            }
-            case "snob":
-              if (c.l.s.length <= 3) add({ mult: 5 });
-              break;
-            case "airdrop":
-              if (c.l.d) add({ chips: 25 });
-              break;
-            case "valedictorian":
-              if (c.rank === 14) add({ xmult: 1.5 });
-              break;
-          }
+          const st = cardInsider(j.id, c, this.ageHours(c));
+          if (st) add(st);
         });
       }
     }

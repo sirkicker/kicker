@@ -37,7 +37,9 @@ function devApi(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [preact(), devApi()],
-  build: { target: "es2022", chunkSizeWarningLimit: 1200 },
+  // real React only for the lazily loaded sign-in island (src/para/): no react -> preact/compat alias,
+  // and the island is left out of Preact's dev transforms. Everything else imports preact directly.
+  plugins: [preact({ reactAliasesEnabled: false, exclude: [/src[\/]para[\/]/, /node_modules/] }), devApi()],
+  build: { target: "es2022", chunkSizeWarningLimit: 1200, sourcemap: false },
   ssr: { external: ["@resvg/resvg-js"] },
 });

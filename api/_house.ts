@@ -2,7 +2,8 @@
 // then hands back a short-lived claim tied to the player's name for the UTC day. Cosmetic only:
 // nothing here is read by the engine, the deal, the shop or the score.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { verifyMessage } from "viem";
+import { createPublicClient, http, verifyMessage } from "viem";
+import { robinhoodTestnet } from "../shared/chain.js";
 import { GAME_TOKEN } from "../shared/data.js";
 import { utcDay } from "../shared/daily.js";
 import { ADDRESS_RE, HOUSE_CHAIN, houseMessage } from "../shared/house.js";
@@ -18,8 +19,16 @@ function key(): Buffer {
   return (devKey ||= randomBytes(32));
 }
 
-const b64 = (b: Buffer | string) => Buffer.from(b).toString("base64url");
+export const b64 = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 const mac = (body: string) => createHmac("sha256", key()).update(body).digest();
+
+/** A MAC in its own domain (sign-in sessions, post receipts), so one kind of token can never pass for another. */
+export const macIn = (domain: string, body: string) => createHmac("sha256", key()).update(domain + "|" + body).digest();
+export function macOk(domain: string, body: string, sig: string): boolean {
+  const want = macIn(domain, body);
+  const got = Buffer.from(sig, "base64url");
+  return got.length === want.length && timingSafeEqual(got, want);
+}
 
 export interface Claim {
   n: string; // name, lowercase
@@ -28,7 +37,7 @@ export interface Claim {
 }
 
 /** End of the UTC day, and never more than 12 hours out. */
-const expiry = (now: number) => Math.min(Date.parse(utcDay(new Date(now)) + "T00:00:00Z") + 86_400_000, now + 12 * 3_600_000);
+export const expiry = (now: number) => Math.min(Date.parse(utcDay(new Date(now)) + "T00:00:00Z") + 86_400_000, now + 12 * 3_600_000);
 
 export function issueClaim(name: string, now = Date.now()): { claim: string; expires: number; day: string } {
   const c: Claim = { n: cleanName(name).toLowerCase(), d: utcDay(new Date(now)), x: expiry(now) };
@@ -68,6 +77,16 @@ export async function kickerBalance(address: string): Promise<bigint> {
   return j.result === "0x" ? 0n : BigInt(j.result);
 }
 
+/**
+ * A smart-account wallet (ERC-1271, or ERC-6492 before it is deployed) can't be checked by recovering a key,
+ * so ask the chain: one read-only eth_call to the account's isValidSignature. Nothing is sent.
+ */
+export async function smartAccountSigned(address: string, message: string, signature: string): Promise<boolean> {
+  const rpc = process.env.HOUSE_RPC || robinhoodTestnet.rpcUrls.default.http[0];
+  const client = createPublicClient({ chain: robinhoodTestnet, transport: http(rpc, { timeout: 8000, retryCount: 0 }) });
+  return client.verifyMessage({ address: address as `0x${string}`, message, signature: signature as `0x${string}` });
+}
+
 export class HouseError extends Error {
   constructor(
     msg: string,
@@ -77,26 +96,46 @@ export class HouseError extends Error {
   }
 }
 
-/** Checks a signed house request; returns a claim for the day or throws a HouseError. */
-export async function checkHouse(
-  input: { name?: unknown; address?: unknown; signature?: unknown },
-  opts: { now?: number; balanceOf?: (a: string) => Promise<bigint> } = {},
-): Promise<{ claim: string; expires: number; day: string; name: string }> {
-  const now = opts.now ?? Date.now();
-  const name = cleanName(typeof input.name === "string" ? input.name : "");
-  const problem = nameProblem(name);
-  if (problem) throw new HouseError(problem, 400);
-  const address = typeof input.address === "string" ? input.address : "";
+export interface SignOpts {
+  now?: number;
+  balanceOf?: (a: string) => Promise<bigint>;
+  smartSigned?: (address: string, message: string, signature: string) => Promise<boolean>;
+}
+
+/**
+ * True when `address` signed `message`: a plain key is recovered locally (no network); otherwise the account
+ * is asked on the chain (ERC-1271 / ERC-6492), one read call. Throws a HouseError on bad input or a silent chain.
+ */
+export async function verifySigned(address: string, message: string, signature: string, opts: SignOpts = {}): Promise<boolean> {
   if (!ADDRESS_RE.test(address)) throw new HouseError("bad address", 400);
-  const signature = typeof input.signature === "string" ? input.signature : "";
-  if (!/^0x[0-9a-fA-F]{130,}$/.test(signature) || signature.length > 2000) throw new HouseError("bad signature", 400);
-  const message = houseMessage(name, address, utcDay(new Date(now)));
+  // 65 bytes from a plain key; smart accounts can send more (ERC-6492 wraps the deploy data around it)
+  if (!/^0x(?:[0-9a-fA-F]{2}){65,}$/.test(signature) || signature.length > 8000) throw new HouseError("bad signature", 400);
   let good = false;
   try {
     good = await verifyMessage({ address: address as `0x${string}`, message, signature: signature as `0x${string}` });
   } catch {
     good = false;
   }
+  if (good) return true;
+  try {
+    return await (opts.smartSigned || smartAccountSigned)(address, message, signature);
+  } catch {
+    throw new HouseError("Robinhood Chain testnet is not answering. Try again in a minute.", 503);
+  }
+}
+
+/** Checks a signed house request; returns a claim for the day or throws a HouseError. */
+export async function checkHouse(
+  input: { name?: unknown; address?: unknown; signature?: unknown },
+  opts: SignOpts = {},
+): Promise<{ claim: string; expires: number; day: string; name: string }> {
+  const now = opts.now ?? Date.now();
+  const name = cleanName(typeof input.name === "string" ? input.name : "");
+  const problem = nameProblem(name);
+  if (problem) throw new HouseError(problem, 400);
+  const address = typeof input.address === "string" ? input.address : "";
+  const signature = typeof input.signature === "string" ? input.signature : "";
+  const good = await verifySigned(address, houseMessage(name, address, utcDay(new Date(now))), signature, opts);
   if (!good) throw new HouseError("The signature does not match that address (or it was signed for another day)", 401);
   let bal: bigint;
   try {

@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://kickerhq.vercel.app"><b>Play now → kickerhq.vercel.app</b></a>
   &nbsp;·&nbsp; <a href="https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323">$KICKER on vibe/vibe</a>
+  &nbsp;·&nbsp; <a href="https://x.com/kyriektnrv">@kyriektnrv on X</a>
   &nbsp;·&nbsp; Robinhood Chain testnet &nbsp;·&nbsp; PixiJS + WebGL
 </p>
 
@@ -32,9 +33,17 @@ You build poker-style hands out of those launches, beat the blind, spend your wi
 | **Badges** | `GRAD` graduated · `HOT` 40+ trades in 24h · `PUMP` / `DIP` price moved ±15% |
 | **Picture** | the token's own image |
 
-A new deck is cut every hour. Farm bots and dead tokens are filtered out before the cut, so the deck stays playable.
+A new deck is cut every few hours. Farm bots and dead tokens are filtered out before the cut, so the deck stays playable.
 
 Long-press a card in your hand, or open it from the deck view, to see the launch behind it: picture, pair, curve progress, price change, trades, holders and badges, with a link to its page on vibe/vibe.
+
+## The cards are live
+
+Every number on a card comes from its launch at the moment the deck was cut, and the Insiders read exactly those numbers. Hover a card (or hold it on a phone) for its data tag: holders, 24h trades, age at the deal, price direction, curve progress, graduated, gift list, badge, and what your Insiders would pay for it. Dots down a card's edge mark the Insiders that would score it, and hovering an Insider lights its cards. The check is the engine's own, so what lights up is what scores. The shop adds one true line about your deck, for the Insiders on offer.
+
+<p align="center">
+  <img src="docs/live.png" alt="A card's data tag" width="70%">
+</p>
 
 ## Hands
 
@@ -67,7 +76,7 @@ Verified runs with a name go into the **Hall of hands**, the day's top 50 best h
 
 ## Daily Deal
 
-One deal a day, the same for everybody. The seed comes from the date alone, and the deck is pinned once: the first deck cut after 00:00 UTC. The hourly decks keep rolling, the day's deal doesn't move.
+One deal a day, the same for everybody. The seed comes from the date alone, and the deck is pinned once: the first deck cut after 00:00 UTC. Newer decks keep rolling, the day's deal doesn't move.
 
 Finish it, make a challenge link with a name, and it lands on the **Daily board** in the Hall of hands: the top 50 of the UTC day, one line per name, your best run counts. The check is the same as for any challenge, every move replayed on the server. The share card reads like a ticker: `Daily Deal · Oct 14 · 41,250`. Finish it on consecutive days and your device keeps a streak.
 
@@ -76,32 +85,59 @@ Finish it, make a challenge link with a name, and it lands on the **Daily board*
   <img src="docs/house.png" alt="House colours" width="49%">
 </p>
 
+## Sign in
+
+Optional. Sign in with email, Google, X, Discord or a wallet, through [Para](https://getpara.com). Browser wallets (MetaMask, Coinbase Wallet and others) are offered inside Para's modal; KICKER's own code never calls a wallet, so there is no `window.ethereum` and no EIP-6963 on the page. If you have no wallet, Para makes one for you. It starts with no `$KICKER`.
+
+<p align="center">
+  <img src="docs/signin.png" alt="Sign in through Para" width="49%">
+  <img src="docs/table.png" alt="The felt: corner indexes, the woven mark and the live hand read" width="49%">
+</p>
+
+Para is a lazily loaded React island: it is fetched only when you open sign-in, or hover, focus or touch the button. The rest of the page is Preact and doesn't carry it.
+
+Once a day you sign one plain text message (no gas, no transaction, nothing moves). It does three things:
+
+- **Your name is yours.** It ties your Hall of hands name to your address, case-insensitive. After that nobody else can post a run under it, and your lines get a small ✓. A name someone else posted in the last 7 days can't be grabbed; the device that posted it can still claim it.
+- **Your table.** Your Daily streak, your best hand of each day and your last 30 posted runs follow you to any device. Signed out, Your table shows this device's record.
+- **House colours** for `$KICKER` holders (below).
+
+The server checks the signature with viem: a plain key is recovered locally, a smart account (ERC-1271) is asked with one read call. Then it hands back short-lived claims for the UTC day.
+
+**Privacy.** Sign-in runs through Para, which keeps your login and the wallet it makes for you. KICKER keeps no emails and no passwords. Signed out, your runs and settings stay in your browser and only the name you post with a hand goes to the Hall of hands. Signed in, KICKER also keeps your claimed name, your address and the runs you post, so they follow you. KICKER never asks for a seed phrase, a private key or funds.
+
 ## House colours
 
 Hold any `$KICKER` on Robinhood Chain testnet and you can dress the table: three card backs and felts (**Closing Bell**, **Ticker Tape**, **Pink Sheets**) and a small house mark next to your name in the Hall of hands and on share cards.
 
-To switch it on, your browser wallet signs a plain text message. No gas, no transaction, no approval: nothing moves. The server checks the signature, reads your `balanceOf` on the token, and hands back a claim tied to your name for the UTC day. Wallets are found through EIP-6963, with no SDKs in between. KICKER never asks for a seed phrase or a private key.
+It comes with the day's sign-in: the server reads your `balanceOf` on the token and, if it isn't zero, adds a house claim tied to your name for the UTC day.
 
-Without a wallet nothing is missing. Every hand plays the same.
+Without signing in nothing is missing. Every hand plays the same.
 
 ## The token
 
-[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, and it is **cosmetic only**. The token can't touch whether you win: the cards come from the deck, the deck comes from the index, and the score comes from the cards. Holding it changes how the table looks, never the cards, the score or the odds. The engine doesn't know the token exists.
+[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, on Robinhood Chain testnet: a test token with no real value. It is **cosmetic only**. The token can't touch whether you win: the cards come from the deck, the deck comes from the index, and the score comes from the cards. Holding it changes how the table looks, never the cards, the score or the odds. The engine doesn't know the token exists.
 
 ## Under the hood
 
 - **Client:** PixiJS v8 (WebGL), TypeScript, Vite, Preact overlays, custom shaders for the swirling background and the CRT pass, WebAudio-synthesised sound, touch and portrait layout, `prefers-reduced-motion` respected.
-- **Server:** Vercel Functions for the hourly deck cut, the daily pin and board, token pictures, run verification, house-colour checks (viem `verifyMessage` plus one `balanceOf` read) and challenge cards (satori + resvg). Responses sit behind the CDN, and nothing polls.
+- **Sign-in:** Para (`@getpara/react-sdk`) in a lazily loaded React island, with its own wagmi connectors for browser wallets. The chain is Robinhood Chain testnet (46630), defined with viem `defineChain`.
+- **Server:** Vercel Functions for the deck cut every few hours, the daily pin and board, token pictures, run verification, sign-in (viem signature checks, ERC-1271 for smart accounts, name claims, Your table) and house colours (one `balanceOf` read), and challenge cards (satori + resvg). Responses sit behind the CDN, and nothing polls.
 - **Data:** the public vibe/vibe v6 index on Robinhood Chain testnet (chain id 46630).
 
 ```bash
 npm install
 npm run dev     # local dev server
 npm run build   # type-check client and api, then build
-npm test        # daily seed, deck pin, Daily board, house checks (in memory, no network)
+npm test        # daily seed, deck pin, Daily board, house and sign-in checks, name claims (in memory, no network)
+npm test -- --anvil   # also checks a real ERC-1271 account on a local anvil (port 8520)
 ```
 
+Sign-in needs a Para API key at build time: `VITE_PARA_API_KEY`, and `VITE_PARA_ENV=PRODUCTION` for a production key (BETA by default). Without a key the sign-in button says it is unavailable, and everything else plays the same.
+
 ## Notes
+
+News and updates: [@kyriektnrv on X](https://x.com/kyriektnrv).
 
 Testnet only. Cards, chips and scores are a game: they are not money and don't stand for anything you own. KICKER is an independent project built on public vibe/vibe data, and it is not made by the vibe/vibe team.
 

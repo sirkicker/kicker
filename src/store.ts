@@ -1,8 +1,9 @@
 // A tiny shared store between the Pixi table and the Preact overlays.
 import type { Edition, PoolCard } from "../shared/data.js";
 import type { Run } from "../shared/engine.js";
+import type { Profile } from "../shared/profile.js";
 
-export type Overlay = null | "title" | "how" | "deck" | "levels" | "over" | "seed" | "options" | "hall" | "house" | "news";
+export type Overlay = null | "title" | "how" | "deck" | "levels" | "over" | "seed" | "options" | "hall" | "house" | "news" | "table" | "more";
 
 /** Today's Daily Deal as /api/daily serves it. */
 export interface Daily {
@@ -48,6 +49,13 @@ export interface UiState {
   detail: Detail | null;
   toast: string | null;
   daily: Daily | null;
+  /** The address signed in through Para (or the last one this browser saw, until Para says otherwise). */
+  signedIn: string | null;
+  signinBusy: boolean;
+  /** "Your table" from the server, while signed in. */
+  profile: Profile | null;
+  /** Cards selected in hand: the live preview on the felt. */
+  preview: { name: string; chips: string; mult: string } | null;
   version: number;
 }
 
@@ -62,6 +70,10 @@ export const ui: UiState = {
   detail: null,
   toast: null,
   daily: null,
+  signedIn: null,
+  signinBusy: false,
+  profile: null,
+  preview: null,
   version: 0,
 };
 

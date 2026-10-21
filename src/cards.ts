@@ -92,6 +92,8 @@ export class CardView extends Container {
   back = new Container();
   art = new Sprite(Texture.EMPTY);
   debuffMark = new Graphics();
+  /** Pips (and, while an Insider is hovered, a frame) in the hue of each held Insider that would score this card. */
+  syn = new Graphics();
   selected = false;
   baseY = 0;
   hover = 0;
@@ -102,7 +104,7 @@ export class CardView extends Container {
     super();
     this.shadow.roundRect(-CW / 2 + 5, -CH / 2 + 7, CW, CH, 10).fill({ color: 0x000000, alpha: 0.38 });
     this.addChild(this.shadow, this.body);
-    this.body.addChild(this.glow, this.face, this.back, this.debuffMark);
+    this.body.addChild(this.glow, this.face, this.syn, this.back, this.debuffMark);
     this.drawBack();
     this.back.visible = false;
     this.redraw();
@@ -139,31 +141,33 @@ export class CardView extends Container {
       this.art.height = 64;
       if (t === Texture.WHITE) this.art.tint = col;
     });
+    // corner index, like a real card: rank with the suit glyph stacked under it, top left, where a fanned hand
+    // still shows it. The pair's full name sits inside the face, under the picture.
     const rk = txt(RANK_LABEL(c.rank), { fontFamily: NUM, fontSize: 34, fill: col });
     rk.anchor.set(0.5, 0);
-    rk.position.set(-CW / 2 + 17, -CH / 2 + 3);
+    rk.position.set(-CW / 2 + 16, -CH / 2 + 3);
     f.addChild(rk);
     const sg = new Graphics();
-    suitGlyph(sg, c.suit, -CW / 2 + 17, -CH / 2 + 45, 13, col);
-    suitGlyph(sg, c.suit, CW / 2 - 17, CH / 2 - 45, 13, col);
+    suitGlyph(sg, c.suit, -CW / 2 + 16, -CH / 2 + 46, 14, col);
+    suitGlyph(sg, c.suit, CW / 2 - 16, CH / 2 - 46, 14, col);
     f.addChild(sg);
     const rk2 = txt(RANK_LABEL(c.rank), { fontFamily: NUM, fontSize: 34, fill: col });
     rk2.anchor.set(0.5, 0);
     rk2.rotation = Math.PI;
-    rk2.position.set(CW / 2 - 17, CH / 2 - 3);
+    rk2.position.set(CW / 2 - 16, CH / 2 - 3);
     f.addChild(rk2);
-    // quote badge
+    // the pair, in full, as a tab on the bottom edge of the picture
     const q = c.bridged ? "BRIDGE" : (SHORT_Q[c.q] ?? c.q.slice(0, 5));
-    const qt = txt(q, { fontSize: 12, fill: COL.cream, fontWeight: "700" });
+    const qt = txt(q, { fontSize: 11, fill: COL.cream, fontWeight: "700" });
     qt.anchor.set(0.5);
-    const qw = Math.max(30, qt.width + 8);
-    const qb = new Graphics().roundRect(CW / 2 - 8 - qw, -CH / 2 + 9, qw, 17, 4).fill(col);
-    qt.position.set(CW / 2 - 8 - qw / 2, -CH / 2 + 17.5);
+    const qw = Math.max(34, qt.width + 10);
+    const qb = new Graphics().roundRect(-qw / 2, 21, qw, 16, 4).fill(col).stroke({ width: 2, color: COL.ink });
+    qt.position.set(0, 29);
     f.addChild(qb, qt);
     // ticker
     const sym = txt("$" + c.l.s.slice(0, 9), { fontSize: c.l.s.length > 7 ? 11 : 13, fill: COL.ink, fontWeight: "700" });
     sym.anchor.set(0.5);
-    sym.position.set(0, 42);
+    sym.position.set(0, 47);
     f.addChild(sym);
     // enhancement sticker
     if (c.enh) {
@@ -171,8 +175,8 @@ export class CardView extends Container {
       const et = txt(label, { fontSize: 10, fill: COL.ink, fontWeight: "700" });
       et.anchor.set(0.5);
       const ew = et.width + 10;
-      const eb = new Graphics().roundRect(-ew / 2, 52, ew, 14, 3).fill(ENH_COL[c.enh]);
-      et.position.set(0, 59);
+      const eb = new Graphics().roundRect(-ew / 2, 57, ew, 14, 3).fill(ENH_COL[c.enh]);
+      et.position.set(0, 64);
       f.addChild(eb, et);
     }
     this.drawGlow();
@@ -212,6 +216,23 @@ export class CardView extends Container {
     this.flipped = on;
     this.back.visible = on;
     this.face.visible = !on;
+    this.syn.visible = !on;
+  }
+
+  /** Static drawing, redrawn only when the hand, the Insiders or the hovered Insider change. */
+  setSynergy(list: { color: number; strength: number }[], focus: number | null) {
+    const g = this.syn;
+    g.clear();
+    if (focus !== null) {
+      g.roundRect(-CW / 2 - 7, -CH / 2 - 7, CW + 14, CH + 14, 15).stroke({ width: 8, color: focus, alpha: 0.28 });
+      g.roundRect(-CW / 2 - 2, -CH / 2 - 2, CW + 4, CH + 4, 11).stroke({ width: 4, color: focus, alpha: 0.95 });
+    }
+    // down the left edge, under the corner index: the strip a fanned hand never covers
+    list.slice(0, 5).forEach((h, i) => {
+      const y = -CH / 2 + 66 + i * 14;
+      g.circle(-CW / 2 + 12, y, 6).fill({ color: COL.ink, alpha: 0.9 });
+      g.circle(-CW / 2 + 12, y, 4.5).fill({ color: h.color, alpha: 0.5 + 0.5 * h.strength });
+    });
   }
 
   setSelected(on: boolean) {

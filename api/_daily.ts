@@ -1,5 +1,5 @@
 // The Daily Deal on the server: the day's deck is pinned once (the first deck cut after 00:00 UTC)
-// and never moves, even as the hourly decks roll on. Its board keeps one line per name: their best.
+// and never moves, even as newer decks roll on. Its board keeps one line per name: their best.
 import { editionNow } from "../shared/data.js";
 import { dailySeed, dayStartHour, prevDay, utcDay, type DailyPin } from "../shared/daily.js";
 import { currentEdition, getEdition } from "./_deck.js";
@@ -68,8 +68,8 @@ export interface DailyBoard {
   entries: HallEntry[];
 }
 
-export async function getBoard(day: string): Promise<DailyBoard> {
-  const b = await loadFresh<DailyBoard>(boardPath(day));
+export async function getBoard(day: string, maxAgeMs?: number): Promise<DailyBoard> {
+  const b = await loadFresh<DailyBoard>(boardPath(day), maxAgeMs);
   return b || { day, seed: dailySeed(day), edition: null, players: 0, names: [], entries: [] };
 }
 
@@ -82,7 +82,7 @@ export async function publicBoard(day: string) {
 
 /** One counted line per name per day: a better hand replaces it, a worse one is ignored. */
 export async function addToBoard(day: string, edition: number, entry: HallEntry): Promise<boolean> {
-  const b = await getBoard(day);
+  const b = structuredClone(await getBoard(day, 0));
   b.edition = edition;
   const who = entry.name.toLowerCase();
   let changed = false;

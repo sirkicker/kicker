@@ -9,6 +9,7 @@ import { cleanName, nameProblem } from "../shared/names.js";
 import { utcDay } from "../shared/daily.js";
 import { addToBoard, dailyDayOf } from "./_daily.js";
 import { claimOk } from "./_house.js";
+import { addToProfile, nameOwner, sessionOf } from "./_me.js";
 
 export { utcDay };
 
@@ -36,7 +37,10 @@ export interface Showdown {
   at: string;
   daily?: string; // the UTC day whose Daily Deal this was
   house?: boolean; // a $KICKER holder's house mark (cosmetic only)
+  verified?: boolean; // posted by the address that owns the name
 }
+
+export class PostError extends Error {}
 
 const B32 = "0123456789abcdefghjkmnpqrstvwxyz";
 function shortId(s: string): string {
@@ -53,7 +57,10 @@ function shortId(s: string): string {
 
 export const ID_RE = /^[0-9a-z]{10}$/;
 
-export async function verifyAndStore(input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown; house?: unknown }, now = Date.now()): Promise<Showdown> {
+export async function verifyAndStore(
+  input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown; house?: unknown; session?: unknown },
+  now = Date.now(),
+): Promise<Showdown> {
   const seed = normSeed(String(input.seed || ""));
   const edition = Number(input.edition);
   const trail = String(input.trail || "");
@@ -67,10 +74,17 @@ export async function verifyAndStore(input: { seed?: unknown; edition?: unknown;
   const rawName = typeof input.name === "string" ? cleanName(input.name) : "";
   if (rawName && nameProblem(rawName)) throw new Error(nameProblem(rawName)!);
   const name = rawName || null;
+  // a session that comes along must be good: a forged or expired one is refused, never quietly dropped
+  const sess = input.session ? sessionOf(input.session, now) : null;
+  if (input.session && !sess) throw new PostError("Your sign-in has expired. Sign in again, or post without it.");
+  // a claimed name posts only with its owner's session; unclaimed names post exactly as before
+  const owner = name ? await nameOwner(name) : null;
+  if (owner && (!sess || sess.a !== owner.a)) throw new PostError(`${owner.name} is a claimed name. Sign in as its owner, or pick another.`);
+  const verified = !!owner && !!sess;
   // the house mark rides along only with a valid claim for this very name; it never touches the replay above
   const house = !!name && claimOk(input.house, name, now);
   const daily = await dailyDayOf(seed, edition, now);
-  const id = shortId(`${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}`);
+  const id = shortId(`${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}${verified ? "|verified" : ""}`);
   const rec: Showdown = {
     id,
     seed,
@@ -94,6 +108,7 @@ export async function verifyAndStore(input: { seed?: unknown; edition?: unknown;
     at: new Date(now).toISOString(),
     ...(daily ? { daily } : {}),
     ...(house ? { house } : {}),
+    ...(verified ? { verified } : {}),
   };
   try {
     await save(`showdowns/${id}.json`, rec);
@@ -103,6 +118,20 @@ export async function verifyAndStore(input: { seed?: unknown; edition?: unknown;
   if (rec.name && rec.over && rec.best && rec.best.total > 0) {
     await addToHall(rec);
     if (rec.daily) await addToBoard(rec.daily, rec.edition, hallEntry(rec));
+  }
+  // the signed-in player's record follows them: one put, only for a verified, finished run
+  if (verified && sess && rec.over && rec.best) {
+    await addToProfile(sess.a, rec.name!, {
+      id: rec.id,
+      seed: rec.seed,
+      edition: rec.edition,
+      total: rec.best.total,
+      handName: rec.best.handName,
+      ante: rec.ante,
+      won: rec.won,
+      at: rec.at,
+      ...(rec.daily ? { daily: rec.daily } : {}),
+    });
   }
   return rec;
 }
@@ -121,6 +150,7 @@ export interface HallEntry {
   cards: ShowCard[];
   at: string;
   house?: boolean;
+  verified?: boolean;
 }
 export interface Hall {
   day: string;
@@ -143,12 +173,13 @@ export function hallEntry(rec: Showdown): HallEntry {
     cards: rec.best!.cards.slice(0, 5).sort((a, b) => a.rank - b.rank),
     at: rec.at,
     ...(rec.house ? { house: true } : {}),
+    ...(rec.verified ? { verified: true } : {}),
   };
 }
 
 async function addToHall(rec: Showdown): Promise<void> {
   const day = utcDay(new Date(rec.at));
-  const hall = (await loadFresh<Hall>(hallPath(day))) || { day, entries: [] };
+  const hall = (await loadFresh<Hall>(hallPath(day), 0)) || { day, entries: [] };
   if (hall.entries.some((e) => e.id === rec.id)) return;
   const entry = hallEntry(rec);
   // one line per player per seed: keep their best

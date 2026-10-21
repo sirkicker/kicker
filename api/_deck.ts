@@ -111,7 +111,7 @@ export async function currentEdition(): Promise<Edition> {
   const have = await getEdition(id);
   if (have) return have;
   const ed = await cutEdition(id);
-  const prev = await storedEdition(id - 1, 48);
+  const prev = await storedEdition(id - 1, 24);
   if (ed.pool.reduce((n, s) => n + s.length, 0) < 20) {
     // the index is down: fall back to the newest stored edition
     if (prev) return prev;

@@ -1,22 +1,27 @@
 // HTML overlays: title, how to play, deck, hand levels, run over + challenge sharing, menus, coach,
-// the Daily Deal board, house colours and the what's-new note.
+// the Daily Deal board, sign-in (through Para), house colours and the what's-new note.
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { BOSSES, FINAL_BOSS, HANDS, INSIDERS, MOVES, BLIND_NAME, ANTE_BASE } from "../shared/content.js";
-import { ENH, GAME_TOKEN, RANK_LABEL, SOURCE_URL, SUITS, facePath, tokenUrl, type Card, type PoolCard } from "../shared/data.js";
+import { ENH, GAME_TOKEN, RANK_LABEL, SOURCE_URL, SUITS, enhOf, facePath, tokenUrl, type Card, type PoolCard, type Suit } from "../shared/data.js";
+import { ageLabel, cardFacts } from "../shared/insight.js";
 import { audioState, setMusic, setSfx, unlock } from "./audio.js";
 import { local, setUi, subscribe, toast, ui } from "./store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
 import { dayLabel, liveStreak, utcDay, type Streak } from "../shared/daily.js";
-import { CHAIN_NAME, LOOKS, claimHouse, findWallets, house, look, short, type Look, type Wallet } from "./house.js";
+import { CHAIN_NAME, LOOKS, house, look, type Look } from "./house.js";
+import { endSession, me, refreshProfile, startSession } from "./me.js";
+import { PARA, openSignIn, short, signOut, warm } from "./signin.js";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
+export const X_URL = "https://x.com/kyriektnrv";
 
 export interface Shared {
   id: string;
   url: string;
   daily: string | null;
   house: boolean;
+  verified: boolean;
 }
 
 export interface UiActions {
@@ -113,6 +118,72 @@ function HouseMark() {
   );
 }
 
+/** Next to a name its owner signed in for. Not the house mark: anyone can have this one. */
+function VerifiedMark() {
+  return (
+    <span class="vmark" title="Verified: posted by the address that claimed this name" aria-label="verified name">
+      ✓
+    </span>
+  );
+}
+
+/** What sign-in through Para keeps, and what KICKER keeps. Shown in the House modal and in How to play. */
+function Privacy() {
+  return (
+    <p class="privacy">
+      <b>Privacy.</b> Sign-in runs through Para, which keeps your login and the wallet it makes for you. KICKER keeps no emails and no passwords. Signed
+      out, your runs and settings stay in this browser, and only the name you post with a hand goes to the Hall of hands. Signed in, KICKER also keeps your
+      claimed name, your wallet address and the runs you post (streak, best hands, last 30 runs), so they follow you. KICKER runs on Robinhood Chain
+      testnet: test tokens, no real value. KICKER never asks for a seed phrase, a private key or funds.
+    </p>
+  );
+}
+
+/** "Sign in", then the short address with a sign-out. Para loads on hover, focus or touch, never before. */
+function SignInChip(props: { big?: boolean }) {
+  const u = useUi();
+  const cls = props.big ? "btn" : "chip";
+  if (!PARA.available)
+    return (
+      <button class={cls + " signin off"} onClick={() => toast(PARA.note)} title={PARA.note}>
+        Sign-in unavailable
+      </button>
+    );
+  const pre = () => void warm()?.catch(() => null);
+  if (u.signedIn)
+    return (
+      <span class={"signin-on" + (props.big ? " big" : "")}>
+        <span class="addr" title={u.signedIn}>
+          {short(u.signedIn)}
+        </span>
+        <button
+          class={cls + " signout"}
+          onPointerEnter={pre}
+          onFocus={pre}
+          onTouchStart={pre}
+          onClick={() => {
+            endSession();
+            A.lookChanged();
+            void signOut().catch((e) => toast(String((e as Error)?.message || e)));
+          }}
+        >
+          Sign out
+        </button>
+      </span>
+    );
+  return (
+    <button
+      class={cls + " signin" + (u.signinBusy ? " busy" : "")}
+      onPointerEnter={pre}
+      onFocus={pre}
+      onTouchStart={pre}
+      onClick={() => void openSignIn().catch((e) => toast(String((e as Error)?.message || e)))}
+    >
+      {u.signinBusy ? "Opening sign-in..." : "Sign in"}
+    </button>
+  );
+}
+
 const streakNow = () => liveStreak(local.get<Streak | null>("kk.streak", null), utcDay());
 const plural = (n: number, one: string, many = one + "s") => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
@@ -123,7 +194,7 @@ function ago(iso: string) {
 
 // ------------------------------------------------------------ title
 /** vibe/vibe vibers, redrawn in the game palette, strolling above and below the logo. */
-function Parade() {
+function Parade(props: { rows: number }) {
   const [names, setNames] = useState<string[]>([]);
   useEffect(() => {
     fetch("/vibers/index.json")
@@ -131,121 +202,505 @@ function Parade() {
       .then((all: string[]) => setNames(all.slice().sort(() => Math.random() - 0.5).slice(0, 16)))
       .catch(() => setNames([]));
   }, []);
-  if (!names.length) return null;
   const row = (list: string[], cls: string) => (
     <div class={"parade " + cls} aria-hidden="true">
-      <div class="track">
-        {[...list, ...list, ...list, ...list].map((n, i) => (
-          <img src={`/vibers/${n}.png`} alt="" width={96} height={96} style={{ animationDelay: `${(i % list.length) * 0.17}s` }} />
-        ))}
-      </div>
+      {list.length > 0 && (
+        <div class="track">
+          {[...list, ...list, ...list, ...list].map((n, i) => (
+            <img src={`/vibers/${n}.png`} alt="" width={96} height={96} style={{ animationDelay: `${(i % list.length) * 0.17}s` }} />
+          ))}
+        </div>
+      )}
     </div>
   );
+  return props.rows === 0 ? row(names.slice(0, 8), "up") : row(names.slice(8), "down");
+}
+
+const ICON_NOTE = "M9 3v10.6A3.5 3.5 0 1 0 11 17V7h6V3z";
+const ICON_SPEAKER = "M4 9v6h4l5 4V5L8 9zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z";
+
+/** Music and Sound as two small icon toggles, top left of the title. */
+function SoundIcons() {
+  const [st, set] = useState(audioState());
+  const one = (on: boolean, label: string, d: string, flip: () => void) => (
+    <button class={"icon-toggle" + (on ? " on" : "")} aria-pressed={on} aria-label={label} title={`${label} ${on ? "on" : "off"}`} onClick={flip}>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path fill="currentColor" d={d} />
+        {!on && <path d="M4 4l16 16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />}
+      </svg>
+    </button>
+  );
   return (
-    <>
-      {row(names.slice(0, 8), "up")}
-      {row(names.slice(8), "down")}
-    </>
+    <div class="corner corner-l">
+      {one(st.music, "Music", ICON_NOTE, () => {
+        unlock();
+        setMusic(!st.music);
+        set(audioState());
+      })}
+      {one(st.sfx, "Sound", ICON_SPEAKER, () => {
+        unlock();
+        setSfx(!st.sfx);
+        set(audioState());
+      })}
+    </div>
   );
 }
+
+/** Top right of the title: a plain Sign in, or who you are (opens Your table, where sign-out lives). */
+function AccountPill() {
+  const u = useUi();
+  if (!PARA.available)
+    return (
+      <div class="corner corner-r">
+        <button class="acct off" onClick={() => toast(PARA.note)} title={PARA.note}>
+          Sign-in unavailable
+        </button>
+      </div>
+    );
+  const pre = () => void warm()?.catch(() => null);
+  if (u.signedIn) {
+    const s = me.get();
+    return (
+      <div class="corner corner-r">
+        <button class="acct in" onClick={() => setUi({ overlay: "table" })} onPointerEnter={pre} onFocus={pre} aria-label={`Your table, signed in as ${short(u.signedIn)}`}>
+          {house.get() ? <HouseMark /> : null}
+          <span class="addr">{s?.name || short(u.signedIn)}</span>
+          {s && <VerifiedMark />}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div class="corner corner-r">
+      <button
+        class={"acct" + (u.signinBusy ? " busy" : "")}
+        onPointerEnter={pre}
+        onFocus={pre}
+        onTouchStart={pre}
+        onClick={() => void openSignIn().catch((e) => toast(String((e as Error)?.message || e)))}
+      >
+        <span class="k" aria-hidden="true">
+          K
+        </span>
+        {u.signinBusy ? "Opening..." : "Sign in"}
+      </button>
+    </div>
+  );
+}
+
+/** Five real cards from the current deck, fanned: the Ace to the Ten of the liveliest launches, one per suit and then some. */
+function HeroFan(props: { ed: NonNullable<typeof ui.edition> }) {
+  const picks: { l: PoolCard; suit: number; rank: number }[] = [];
+  const sorted = props.ed.pool.map((p) => p.slice().sort((a, b) => b.p - a.p));
+  for (let i = 0; i < 5; i++) {
+    const suit = i % 4;
+    const l = sorted[suit][Math.floor(i / 4)] || sorted[suit][0];
+    if (l) picks.push({ l, suit, rank: 14 - i });
+  }
+  if (picks.length < 5) return null;
+  return (
+    <div class="fan" aria-hidden="true">
+      {picks.map((c, i) => (
+        <div class="fcard" style={{ "--i": i - 2, color: SUIT_HEX[c.suit] } as Record<string, string | number>}>
+          <div class="fface">
+            <span class="fidx">
+              <b>{RANK_LABEL(c.rank)}</b>
+              <i>{SUIT_SHAPE[c.suit]}</i>
+            </span>
+            <img src={facePath(c.l.c, c.l.s)} alt="" width={64} height={64} />
+            <span class="ftab" style={{ background: SUIT_HEX[c.suit] }}>
+              {c.l.q === "VIBEVIBE" ? "VIBE" : c.l.q.slice(0, 5)}
+            </span>
+            <span class="ftick">${c.l.s.slice(0, 8)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A number that counts up the first time it shows. Instant under reduced motion. */
+function CountUp(props: { n: number }) {
+  const [v, set] = useState(0);
+  useEffect(() => {
+    const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || props.n <= 0) {
+      set(props.n);
+      return;
+    }
+    const t0 = performance.now();
+    let raf = 0;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 700);
+      set(Math.round(props.n * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [props.n]);
+  return <>{fmt(v)}</>;
+}
+
+/** Re-renders every half minute, for the countdowns. */
+function useClock(ms = 30_000) {
+  const [now, set] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => set(Date.now()), ms);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+const span = (mins: number) => (mins <= 0 ? "any minute now" : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} min`);
+
+/** Desktop only, left of the title: today's Daily board, from the same CDN-cached reads the Hall uses. */
+function DailyPanel() {
+  const u = useUi();
+  const now = useClock();
+  const [board, setBoard] = useState<Board | null>(null);
+  const [prev, setPrev] = useState<Board | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    fetch("/api/hall?board=daily")
+      .then((r) => r.json())
+      .then((b: Board) => {
+        setBoard(b);
+        // an empty board: one more CDN-cached read, yesterday's winner
+        if (!b.entries.length) {
+          const y = new Date(Date.parse((b.day || utcDay()) + "T00:00:00Z") - 86_400_000).toISOString().slice(0, 10);
+          fetch(`/api/hall?board=daily&day=${y}`)
+            .then((r) => r.json())
+            .then(setPrev)
+            .catch(() => null);
+        }
+      })
+      .catch(() => setErr(true));
+  }, []);
+  const day = board?.day || u.daily?.day || utcDay();
+  const players = board?.players ?? u.daily?.players ?? 0;
+  const seed = board?.seed || u.daily?.seed;
+  const edition = board?.edition ?? u.daily?.edition;
+  const sess = me.get();
+  const myName = (sess?.name || local.get<string>("kk.name", "") || "").toLowerCase();
+  const myIdx = board && myName ? board.entries.findIndex((e) => e.name.toLowerCase() === myName) : -1;
+  const streak = sess && u.profile ? liveStreak(u.profile.streak, utcDay()) : streakNow();
+  const nextDaily = Math.max(0, Math.round((Date.parse(utcDay(new Date(now)) + "T00:00:00Z") + 86_400_000 - now) / 60000));
+  const leader = board?.entries[0];
+  return (
+    <aside class="side side-l" aria-label="Today's Daily board">
+      <h3>
+        <span>Today's Daily board</span>
+      </h3>
+      <div class="side-meta">
+        <span>
+          <i class="ic">◷</i>
+          {dayLabel(day)} (UTC)
+        </span>
+        <span>
+          <i class="ic">☺</i>
+          <b>
+            <CountUp n={players} />
+          </b>{" "}
+          {players === 1 ? "player" : "players"}
+        </span>
+      </div>
+      <p class="side-seed">
+        Seed <b>{seed || "..."}</b>
+        {edition ? ` on deck #${edition}` : ""}
+      </p>
+      <hr class="pix" />
+      {err ? (
+        <p class="side-note">The board is not answering right now.</p>
+      ) : !board ? (
+        <p class="side-note">Reading the board...</p>
+      ) : board.entries.length ? (
+        <>
+          <ol class="side-board">
+            {board.entries.slice(0, 10).map((e, i) => (
+              <li class={(i === myIdx ? "me " : "") + (i >= 5 ? "lo2" : "")}>
+                <span class="pos">{i + 1}</span>
+                <span class="nm">
+                  {e.house && <HouseMark />}
+                  <b class="who">{e.name}</b>
+                  {e.verified && <VerifiedMark />}
+                </span>
+                <b class="sc">
+                  <CountUp n={e.total} />
+                </b>
+              </li>
+            ))}
+          </ol>
+          {leader && (
+            <p class="side-hint lo">
+              Leader's hand: <b>{leader.handName}</b>
+            </p>
+          )}
+        </>
+      ) : (
+        <div class="side-empty">
+          <div class="empty-felt" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <p class="side-note">Nobody has posted today. The board is yours.</p>
+          {prev && prev.entries[0] && (
+            <p class="side-hint">
+              Yesterday: <b class="who">{prev.entries[0].name}</b> with <b class="m">{fmt(prev.entries[0].total)}</b> ({prev.entries[0].handName})
+            </p>
+          )}
+        </div>
+      )}
+      <hr class="pix" />
+      <div class="side-rows">
+        {myIdx >= 0 && board && (
+          <p class="row-fact">
+            <i class="ic">★</i>Your best today: <b>{fmt(board.entries[myIdx].total)}</b> (#{myIdx + 1})
+          </p>
+        )}
+        <p class="row-fact">
+          <i class="ic">♨</i>
+          {sess ? "Your streak" : "Streak on this device"}: <b>{plural(streak, "day")}</b>
+        </p>
+        <p class="row-fact">
+          <i class="ic">⏱</i>Next Daily in <b>{span(nextDaily)}</b>
+        </p>
+      </div>
+      <button class="btn gold side-btn" onClick={() => A.dailyRun()}>
+        Play the Daily Deal
+      </button>
+    </aside>
+  );
+}
+
+/** Desktop only, right of the title: live facts from the pool the page already loaded, each with who cares. */
+function DeckPanel(props: { ed: NonNullable<typeof ui.edition> }) {
+  const ed = props.ed;
+  const now = useClock();
+  const cutAt = Date.parse(ed.at) / 1000;
+  const all = ed.pool.flatMap((p, u) => p.map((l) => ({ l, u })));
+  const total = all.length;
+  const counts = ed.pool.map((p) => p.length);
+  const max = Math.max(1, ...counts);
+  const avg = ed.pool.map((p) => (p.length ? p.reduce((n, l) => n + l.p, 0) / p.length / 100 : 0));
+  const hot = all.slice().sort((a, b) => b.l.k - a.l.k || b.l.h - a.l.h).slice(0, 3);
+  const youngest = all.slice().sort((a, b) => b.l.a - a.l.a)[0];
+  const oldest = all.slice().sort((a, b) => a.l.a - b.l.a)[0];
+  const young = all.filter((c) => (cutAt - c.l.a) / 3600 < 6).length;
+  const old = all.filter((c) => (cutAt - c.l.a) / 3600 >= 24).length;
+  const down = all.filter((c) => c.l.x !== null && c.l.x < 0).length;
+  const grads = all.filter((c) => c.l.g).length;
+  const stocks = [...new Set(ed.pool[1].map((l) => l.q))];
+  // a deck lasts three hours from its cut (see /api/shuffle); the next one is cut on the first visit after that
+  const next = Math.round(((ed.id + 3) * 3_600_000 - now) / 60000);
+  return (
+    <aside class="side side-r" aria-label="In today's deck">
+      <h3>
+        <span>In today's deck</span>
+      </h3>
+      <div class="side-meta">
+        <span>
+          <i class="ic">#</i>Deck {ed.id} · cut {ago(ed.at)}
+        </span>
+      </div>
+      <hr class="pix" />
+      <ul class="side-bars">
+        {SUITS.map((s, i) => (
+          <li>
+            <span class="sl" style={{ color: SUIT_HEX[i] }}>
+              {SUIT_SHAPE[i]} {s.name}
+            </span>
+            <span class="bar">
+              <span style={{ width: `${(counts[i] / max) * 100}%`, background: SUIT_HEX[i] }} />
+            </span>
+            <b>
+              <CountUp n={counts[i]} />
+            </b>
+            <small>curve {avg[i].toFixed(0)}%</small>
+          </li>
+        ))}
+      </ul>
+      <p class="side-hint lo">Suit maxis pay +3 Mult per card of their suit. Moonboy reads the curve.</p>
+      <hr class="pix" />
+      <div class="side-hots">
+        {hot.map((c, i) => (
+          <div class="mini">
+            <img src={facePath(c.l.c, c.l.s)} alt="" width={44} height={44} />
+            <div>
+              <b style={{ color: SUIT_HEX[c.u] }}>${c.l.s}</b>
+              <span>{c.l.k.toLocaleString("en-US")} trades</span>
+              <span>{c.l.h.toLocaleString("en-US")} holders</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p class="side-hint">
+        Volume Guy food: the busiest three.<span class="lo"> 40+ trades makes a card Hot (it scores twice) unless it graduated.</span>
+      </p>
+      <hr class="pix" />
+      <div class="side-rows">
+        {youngest && (
+          <p class="row-fact">
+            <i class="ic">✦</i>Youngest: <b>${youngest.l.s}</b>, {ageLabel((cutAt - youngest.l.a) / 3600)} before the cut
+            <small>Early Bird food: {young} under 6 h</small>
+          </p>
+        )}
+        {oldest && (
+          <p class="row-fact lo">
+            <i class="ic">⌛</i>Oldest: <b>${oldest.l.s}</b>, {ageLabel((cutAt - oldest.l.a) / 3600)}
+            <small>Old Money food: {old} over a day</small>
+          </p>
+        )}
+        <p class="row-fact">
+          <i class="ic">↓</i>
+          <b>
+            <CountUp n={down} />
+          </b>{" "}
+          of {total} are down
+          <small>Dip Buyer food</small>
+        </p>
+        <p class="row-fact">
+          <i class="ic gold">★</i>
+          <b class="gold">
+            <CountUp n={grads} />
+          </b>{" "}
+          graduated
+          <small>x1.5 Mult each when scored</small>
+        </p>
+        <p class="row-fact lo2">
+          <i class="ic">▲</i>
+          <b>{counts[1]}</b> stock pairs: {stocks.join(", ") || "none"}
+          <small>Ticker Flush: five cards on one ticker</small>
+        </p>
+        <p class="row-fact">
+          <i class="ic">⏱</i>Next cut in <b>{span(next)}</b>
+        </p>
+      </div>
+    </aside>
+  );
+}
+
 function Title() {
   const u = useUi();
   const ed = u.edition;
   const ch = u.challenge;
   const saved = A.hasSaved();
+  const live = ed
+    ? `${ed.pool.reduce((n, p) => n + p.length, 0)} live launches in today's deck · new cut every few hours`
+    : u.editionError
+      ? "The launch index is not answering. Try again in a minute."
+      : "Shuffling the newest launches...";
   return (
     <div class="title-screen">
-      <Parade />
-      <div class="logo" aria-label="KICKER">
-        {"KICKER".split("").map((ch, i) => (
-          <span style={{ animationDelay: `${i * 0.12}s` }}>{ch}</span>
-        ))}
-      </div>
-      <p class="tag">A poker roguelike where every card is a live vibe/vibe launch.</p>
-      {ch && (
-        <div class="challenge">
-          <p>
-            <b class="who">{ch.name || "Someone"}</b> challenged you on this seed: {ch.won ? "cleared all 8 antes" : `reached ante ${ch.ante}`}, best hand{" "}
-            <b class="m">{fmt(ch.best)}</b>
-            {ch.handName ? ` (${ch.handName})` : ""}.
-          </p>
-          <button class="btn gold" onClick={() => A.acceptChallenge()}>
-            Take the challenge
-          </button>
+      <Parade rows={0} />
+      <SoundIcons />
+      <AccountPill />
+      <DailyPanel />
+      {ed && <DeckPanel ed={ed} />}
+      <div class="title-main">
+        <div class="logo" aria-label="KICKER">
+          {"KICKER".split("").map((c, i) => (
+            <span style={{ animationDelay: `${i * 0.12}s` }}>{c}</span>
+          ))}
         </div>
-      )}
-      <div class="menu">
-        {saved && (
-          <button class="btn teal big" onClick={() => A.continueRun()}>
-            Continue run
-          </button>
-        )}
-        <div class="row deal">
-          <button class={"btn big " + (saved ? "pink" : "teal")} disabled={!ed} onClick={() => A.newRun()}>
-            {ed ? "New run" : u.editionError ? "Deck unavailable" : "Cutting the deck..."}
-          </button>
-          <button class="btn big gold daily-btn" disabled={!u.daily && !ed} onClick={() => A.dailyRun()} aria-label="Daily Deal">
-            <span>Daily Deal</span>
-            <small>
-              {u.daily ? `${u.daily.label} · ${u.daily.players ? plural(u.daily.players, "player") + " today" : "same deal for all"}` : dayLabel(utcDay())}
-              {streakNow() > 1 ? ` · streak ${streakNow()}` : ""}
-            </small>
-          </button>
-        </div>
-        <div class="row">
-          <button class="btn" onClick={() => setUi({ overlay: "how" })}>
-            How to play
-          </button>
-          <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
-            Hall of hands
-          </button>
-        </div>
-        <div class="row">
-          <button class="btn" disabled={!ed} onClick={() => setUi({ overlay: "deck" })}>
-            This hour's cards
-          </button>
-        </div>
-        <div class="row minor">
-          <button class="chip" onClick={() => setUi({ overlay: "seed" })}>
-            Play a friend's seed
-          </button>
-          <SoundToggles />
-        </div>
-        <div class="row minor">
-          <button class={"chip" + (house.get() ? " on gold" : "")} onClick={() => setUi({ overlay: "house" })}>
-            House colours
-          </button>
-          <button class="chip" onClick={() => setUi({ overlay: "news" })}>
-            What's new in 1.1
-          </button>
-        </div>
-      </div>
-      <div class="fresh">
-        {ed ? (
-          <>
-            Fresh deck: <b>{ed.pool.reduce((n, p) => n + p.length, 0)}</b> live launches from vibe/vibe, reshuffled every hour.
-          </>
-        ) : u.editionError ? (
-          "The launch index is not answering. Try again in a minute."
+        <p class="tag">A poker roguelike where every card is a live vibe/vibe launch.</p>
+        <p class="live">{live}</p>
+        {ch ? (
+          <div class="challenge">
+            <p>
+              <b class="who">{ch.name || "Someone"}</b> challenged you on this seed: {ch.won ? "cleared all 8 antes" : `reached ante ${ch.ante}`}, best hand{" "}
+              <b class="m">{fmt(ch.best)}</b>
+              {ch.handName ? ` (${ch.handName})` : ""}.
+            </p>
+            <button class="btn gold" onClick={() => A.acceptChallenge()}>
+              Take the challenge
+            </button>
+          </div>
+        ) : ed ? (
+          <HeroFan ed={ed} />
         ) : (
-          "Shuffling the newest launches..."
+          <div class="fan empty" aria-hidden="true" />
         )}
+        <div class="title-buttons">
+          <div class="row deal">
+            {saved ? (
+              <button class="btn big teal" onClick={() => A.continueRun()}>
+                Continue run
+              </button>
+            ) : (
+              <button class="btn big teal" disabled={!ed} onClick={() => A.newRun()}>
+                {ed ? "New run" : u.editionError ? "Deck unavailable" : "Cutting the deck..."}
+              </button>
+            )}
+            <button class="btn big gold daily-btn" disabled={!u.daily && !ed} onClick={() => A.dailyRun()} aria-label="Daily Deal">
+              <span>Daily Deal</span>
+              <small>
+                {u.daily ? `${u.daily.label} · ${u.daily.players ? plural(u.daily.players, "player") + " today" : "same deal for all"}` : dayLabel(utcDay())}
+                {streakNow() > 1 ? ` · streak ${streakNow()}` : ""}
+              </small>
+            </button>
+          </div>
+          <div class="row three">
+            <button class="btn" onClick={() => setUi({ overlay: "how" })}>
+              How to play
+            </button>
+            <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
+              Hall of hands
+            </button>
+            <button class="btn" onClick={() => setUi({ overlay: "table" })}>
+              Your table
+            </button>
+          </div>
+          <div class="row links">
+            {saved && ed && (
+              <button class="textlink" onClick={() => A.newRun()}>
+                New run instead
+              </button>
+            )}
+            <button class="textlink" onClick={() => setUi({ overlay: "more" })}>
+              More
+            </button>
+          </div>
+        </div>
+        <footer class="title-foot">
+          <nav class="foot-links" aria-label="Links">
+            <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
+              ${GAME_TOKEN.symbol} ↗
+            </a>
+            <a href={SOURCE_URL} target="_blank" rel="noopener">
+              Source ↗
+            </a>
+            <a href={X_URL} target="_blank" rel="noopener">
+              @kyriektnrv on X ↗
+            </a>
+          </nav>
+        </footer>
       </div>
-      <div class="chips-row">
-        <a class="token-chip" href={GAME_TOKEN.url} target="_blank" rel="noopener" aria-label={`$${GAME_TOKEN.symbol} on vibe/vibe`}>
-          <span class="tc-dot" aria-hidden="true">K</span>${GAME_TOKEN.symbol} ↗
-        </a>
-        <a class="token-chip src" href={SOURCE_URL} target="_blank" rel="noopener" aria-label="Source code on GitHub">
-          <svg class="gh" viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-            />
-          </svg>
-          Source ↗
-        </a>
-      </div>
+      <Parade rows={1} />
     </div>
+  );
+}
+
+/** The things that left the title screen, in one small sheet. */
+function More() {
+  const u = useUi();
+  return (
+    <Modal title="More">
+      <div class="menu more">
+        <button class="btn" disabled={!u.edition} onClick={() => setUi({ overlay: "deck" })}>
+          Today's pool
+        </button>
+        <button class="btn" onClick={() => setUi({ overlay: "seed" })}>
+          Play a friend's seed
+        </button>
+        <button class={"btn" + (house.get() ? " gold" : "")} onClick={() => setUi({ overlay: "house" })}>
+          House colours
+        </button>
+        <button class="btn" onClick={() => setUi({ overlay: "news" })}>
+          What's new in 1.2
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -306,6 +761,14 @@ function How() {
         </table>
       </section>
       <section>
+        <h3>The cards are live</h3>
+        <p>
+          Every number on a card comes from its launch at the moment the deck was cut: holders, trades in the last 24 hours, age, price direction, curve
+          progress, whether it graduated and whether it runs a gift list. The Insiders read exactly those numbers. Hover a card (or hold it on a phone) for
+          its data tag, and the small dots in a card's corner show which of your Insiders would pay for it. Hover an Insider to light its cards.
+        </p>
+      </section>
+      <section>
         <h3>Hands</h3>
         <table class="hands">
           <thead>
@@ -345,7 +808,7 @@ function How() {
             </li>
           ))}
         </ul>
-        <p>Clearing a blind pays its reward ($3 / $4 / $5), $1 per unused hand and $1 interest per $5 you hold (max $5).</p>
+        <p>Clearing a blind cashes out its stake ($3 / $4 / $5), plus $1 per unused hand and $1 interest per $5 you hold (max $5). Game money, spent in the shop.</p>
       </section>
       <section>
         <h3>The shop</h3>
@@ -382,12 +845,24 @@ function How() {
           <a href={SOURCE_URL} target="_blank" rel="noopener">
             github.com/sirkicker/kicker ↗
           </a>
+          . News:{" "}
+          <a href={X_URL} target="_blank" rel="noopener">
+            @kyriektnrv on X ↗
+          </a>
         </p>
+      </section>
+      <section>
+        <h3>Sign in</h3>
+        <p>
+          Optional. Sign in with email, Google, X, Discord or a wallet, through Para. One signed message a day claims your name (a ✓ in the Hall, nobody
+          else posts under it), keeps Your table on any device, and checks ${GAME_TOKEN.symbol} for house colours. Everything else plays the same without it.
+        </p>
+        <Privacy />
       </section>
       <section>
         <h3>Where the cards come from</h3>
         <p>
-          Once an hour the game reads the newest ~1,300 launches from the vibe/vibe v6 index. Farm-bot launches (templated descriptions, generated names, numeric
+          Every few hours the game reads the newest ~1,300 launches from the vibe/vibe v6 index. Farm-bot launches (templated descriptions, generated names, numeric
           tickers, never-traded tokens, more than two launches from one creator) are left out. Per suit, the 10 liveliest launches plus the newest ones make the
           pool of 30; your seed draws 13 of them. Desktop keys: Enter plays, X discards, S sorts. Hold a card in hand (or tap it in Deck) for its full details.
         </p>
@@ -402,18 +877,124 @@ function How() {
   );
 }
 
+// ------------------------------------------------------------ the data tag (deck view and today's pool)
+interface Inspect {
+  title: string;
+  lines: [string, string][];
+  x: number;
+  y: number;
+  color: string;
+}
+let inspectNow: Inspect | null = null;
+function showInspect(v: Inspect | null) {
+  if (!v && !inspectNow) return;
+  inspectNow = v;
+  setUi({});
+}
+if (typeof window !== "undefined") {
+  // the tag leaves on scroll and on the next tap, wherever it lands
+  const hide = () => showInspect(null);
+  window.addEventListener("scroll", hide, true);
+  window.addEventListener("wheel", hide, { passive: true });
+  window.addEventListener("pointerdown", hide, true);
+}
+
+/** What the Insiders read off a launch, next to the card it came from. Leaves on pointer-out, scroll or the next tap. */
+function InspectTag() {
+  useUi();
+  const v = inspectNow;
+  if (!v) return null;
+  const w = Math.min(340, innerWidth - 16);
+  const left = Math.max(8, Math.min(innerWidth - w - 8, v.x - w / 2));
+  const above = v.y > innerHeight * 0.55;
+  return (
+    <div
+      class="inspect"
+      role="tooltip"
+      style={{ left: `${left}px`, width: `${w}px`, borderColor: v.color, ...(above ? { bottom: `${innerHeight - v.y + 10}px` } : { top: `${v.y + 10}px` }) }}
+    >
+      <b class="it" style={{ color: v.color }}>
+        {v.title}
+      </b>
+      <dl>
+        {v.lines.map(([k, val]) => (
+          <>
+            <dt>{k}</dt>
+            <dd>{val}</dd>
+          </>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** The tag's facts for a deck-view card; a pool card has no rank yet (the seed sets it). */
+function factsOf(l: PoolCard, rank: number | undefined, suit: number, enh: string | null | undefined, bridged?: boolean) {
+  const run = ui.run;
+  const card: Card = { id: -1, l, rank: rank || 2, suit: suit as Suit, q: l.q, enh: (enh === undefined ? enhOf(l) : enh) as Card["enh"], bridged };
+  const at = run ? run.s.editionAt : ui.edition ? Date.parse(ui.edition.at) / 1000 : l.a;
+  const f = cardFacts(card, (at - l.a) / 3600);
+  if (!rank) {
+    f.title = `$${l.s}`;
+    f.lines = f.lines.map(([k, v]) => (k === "Rank" ? ["Curve", `${(l.p / 100).toFixed(l.p < 1000 ? 1 : 0)}% (your seed turns that into a rank)`] : [k, v]));
+  }
+  return f;
+}
+
 // ------------------------------------------------------------ deck view
+let inspectTimer = 0;
+let pressed = false;
+// after a touch, the browser sends "mouse" enter/leave events of its own when the page changes under the finger
+let lastTouch = 0;
+const realMouse = (e: PointerEvent) => e.pointerType === "mouse" && Date.now() - lastTouch > 1500;
 function DeckCard(props: { l: PoolCard; rank?: number; suit?: number; enh?: string | null; dim?: boolean; bridged?: boolean }) {
   const { l } = props;
   const suit = props.suit ?? l.u;
   const ch = l.x === null ? "n/a" : `${l.x >= 0 ? "+" : ""}${(l.x / 100).toFixed(1)}%`;
+  const show = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const f = factsOf(l, props.rank, suit, props.enh, props.bridged);
+    showInspect({ ...f, x: r.left + r.width / 2, y: r.top < innerHeight * 0.55 ? r.bottom : r.top, color: SUIT_HEX[suit] });
+  };
   return (
     <div
       class={"dcard" + (props.dim ? " dim" : "")}
       role="button"
       tabIndex={0}
+      onPointerEnter={(e) => {
+        if (!realMouse(e)) return;
+        const el = e.currentTarget as HTMLElement;
+        clearTimeout(inspectTimer);
+        inspectTimer = window.setTimeout(() => show(el), 300);
+      }}
+      onPointerLeave={(e) => {
+        clearTimeout(inspectTimer);
+        // a finger lifting also "leaves"; on touch the tag stays until the next tap
+        if (realMouse(e)) showInspect(null);
+      }}
+      onPointerDown={(e) => {
+        showInspect(null);
+        pressed = false;
+        if (e.pointerType === "mouse") return;
+        lastTouch = Date.now();
+        const el = e.currentTarget as HTMLElement;
+        clearTimeout(inspectTimer);
+        inspectTimer = window.setTimeout(() => {
+          pressed = true;
+          show(el);
+        }, 400);
+      }}
+      onPointerUp={() => clearTimeout(inspectTimer)}
+      onPointerCancel={() => clearTimeout(inspectTimer)}
+      onContextMenu={(e) => e.preventDefault()}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) return;
+        if (pressed) {
+          // the long-press was for the tag; the card itself stays put
+          pressed = false;
+          return;
+        }
+        showInspect(null);
         setUi({ detail: { l, rank: props.rank, suit, enh: props.enh, q: l.q, bridged: props.bridged } });
       }}
     >
@@ -472,7 +1053,7 @@ function Deck() {
   if (!ed) return null;
   const pool = ed.pool[tab] || [];
   return (
-    <Modal title={`This hour's pool · deck #${ed.id}`} wide>
+    <Modal title={`Today's pool · deck #${ed.id}`} wide>
       <div class="tabs">
         {SUITS.map((x, i) => (
           <button class={"chip" + (tab === i ? " on" : "")} style={{ color: SUIT_HEX[i] }} onClick={() => setTab(i)}>
@@ -565,6 +1146,15 @@ function Options() {
         <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
           Hall of hands
         </button>
+        <button class="btn" onClick={() => setUi({ overlay: "seed" })}>
+          Play a friend's seed
+        </button>
+        <div class="row signin-row">
+          <SignInChip big />
+          <button class="btn" onClick={() => setUi({ overlay: "table" })}>
+            Your table
+          </button>
+        </div>
         <div class="row">
           <button class="btn" onClick={() => setUi({ overlay: "house" })}>
             House colours
@@ -636,6 +1226,7 @@ interface DayEntry {
   edition: number;
   cards: { s: string; c: string | null; rank: number; suit: number; t: string }[];
   house?: boolean;
+  verified?: boolean;
 }
 
 interface Board {
@@ -655,7 +1246,8 @@ function HallRows(props: { entries: DayEntry[] }) {
           <div class="hscore">{fmt(h.total)}</div>
           <div class="hmain">
             {h.house && <HouseMark />}
-            <b class="who">{h.name}</b> · {h.handName} · {h.won ? "won the run" : `ante ${h.ante}`}
+            <b class="who">{h.name}</b>
+            {h.verified && <VerifiedMark />} · {h.handName} · {h.won ? "won the run" : `ante ${h.ante}`}
             <HandCards cards={h.cards} />
           </div>
           <button class="btn small teal" onClick={() => A.playEntry(h)}>
@@ -831,7 +1423,7 @@ function CardDetail() {
               <b>{enh.name}</b>: {enh.text}, because {enh.why}.
             </p>
           )}
-          <p class="note">Numbers as of the hourly deck cut. Rank comes from curve progress inside the suit.</p>
+          <p class="note">Numbers as of the deck cut, every few hours. Rank comes from curve progress inside the suit.</p>
           <a class="btn gold wide" href={tokenUrl(l.t)} target="_blank" rel="noopener">
             Open ${l.s} on vibe/vibe ↗
           </a>
@@ -845,7 +1437,7 @@ function CardDetail() {
 function Over() {
   const u = useUi();
   const run = u.run;
-  const [name, setName] = useState(local.get<string>("kk.name", ""));
+  const [name, setName] = useState(me.get()?.name || local.get<string>("kk.name", ""));
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<Shared | null>(null);
   const [copied, setCopied] = useState(false);
@@ -860,12 +1452,14 @@ function Over() {
   const daily = A.isDaily();
   const hs = house.get();
   const marked = !!hs && !!name.trim() && cleanName(name).toLowerCase() === hs.name.toLowerCase();
+  const sess = me.get();
+  const verified = !!sess && !!name.trim() && cleanName(name).toLowerCase() === sess.name.toLowerCase();
   const streak = streakNow();
   const brag = daily
     ? `Daily Deal · ${dayLabel(daily)} · ${fmt(s.best?.total || 0)} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Same deal for everybody today. Beat it:`
     : `${won ? "Cleared all 8 antes" : `Reached ante ${s.ante}`} on KICKER, the poker roguelike dealt from live vibe/vibe launches. Best hand: ${fmt(s.best?.total || 0)}${s.best ? ` (${HANDS.find((h) => h.id === s.best!.hand)?.name})` : ""}. Same seed, same deal. Beat it:`;
   return (
-    <Modal title={won ? "Graduated!" : "Rugged"} accent={won ? "#ffc23d" : "#ff3d7f"} onClose={() => setUi({ overlay: "over" })}>
+    <Modal title={won ? "Graduated" : "Rugged"} accent={won ? "#ffc23d" : "#ff3d7f"} onClose={() => setUi({ overlay: "over" })}>
       <div class="over">
         <div class="ostats">
           <div>
@@ -908,7 +1502,7 @@ function Over() {
             {seedCopied ? "Seed copied" : "Copy seed"}
           </button>
         </div>
-        {ch && <p class={"vs " + (beat ? "win" : "")}>{beat ? `You beat ${ch.name || "the challenger"}!` : `${ch.name || "The challenger"} still leads: ante ${ch.ante}, best ${fmt(ch.best)}.`}</p>}
+        {ch && <p class={"vs " + (beat ? "win" : "")}>{beat ? `You beat ${ch.name || "the challenger"}.` : `${ch.name || "The challenger"} still leads: ante ${ch.ante}, best ${fmt(ch.best)}.`}</p>}
         {!link ? (
           <form
             class="share"
@@ -946,6 +1540,7 @@ function Over() {
               ) : (
                 "With a name, your best hand also enters today's Hall of hands."
               )}
+              {!nameErr && verified ? " Signed in: your name is verified and the run goes to Your table." : ""}
               {!nameErr && marked ? " Your house mark rides along." : ""}
             </small>
             <button class="btn gold" disabled={busy} type="submit">
@@ -1030,38 +1625,44 @@ function Swatch(props: { lk: Look; on: boolean; locked: boolean; onPick: () => v
 }
 
 function House() {
-  useUi();
+  const u = useUi();
   const [name, setName] = useState(local.get<string>("kk.name", ""));
-  const [wallets, setWallets] = useState<Wallet[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [, bump] = useState(0);
   const hs = house.get();
   const cur = look();
+  useEffect(() => {
+    // the player came here for house colours: start loading sign-in now, it is the next thing they'll tap
+    if (PARA.available) void warm()?.catch(() => null);
+  }, []);
   const pickLook = (id: string) => {
     local.set("kk.look", id);
     A.lookChanged();
     bump((x) => x + 1);
   };
-  const find = async () => {
+  const sign = async () => {
     setErr("");
     const problem = nameProblem(name);
     if (problem) {
       setErr(problem);
       return;
     }
-    setWallets(await findWallets());
-  };
-  const sign = async (w: Wallet) => {
-    setErr("");
     setBusy(true);
     try {
       const n = cleanName(name);
       local.set("kk.name", n);
-      await claimHouse(w, n);
-      if (look().id === "house") local.set("kk.look", LOOKS[1].id);
+      const r = await startSession(n);
+      if (r.house) {
+        if (look().id === "house") local.set("kk.look", LOOKS[1].id);
+        toast("House colours on. Same cards, same odds, better outfit.");
+      } else
+        toast(
+          r.holder === null
+            ? `Signed in as ${r.name}. Robinhood Chain testnet is not answering, so no house colours for now.`
+            : `Signed in as ${r.name}. No $${GAME_TOKEN.symbol} on this address, so the house look stays. Everything else plays the same.`,
+        );
       A.lookChanged();
-      toast("House colours on. Same cards, same odds, better outfit.");
     } catch (e) {
       const m = String((e as { message?: string })?.message || e);
       setErr((e as { code?: number })?.code === 4001 || /reject|denied|cancel/i.test(m) ? "Signature cancelled. Nothing was sent." : m);
@@ -1075,7 +1676,7 @@ function House() {
         Hold any amount of <b>${GAME_TOKEN.symbol}</b> and the table gets dressed for you: another card back, another felt, and a small <HouseMark /> next to your
         name in the Hall of hands and on share cards. Nothing else.
       </p>
-      <p class="plain">Cosmetic only, never changes the cards, the score or the odds. Without a wallet you lose nothing: every hand plays the same.</p>
+      <p class="plain">Cosmetic only, never changes the cards, the score or the odds. Without signing in you lose nothing: every hand plays the same.</p>
       <div class="swatches">
         {LOOKS.map((lk) => (
           <Swatch lk={lk} on={cur.id === lk.id} locked={!hs && lk.id !== "house"} onPick={() => pickLook(lk.id)} />
@@ -1103,7 +1704,127 @@ function House() {
           class="share"
           onSubmit={(e) => {
             e.preventDefault();
-            void find();
+            if (!PARA.available) toast(PARA.note);
+            else if (u.signedIn) void sign();
+            else void openSignIn().catch((er) => setErr(String((er as Error)?.message || er)));
+          }}
+        >
+          <p class="via">
+            Sign in with email, Google, X, Discord or a wallet, through Para. A Para wallet is made for you if you have none; it starts with no ${GAME_TOKEN.symbol}.
+          </p>
+          {u.signedIn && PARA.available && (
+            <>
+              <input
+                class="field"
+                maxLength={12}
+                value={name}
+                placeholder="Your name, 3-12 letters"
+                aria-label="Name"
+                onInput={(e) => {
+                  setName((e.target as HTMLInputElement).value);
+                  setErr("");
+                }}
+              />
+              <small class="hint">
+                Signed in as {short(u.signedIn)}. One signed message claims this name for your address and checks ${GAME_TOKEN.symbol} for today (UTC).
+              </small>
+            </>
+          )}
+          {!PARA.available ? (
+            <p class="note off">{PARA.note}</p>
+          ) : (
+            <button class="btn gold" type="submit" disabled={busy || u.signinBusy}>
+              {busy ? "Waiting for the signature..." : u.signedIn ? "Sign once for today" : u.signinBusy ? "Opening sign-in..." : "Sign in"}
+            </button>
+          )}
+        </form>
+      )}
+      {err && <p class="err">{err}</p>}
+      <div class="safety">
+        <b>Plain terms.</b> It's all on {CHAIN_NAME}. You sign a plain text message: no gas, no transaction, no approval, nothing moves. The server reads your{" "}
+        {"$" + GAME_TOKEN.symbol} balance and that's it.
+      </div>
+      <Privacy />
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ your table (signed in: from the server; signed out: this device)
+function Table() {
+  const u = useUi();
+  const sess = me.get();
+  const [name, setName] = useState(sess?.name || local.get<string>("kk.name", ""));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (sess) void refreshProfile();
+    else if (PARA.available && u.signedIn) void warm()?.catch(() => null);
+  }, []);
+  const p = sess ? u.profile : null;
+  const mine = local.get<HallEntry[]>("kk.hall", []);
+  const streak = p ? liveStreak(p.streak, utcDay()) : streakNow();
+  const bestStreak = p ? p.streak?.best || 0 : local.get<Streak | null>("kk.streak", null)?.best || 0;
+  const claim = async () => {
+    setErr("");
+    const problem = nameProblem(name);
+    if (problem) {
+      setErr(problem);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await startSession(name);
+      A.lookChanged();
+      toast(`${r.name} is yours. Runs you post under it are verified and follow you to any device.`);
+    } catch (e) {
+      const m = String((e as Error)?.message || e);
+      setErr(/reject|denied|cancel/i.test(m) ? "Signature cancelled. Nothing was sent." : m);
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal title="Your table" wide>
+      <div class="table-head">
+        <div>
+          <b class="who">{sess?.name || local.get<string>("kk.name", "") || "No name yet"}</b>
+          {sess && <VerifiedMark />}
+          {house.get() && <HouseMark />}
+          <br />
+          <small class="note">{u.signedIn ? short(u.signedIn) : "Signed out: this device's record only."}</small>
+          {u.signedIn && PARA.available && (
+            <div>
+              <button
+                class="btn small signout"
+                onClick={() => {
+                  endSession();
+                  A.lookChanged();
+                  void signOut().catch((e) => toast(String((e as Error)?.message || e)));
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+        <div class="tstat">
+          <small>Daily streak</small>
+          <b class="m">{streak}</b>
+          <small>best {bestStreak}</small>
+        </div>
+      </div>
+      {!PARA.available ? (
+        <p class="note">{PARA.note}</p>
+      ) : !u.signedIn ? (
+        <div class="row">
+          <SignInChip big />
+          <p class="note">Sign in to claim your name and keep this record on any device: your Daily streak, your best hand of each day, your last 30 runs.</p>
+        </div>
+      ) : !sess ? (
+        <form
+          class="share"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void claim();
           }}
         >
           <input
@@ -1117,30 +1838,60 @@ function House() {
               setErr("");
             }}
           />
-          <small class="hint">The mark is tied to this name for today (UTC).</small>
-          {!wallets ? (
-            <button class="btn gold" type="submit">
-              Find my wallet
-            </button>
-          ) : wallets.length ? (
-            <div class="wallets">
-              {wallets.map((w) => (
-                <button class="btn" type="button" disabled={busy} onClick={() => void sign(w)}>
-                  {w.icon && <img src={w.icon} alt="" width={24} height={24} />}
-                  {busy ? "Waiting for the signature..." : `Sign with ${w.name}`}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p class="note">No browser wallet found on this page. That's fine: everything else plays exactly the same.</p>
-          )}
+          <small class="hint">
+            One signed message a day claims this name for {short(u.signedIn)}: after that, nobody else can post under it. Plain text, no gas, nothing moves.
+          </small>
+          <button class="btn gold" type="submit" disabled={busy || u.signinBusy}>
+            {busy ? "Waiting for the signature..." : "Sign once for today"}
+          </button>
         </form>
-      )}
+      ) : null}
       {err && <p class="err">{err}</p>}
-      <div class="safety">
-        <b>Plain terms.</b> It's all on {CHAIN_NAME}. You sign a plain text message: no gas, no transaction, no approval, nothing moves. The server reads your{" "}
-        {"$" + GAME_TOKEN.symbol} balance and that's it. KICKER never asks for a seed phrase or a private key. If anything ever does, it isn't us.
-      </div>
+      <section>
+        <h3>Best hands</h3>
+        {p ? (
+          p.best.length ? (
+            <ol class="mybest">
+              {p.best.slice(0, 10).map((b) => (
+                <li>
+                  <span class="d">{dayLabel(b.day)}</span> <b class="m">{fmt(b.total)}</b> {b.handName}{" "}
+                  <a href={`/c/${b.id}`}>replay ↗</a>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p class="note">No verified runs yet. Post one with your name and it lands here.</p>
+          )
+        ) : mine.length ? (
+          <ol class="mybest">
+            {mine.slice(0, 10).map((h) => (
+              <li>
+                <b class="m">{fmt(h.total)}</b> {h.hand} · ante {h.ante} <a href={`/?s=${h.seed}&e=${h.edition}`}>play this seed ↗</a>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p class="note">Nothing yet. Your best hand of each run lands here.</p>
+        )}
+      </section>
+      {p && (
+        <section>
+          <h3>Recent runs</h3>
+          {p.recent.length ? (
+            <ol class="myruns">
+              {p.recent.map((r) => (
+                <li>
+                  <span class="d">{dayLabel(r.at.slice(0, 10))}</span> {r.won ? "won the run" : `ante ${r.ante}`} · <b class="m">{fmt(r.total)}</b> {r.handName}
+                  {r.daily ? " · Daily Deal" : ""} <a href={`/c/${r.id}`}>replay ↗</a> <a href={`/?s=${r.seed}&e=${r.edition}`}>same seed ↗</a>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p class="note">No runs posted yet.</p>
+          )}
+        </section>
+      )}
+      <Privacy />
     </Modal>
   );
 }
@@ -1153,22 +1904,26 @@ function News() {
   return (
     <Modal title={`What's new · ${VERSION.replace(/\.0$/, "")}`}>
       <section>
-        <h3>Daily Deal</h3>
+        <h3>Sign in, sit down</h3>
         <p>
-          One deal a day, the same for everybody: a seed fixed by the date, dealt from the first deck cut after 00:00 UTC. Post it with a name and it lands on the
-          Daily board in the Hall of hands, one line per name, your best run of the day counts. Finish it on consecutive days for a streak.
+          Sign in with email, Google, X, Discord or a wallet, through Para. Nothing about the cards changes: ${GAME_TOKEN.symbol} holders still dress the
+          table, and everybody plays exactly the same hand.
         </p>
       </section>
       <section>
-        <h3>House colours</h3>
+        <h3>Your name, your record</h3>
         <p>
-          ${GAME_TOKEN.symbol} holders can sign a plain message (no gas, nothing moves) to dress the table: three card backs and felts, and a small mark next to
-          their name. Cosmetic only, never changes the cards, the score or the odds.
+          Signed in, one plain message a day claims your Hall of hands name: nobody else can post under it, and your lines get a ✓. Your Daily streak, best
+          hands and last 30 runs follow you to any device, in Your table.
         </p>
       </section>
       <section>
-        <h3>The token</h3>
-        <p>The token can't touch whether you win. The cards come from the deck, the deck comes from the index, and the score comes from the cards.</p>
+        <h3>A better table</h3>
+        <p>Card corners you can read in a fanned hand, a felt with a centre, a live read of what your selection is worth, and bigger cards on big screens.</p>
+      </section>
+      <section>
+        <h3>Honest labels</h3>
+        <p>Decks are cut every few hours, so the title says so. Blinds show their cash-out: game money, spent in the shop.</p>
       </section>
       <div class="row">
         <button class="btn gold" onClick={() => A.dailyRun()}>
@@ -1221,7 +1976,10 @@ function App() {
       {u.overlay === "over" && <Over />}
       {u.overlay === "house" && <House />}
       {u.overlay === "news" && <News />}
+      {u.overlay === "table" && <Table />}
+      {u.overlay === "more" && <More />}
       <CardDetail />
+      <InspectTag />
       <Coach />
       <Toast />
       {u.overlay === null && u.run && (u.run.s.phase === "over" || u.run.s.phase === "won") && (
