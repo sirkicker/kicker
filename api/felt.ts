@@ -8,6 +8,8 @@ import { FIXTURE_NAME, ROUNDS } from "../shared/content.js";
 import { dayLabel } from "../shared/daily.js";
 import type { FigInfo } from "../shared/engine.js";
 import { getResult, type Result } from "./_runs.js";
+import { getEdition } from "./_cut.js";
+import { buildSquad, ghostSquad, type Launch } from "../shared/data.js";
 
 const SITE = "https://kickerhq.vercel.app";
 const C = {
@@ -113,9 +115,97 @@ function frame(...children: (Node | null)[]): Node {
   );
 }
 
+/** A ghost from above: a pale sheet with hollow eyes, the dead launch's picture showing through. */
+function ghostFig(l: Launch, pic: string | null, size: number): Node {
+  return h(
+    "div",
+    { flexDirection: "column", alignItems: "center", width: size + 20, opacity: 0.78 },
+    h(
+      "div",
+      {
+        width: size,
+        height: size * 1.18,
+        borderRadius: `${size / 2}px ${size / 2}px 10px 10px`,
+        background: "#dcebf3",
+        border: `4px solid ${C.ink}`,
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+      },
+      pic ? img(pic, { width: size * 0.7, height: size * 0.7, borderRadius: size * 0.35, opacity: 0.55 }) : null,
+      h("div", { position: "absolute", left: size * 0.26, top: size * 0.3, width: size * 0.13, height: size * 0.2, borderRadius: 8, background: C.ink }),
+      h("div", { position: "absolute", right: size * 0.26, top: size * 0.3, width: size * 0.13, height: size * 0.2, borderRadius: 8, background: C.ink }),
+    ),
+    h("div", { marginTop: 4, fontSize: 18, color: "#cfe3ee", background: C.ink, padding: "1px 8px", borderRadius: 6 }, "$" + l.s.slice(0, 7)),
+  );
+}
+
+/** The Haunted table's share image: night felt, a pumpkin ball, the goal's figures, and the ghost club behind them. */
+async function hauntPng(rec: Result): Promise<Node> {
+  const figs = (rec.best?.figs || []).slice(0, 5);
+  const ed = await getEdition(rec.edition);
+  const ghosts = ed ? ghostSquad(ed, rec.seed, buildSquad(ed, rec.seed), 1, Math.min(2, rec.fixture)).slice(8, 11) : [];
+  const [pics, gpics] = await Promise.all([Promise.all(figs.map((f) => art(f.c))), Promise.all(ghosts.map((g) => art(g.c)))]);
+  const reached = rec.won ? "Beat all three ghost clubs" : `Won ${rec.cleared} of 3 ghost matches`;
+  return h(
+    "div",
+    {
+      width: 1200,
+      height: 630,
+      background: "radial-gradient(circle at 70% 40%, #15343e 0%, #0a1d22 45%, #05090b 100%)",
+      fontFamily: "Jersey",
+      color: C.cream,
+      position: "relative",
+      overflow: "hidden",
+    },
+    // mist low across the picture
+    h("div", { position: "absolute", left: -200, top: 560, width: 1600, height: 140, background: "#cfe3ee", opacity: 0.05, borderRadius: 70 }),
+    h(
+      "div",
+      { position: "absolute", left: 64, top: 46, flexDirection: "column", width: 540 },
+      h("div", { fontSize: 112, lineHeight: 1, color: C.cream, letterSpacing: 4 }, "KICKER"),
+      h("div", { fontSize: 40, color: "#ffb35c", marginTop: 6, lineHeight: 1 }, "Haunted table"),
+      h("div", { fontSize: 24, color: "#cfe3ee", marginTop: 8, width: 500 }, "ghost clubs made of the quietest launches on vibe/vibe"),
+      h(
+        "div",
+        { marginTop: 24, background: C.ink, border: "4px solid #cfe3ee", borderRadius: 10, padding: "10px 18px", alignSelf: "flex-start", fontSize: 30, color: "#cfe3ee", alignItems: "center" },
+        rec.house && rec.name ? houseMark(30) : null,
+        rec.name ? `${rec.name} dares you: same ghosts` : "Same seed, same ghosts",
+      ),
+      h("div", { marginTop: 18, fontSize: 54, color: C.cream, lineHeight: 1 }, rec.seed),
+      h("div", { marginTop: 8, fontSize: 24, color: C.dim }, `cut #${rec.edition} · ${reached}`),
+      rec.best
+        ? h(
+            "div",
+            { marginTop: 20, alignItems: "center" },
+            h("div", { background: "#f07a12", color: C.ink, borderRadius: 8, padding: "6px 14px", fontSize: 28 }, rec.best.style),
+            h("div", { marginLeft: 16, fontSize: 58, color: "#ffb35c", lineHeight: 1 }, rec.best.total.toLocaleString("en-US")),
+            h("div", { marginLeft: 10, fontSize: 22, color: C.dim }, "best goal"),
+          )
+        : null,
+    ),
+    // the ghost club hangs back over the felt
+    h("div", { position: "absolute", right: 40, top: 40, alignItems: "flex-start", justifyContent: "flex-end", width: 520 }, ...ghosts.map((g, i) => ghostFig(g, gpics[i], 86))),
+    h("div", { position: "absolute", right: 30, top: 200, width: 620, height: 270, background: "#071a1e", borderRadius: 26, border: "10px solid #1c0b18" }),
+    h("div", { position: "absolute", right: 0, top: 296, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
+    h("div", { position: "absolute", right: 40, top: 237, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
+    // the pumpkin ball, with a short ember trail
+    h("div", { position: "absolute", right: 80, top: 466, width: 120, height: 10, background: "#ff7a1c", opacity: 0.35, borderRadius: 5 }),
+    h("div", { position: "absolute", right: 150, top: 470, width: 60, height: 6, background: "#ffb35c", opacity: 0.4, borderRadius: 3 }),
+    h(
+      "div",
+      { position: "absolute", right: 32, top: 444, width: 58, height: 52, borderRadius: 29, background: "radial-gradient(circle at 35% 35%, #ffb35c, #f07a12 60%, #a84a06)", border: `4px solid ${C.ink}` },
+      h("div", { position: "absolute", left: 23, top: -14, width: 7, height: 13, background: "#3d7a2a" }),
+    ),
+    h("div", { position: "absolute", right: 64, bottom: 30, fontSize: 26, color: "#cfe3ee" }, "kickerhq.vercel.app"),
+  );
+}
+
 async function imagePng(rec: Result | null): Promise<Buffer> {
   let tree: Node;
-  if (!rec) {
+  if (rec && rec.mode === "haunt") {
+    tree = await hauntPng(rec);
+  } else if (!rec) {
     tree = frame(
       h(
         "div",
@@ -170,7 +260,9 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 function page(rec: Result | null, id: string): string {
   const title = !rec
     ? "A season on KICKER"
-    : rec.daily
+    : rec.mode === "haunt"
+      ? `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} Haunted table ${rec.seed} on KICKER`
+      : rec.daily
       ? `${esc(dailyLine(rec))} on KICKER`
       : `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} seed ${rec.seed} on KICKER`;
   const desc = !rec

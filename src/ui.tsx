@@ -2,7 +2,7 @@
 // links, menus, coach tips, the Daily board, sign-in (through Para), team kits and the what's-new note.
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { BOSS, BOSSES, COACHES, DRILLS, FINAL_BOSS, FIXTURE_NAME, LANES, MOUTH, PLAYS, RODS, ROUNDS, WIN_FANS } from "../shared/content.js";
+import { BOSS, BOSSES, COACHES, DRILLS, FINAL_BOSS, FIXTURE_NAME, GHOST_RULES, HAUNT, LANES, MOUTH, PLAYS, RODS, ROUNDS, STYLES, WIN_FANS } from "../shared/content.js";
 import { GAME_TOKEN, PAIRS, SOURCE_URL, STAT, facePath, tokenUrl, type Launch } from "../shared/data.js";
 import type { FigInfo } from "../shared/engine.js";
 import { BASE_BLOCKS, BASE_TOUCHES, GOALS_TO_WIN, POSSESSIONS } from "../shared/engine.js";
@@ -14,8 +14,10 @@ import { dayLabel, liveStreak, utcDay, type Streak } from "../shared/daily.js";
 import { CHAIN_NAME, LOOKS, house, look, type Look } from "./house.js";
 import { endSession, me, refreshProfile, startSession } from "./me.js";
 import { PARA, openSignIn, short, signOut, warm } from "./signin.js";
+import { HAUNT_UNTIL, hauntKit, hauntOn } from "./haunt.js";
+import type { RunMode } from "../shared/engine.js";
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.1.0";
 export const X_URL = "https://x.com/kyriektnrv";
 
 export interface Shared {
@@ -24,10 +26,13 @@ export interface Shared {
   daily: string | null;
   house: boolean;
   verified: boolean;
+  kit: boolean;
 }
 
 export interface UiActions {
-  newRun(): void;
+  newRun(mode?: RunMode): void;
+  savedMode(): RunMode | null;
+  playPending(): void;
   continueRun(): void;
   playSeed(raw: string): Promise<boolean>;
   restartSeed(): void;
@@ -41,7 +46,7 @@ export interface UiActions {
   swap(a: number, b: number): boolean;
   kickOff(): void;
   hasSaved(): boolean;
-  playEntry(h: { id: string; name: string; round: number; cleared: number; won: boolean; total: number; style: string; seed: string; edition: number }): void;
+  playEntry(h: { id: string; name: string; round: number; cleared: number; won: boolean; total: number; style: string; seed: string; edition: number; mode?: string }): void;
 }
 
 /** Your best goal of a season, kept in this browser. */
@@ -129,6 +134,15 @@ function HouseMark() {
   return (
     <span class="hmark" title="$KICKER holder: team kits (cosmetic only)" aria-label="team kits">
       K
+    </span>
+  );
+}
+
+/** The Haunted kit: won a Haunted table match during the event. Cosmetic only. */
+function HauntMark() {
+  return (
+    <span class="gmark" title="Haunted kit: won a match on the Haunted table during the event (cosmetic only)" aria-label="Haunted kit">
+      ☾
     </span>
   );
 }
@@ -384,6 +398,7 @@ interface DayEntry {
   figs: FigInfo[];
   house?: boolean;
   verified?: boolean;
+  mode?: string;
 }
 
 interface Board {
@@ -611,11 +626,64 @@ function CutPanel(props: { ed: NonNullable<typeof ui.edition> }) {
   );
 }
 
+/** The Haunted table's entry on the title: a tile while the event runs, a small archive line after it. */
+function HauntTile() {
+  const live = hauntOn();
+  const kit = hauntKit();
+  if (!live)
+    return (
+      <p class="haunt-archive">
+        Haunted table: closed. <button class="textlink" onClick={() => A.newRun("haunt")}>Play the past event</button>
+      </p>
+    );
+  return (
+    <button class="haunt-tile" onClick={() => A.newRun("haunt")} aria-label="Play the Haunted table">
+      <span class="ht-art" aria-hidden="true">
+        <i class="pumpkin" />
+        <i class="ghost" />
+      </span>
+      <span class="ht-text">
+        <b>Haunted table</b>
+        <small>
+          {HAUNT_UNTIL}. Three ghost clubs made of the cut's deadest launches, a rod that phases, a poltergeist, the lights low.
+          {kit ? " Haunted kit: yours." : ""}
+        </small>
+      </span>
+      <span class="ht-go">Play</span>
+    </button>
+  );
+}
+
+/** A shared seed link lands here: the seed, and a button. It never starts by itself. */
+function PendingSeed() {
+  const u = useUi();
+  const p = u.pendingSeed;
+  if (!p) return null;
+  return (
+    <div class="challenge pending">
+      <p>
+        A seed was shared with you: <b class="m">{p.seed}</b>
+        {p.edition ? ` on cut #${p.edition}` : ""}
+        {p.mode === "haunt" ? " (Haunted table)" : ""}. Same squad, same clubs, same shelf.
+      </p>
+      <div class="row">
+        <button class="btn gold" onClick={() => A.playPending()}>
+          Play seed {p.seed}
+        </button>
+        <button class="btn" onClick={() => setUi({ pendingSeed: null })}>
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Title() {
   const u = useUi();
   const ed = u.edition;
   const ch = u.challenge;
   const saved = A.hasSaved();
+  const savedMode = A.savedMode();
   const live = ed
     ? `${ed.pool.reduce((n, p) => n + p.length, 0)} live launches on today's transfer list · new cut every few hours`
     : u.editionError
@@ -636,7 +704,9 @@ function Title() {
         </div>
         <p class="tag">Turn-based table football. Every figure on your rods is a live vibe/vibe launch.</p>
         <p class="live">{live}</p>
-        {ch ? (
+        {u.pendingSeed ? (
+          <PendingSeed />
+        ) : ch ? (
           <div class="challenge">
             <p>
               <b class="who">{ch.name || "Someone"}</b> challenged you on this seed: {ch.won ? "won the whole season" : `out in round ${ch.round}`}, best goal{" "}
@@ -656,7 +726,7 @@ function Title() {
           <div class="row play">
             {saved ? (
               <button class="btn big teal" onClick={() => A.continueRun()}>
-                Continue season
+                {savedMode === "haunt" ? "Continue Haunted table" : "Continue season"}
               </button>
             ) : (
               <button class="btn big teal" disabled={!ed} onClick={() => A.newRun()}>
@@ -671,6 +741,7 @@ function Title() {
               </small>
             </button>
           </div>
+          <HauntTile />
           <div class="row three">
             <button class="btn" onClick={() => setUi({ overlay: "how" })}>
               How to play
@@ -728,7 +799,7 @@ function More() {
           Team kits
         </button>
         <button class="btn" onClick={() => setUi({ overlay: "news" })}>
-          What's new in 2.0
+          What's new in 2.1
         </button>
       </div>
     </Modal>
@@ -757,7 +828,7 @@ function How() {
       <section>
         <h3>Your ball</h3>
         <p>
-          You get {BASE_TOUCHES} <b>touches</b> a possession. One touch is either a <b>slide</b> of one of your rods by one lane (the arrows under each rod), or a{" "}
+          You get {BASE_TOUCHES} <b>touches</b> a possession. One touch is either a <b>slide</b> of one of your rods by one lane (drag the rod, or press a button at its handle), or a{" "}
           <b>kick</b> with the figure on the ball: a pass to a figure on one of your rods further up, or a shot. The ball runs straight, or one lane sideways for
           every rod it crosses, and comes back off the side walls. Any of their figures standing in its lane blocks it and wins the ball. The gold lines show
           your kicks; red ones are blocked.
@@ -815,6 +886,33 @@ function How() {
             </li>
           ))}
         </ul>
+      </section>
+      <section>
+        <h3>How clubs play</h3>
+        <ul class="bosses">
+          {(Object.keys(STYLES) as (keyof typeof STYLES)[]).map((k) => (
+            <li>
+              <b>{STYLES[k].name}</b>: {STYLES[k].text}.
+            </li>
+          ))}
+        </ul>
+        <p>Every club keeps its way of playing all season, and every club gets sharper by the round.</p>
+      </section>
+      <section>
+        <h3>Haunted table</h3>
+        <p>
+          A short event, {hauntOn() ? `live ${HAUNT_UNTIL}` : "now closed and still playable"}: three matches against ghost clubs whose figures are the
+          cut's quietest launches (each tag shows its 24h trade count). Win a Haunted match while it runs and your device keeps a <b>Haunted kit</b>{" "}
+          mark, for the look only. Three rules:
+        </p>
+        <ul class="bosses">
+          {Object.values(GHOST_RULES).map((g) => (
+            <li>
+              <b>{g.name}</b>: {g.text}
+            </li>
+          ))}
+        </ul>
+        <p class="note">An independent event mode for the spooky week on Robinhood Chain testnet, through {HAUNT.endLabel}. Its goals have their own board in the Hall.</p>
       </section>
       <section>
         <h3>The dressing room</h3>
@@ -1125,13 +1223,16 @@ function BossIntro() {
   return (
     <div class="ov-backdrop boss-bg" onClick={(e) => e.target === e.currentTarget && setUi({ overlay: null })}>
       <div class="ov-panel boss" role="dialog" aria-label={b.name}>
-        <p class="boss-kicker">Round {m.round} · boss club</p>
+        <p class="boss-kicker">{run.mode === "haunt" ? "Haunted table · the last ghost club" : `Round ${m.round} · boss club`}</p>
         <div class="crest" aria-hidden="true">
           <span>{b.name.replace(/^The /, "").slice(0, 1)}</span>
         </div>
         <h2>{b.name}</h2>
         <p class="boss-rule">{b.text}.</p>
-        <p class="note">{id === "bell" ? "Win this and the season is yours." : "Lose this one and the season ends here. Against a boss club, a draw is not enough."}</p>
+        <p class="note">
+          {STYLES[run.styleOf()].name}: {STYLES[run.styleOf()].text}.
+        </p>
+        <p class="note">{id === "bell" ? "Win this and the season is yours." : id === "haunt" ? "Beat it to lay the Haunted table to rest. A draw is not enough." : "Lose this one and the season ends here. Against a boss club, a draw is not enough."}</p>
         <div class="row">
           <button class="btn" onClick={() => setUi({ overlay: "squad" })}>
             Line-up
@@ -1274,7 +1375,10 @@ function HallRows(props: { entries: DayEntry[] }) {
 }
 
 function Hall() {
-  const [tab, setTab] = useState<"day" | "daily" | "mine">(local.get<string>("kk.hallTab", "day") === "daily" ? "daily" : "day");
+  const saved = local.get<string>("kk.hallTab", "day");
+  const [tab, setTab] = useState<"day" | "daily" | "haunt" | "mine">(saved === "daily" || saved === "haunt" ? saved : "day");
+  const [ghosts, setGhosts] = useState<{ day: string; entries: DayEntry[] } | null>(null);
+  const [ghostErr, setGhostErr] = useState(false);
   const [day, setDay] = useState<{ day: string; entries: DayEntry[] } | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [err, setErr] = useState(false);
@@ -1288,8 +1392,12 @@ function Hall() {
       .then((r) => r.json())
       .then(setBoard)
       .catch(() => setBoardErr(true));
+    fetch("/api/hall?board=haunt")
+      .then((r) => r.json())
+      .then(setGhosts)
+      .catch(() => setGhostErr(true));
   }, []);
-  const pick = (t: "day" | "daily" | "mine") => {
+  const pick = (t: "day" | "daily" | "haunt" | "mine") => {
     setTab(t);
     local.set("kk.hallTab", t);
   };
@@ -1303,11 +1411,27 @@ function Hall() {
         <button class={"pill" + (tab === "daily" ? " on" : "")} onClick={() => pick("daily")}>
           Daily Match
         </button>
+        <button class={"pill haunt" + (tab === "haunt" ? " on" : "")} onClick={() => pick("haunt")}>
+          Haunted
+        </button>
         <button class={"pill" + (tab === "mine" ? " on" : "")} onClick={() => pick("mine")}>
           Mine
         </button>
       </div>
-      {tab === "daily" ? (
+      {tab === "haunt" ? (
+        <>
+          <p class="note">
+            Haunted table · {ghosts?.day || utcDay()} (UTC): the best goals scored against the ghost clubs, every touch played again on the server.
+            {hauntOn() ? ` Live ${HAUNT_UNTIL}.` : " The event is closed; the table stays open."}
+          </p>
+          <button class="btn wide haunt-btn" onClick={() => A.newRun("haunt")}>
+            Play the Haunted table
+          </button>
+          {ghostErr && <p class="err">The Haunted board is not answering right now.</p>}
+          {ghosts && !ghosts.entries.length && <p>No Haunted goals posted today. Quiet in here.</p>}
+          {ghosts && <HallRows entries={ghosts.entries} />}
+        </>
+      ) : tab === "daily" ? (
         <>
           <p class="note">
             Daily Match · {dayLabel(board?.day || utcDay())} (UTC): seed {board?.seed || "..."}
@@ -1471,16 +1595,23 @@ function Over() {
   const verified = !!sess && !!name.trim() && cleanName(name).toLowerCase() === sess.name.toLowerCase();
   const streak = streakNow();
   const m = s.match;
-  const brag = daily
+  const haunt = run.mode === "haunt";
+  const brag = haunt
+    ? `${won ? "Beat all three ghost clubs" : `Won ${s.cleared} of 3`} on the Haunted table at KICKER, turn-based table football with live vibe/vibe launches on my rods and the quietest ones on theirs. Best goal: ${fmt(s.best?.total || 0)}. Same seed, same ghosts:`
+    : daily
     ? `Daily Match · ${dayLabel(daily)} · best goal ${fmt(s.best?.total || 0)} on KICKER, turn-based table football with live vibe/vibe launches on the rods. Same squad for everybody today. Beat it:`
     : `${won ? "Won the whole season" : `Reached round ${s.round}`} on KICKER, turn-based table football with live vibe/vibe launches on the rods. Best goal: ${fmt(s.best?.total || 0)}${s.best ? ` (${s.best.style})` : ""}. Same seed, same season. Beat it:`;
   return (
-    <Modal title={won ? "Champions" : "Season over"} accent={won ? "#ffc23d" : "#ff3d7f"} onClose={() => setUi({ overlay: "over" })}>
+    <Modal
+      title={haunt ? (won ? "Laid to rest" : "Haunted table over") : won ? "Champions" : "Season over"}
+      accent={haunt ? "#cfe3ee" : won ? "#ffc23d" : "#ff3d7f"}
+      onClose={() => setUi({ overlay: "over" })}
+    >
       <div class="over">
         <div class="ostats">
           <div>
-            <small>Round</small>
-            <b>{Math.min(s.round, ROUNDS)}</b>
+            <small>{haunt ? "Match" : "Round"}</small>
+            <b>{haunt ? Math.min(s.kind + 1, 3) : Math.min(s.round, ROUNDS)}</b>
           </div>
           <div>
             <small>Matches won</small>
@@ -1493,10 +1624,13 @@ function Over() {
         </div>
         <p class="note">
           {won
-            ? "You beat the Closing Bell."
+            ? haunt
+              ? "You beat The Haunted XI."
+              : "You beat the Closing Bell."
             : `Out to ${m?.club || "a boss club"} in round ${s.round}${m ? `, ${m.score[0]}:${m.score[1]}` : ""}. ${FIXTURE_NAME[s.kind]}.`}{" "}
           {s.goalsFor} goals for, {s.goalsAgainst} against{s.best ? `. Best goal: ${s.best.style}.` : "."}
         </p>
+        {haunt && s.cleared > 0 && hauntKit() && <p class="daily-tag haunt">Haunted kit: on this device since {hauntKit()}. For the look only.</p>}
         {daily && (
           <p class="daily-tag">
             Daily Match · {dayLabel(daily)}
@@ -1554,6 +1688,8 @@ function Over() {
             <small class="hint">
               {nameErr ? (
                 <span class="err">{nameErr}</span>
+              ) : haunt ? (
+                "With a name, your best goal enters today's Haunted board in the Hall."
               ) : daily ? (
                 "With a name, this season enters the Daily board (your best of the day counts) and today's Hall of goals."
               ) : (
@@ -1568,7 +1704,13 @@ function Over() {
           </form>
         ) : (
           <div class="shared">
-            <img src={`/api/felt?id=${link.id}`} alt="Challenge image: the figures of the best goal" width={600} height={315} />
+            <img
+              src={`/api/felt?id=${link.id}`}
+              alt={haunt ? "Challenge image: the best goal on the Haunted table" : "Challenge image: the figures of the best goal"}
+              width={600}
+              height={315}
+            />
+            {link.kit && <p class="note">Haunted kit saved to Your table.</p>}
             {link.daily && <p class="note">Posted to the Daily board for {dayLabel(link.daily)}. The best 50 names of the day are shown.{link.house ? " House mark on." : ""}</p>}
             <input class="field" readOnly value={full} onFocus={(e) => (e.target as HTMLInputElement).select()} aria-label="Challenge link" />
             <div class="row">
@@ -1598,8 +1740,8 @@ function Over() {
           <button class="btn teal" onClick={() => A.restartSeed()}>
             Same seed again
           </button>
-          <button class="btn pink" onClick={() => A.newRun()}>
-            New season
+          <button class="btn pink" onClick={() => A.newRun(haunt ? "haunt" : "season")}>
+            {haunt ? "New Haunted table" : "New season"}
           </button>
         </div>
         <div class="row">
@@ -1794,6 +1936,7 @@ function Table() {
           <b class="who">{sess?.name || local.get<string>("kk.name", "") || "No name yet"}</b>
           {sess && <VerifiedMark />}
           {house.get() && <HouseMark />}
+          {(hauntKit() || (p && p.kit?.haunt)) && <HauntMark />}
           <br />
           <small class="note">{u.signedIn ? short(u.signedIn) : "Signed out: this device's record only."}</small>
           {u.signedIn && PARA.available && (
@@ -1908,6 +2051,20 @@ function News() {
   return (
     <Modal title={`What's new · ${VERSION.replace(/\.0$/, "")}`}>
       <section>
+        <h3>2.1: Haunted table</h3>
+        <p>
+          For the spooky week on Robinhood Chain testnet, {HAUNT_UNTIL}: three ghost clubs made of the cut's quietest launches, a rod that phases, a
+          poltergeist that moves their rods, and the lights turned low. A Haunted board in the Hall, and a Haunted kit mark for a win while it runs.
+        </p>
+      </section>
+      <section>
+        <h3>2.1: a better table</h3>
+        <p>
+          The table fills the screen. Figures are proper table-football men with their launch as the head, theirs too. Drag a rod to slide it, or use the
+          handle at its end. Clubs have a style: one parks the bus, one presses, one shoots from distance. A short walkthrough in your first match.
+        </p>
+      </section>
+      <section>
         <h3>Table football</h3>
         <p>
           Kicker is what the Germans call table football, and now the name means what it says. KICKER 2.0 is a turn-based table football season: four rods a
@@ -1933,6 +2090,9 @@ function News() {
         <p>The wine and teal, the felt, the vibers, the gold sign-in, the sound. Your $KICKER kit is still cosmetic only.</p>
       </section>
       <div class="row">
+        <button class="btn haunt-btn" onClick={() => A.newRun("haunt")}>
+          Haunted table
+        </button>
         <button class="btn gold" onClick={() => A.dailyRun()}>
           Play the Daily Match
         </button>
@@ -1944,9 +2104,37 @@ function News() {
   );
 }
 
+/** The first-match walkthrough: four prompts on the real table, each moves on when you do the thing. */
+export const TUT = [
+  "1 of 4 · Slide. Drag one of your rods a lane, or press a button at its handle. They react to every touch.",
+  "2 of 4 · Pass. A ring on one of your figures further up is a pass that gets through. Tap the ringed figure.",
+  "3 of 4 · Shoot. A gold disc in their goal mouth is a shot with a clear lane. Tap it. Red lines are blocked.",
+  "4 of 4 · Their ball. Red lines are shots, amber are passes. Slide a rod into a red lane to block it, then press Ready.",
+];
+function Tutorial() {
+  const u = useUi();
+  if (u.tut === null || u.overlay) return null;
+  return (
+    <div class="coach tut in-round" role="status">
+      <p>{TUT[u.tut]}</p>
+      <div class="row">
+        <button
+          class="btn small"
+          onClick={() => {
+            local.set("kk.tut", "done");
+            setUi({ tut: null });
+          }}
+        >
+          Skip the walkthrough
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Coach() {
   const u = useUi();
-  if (!u.coach || u.overlay) return null;
+  if (!u.coach || u.overlay || u.tut !== null) return null;
   const ph = u.run?.s.phase;
   return (
     <div class={"coach " + (ph === "attack" || ph === "defend" ? "in-round" : "in-menu")} role="status">
@@ -1985,6 +2173,7 @@ function App() {
       <FigureDetail />
       <InspectTag />
       <Coach />
+      <Tutorial />
       <Toast />
       {u.overlay === null && u.run && (u.run.s.phase === "over" || u.run.s.phase === "won") && (
         <button class="btn gold floating" onClick={() => setUi({ overlay: "over" })}>

@@ -3,8 +3,8 @@
   --night2: #2a0f24;
   --tile: #22091c;
   --edge: #5a2048;
-  --paper: #fff1dc;
-  --paper2: #f1dcc0;
+  --linen: #fff1dc;
+  --linen2: #f1dcc0;
   --dim: #c9a9bd;
   --cyan: #27c4e8;
   --hot: #ff3d7f;
@@ -25,7 +25,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
-  color: var(--paper);
+  color: var(--linen);
   font-family: var(--font);
   font-synthesis: none;
   letter-spacing: 0.02em;
@@ -69,7 +69,7 @@ body {
   font-family: var(--font);
   font-weight: 700;
   font-size: 22px;
-  color: var(--paper);
+  color: var(--linen);
   background: #6b3a5e;
   border: 0;
   border-radius: 10px;
@@ -133,7 +133,7 @@ body {
 }
 .pill.on {
   border-color: currentColor;
-  color: var(--paper);
+  color: var(--linen);
   background: var(--night2);
 }
 .row {
@@ -167,7 +167,7 @@ body {
   font-size: clamp(88px, 17vw, 210px);
   line-height: 0.9;
   letter-spacing: 0.04em;
-  color: var(--paper);
+  color: var(--linen);
   text-shadow:
     6px 6px 0 var(--hot),
     12px 12px 0 var(--night);
@@ -188,7 +188,7 @@ body {
 }
 .tag {
   font-size: clamp(16px, 2.4vw, 22px);
-  color: var(--paper2);
+  color: var(--linen2);
   margin: 18px 0 22px;
   max-width: 640px;
   text-shadow: 2px 2px 0 var(--night);
@@ -286,7 +286,7 @@ body {
   border-radius: 10px;
   border: 0;
   background: var(--night);
-  color: var(--paper);
+  color: var(--linen);
   cursor: pointer;
 }
 .ov-body {
@@ -358,7 +358,7 @@ table.map td:first-child {
   font-size: 22px;
   width: 100%;
   background: var(--night);
-  color: var(--paper);
+  color: var(--linen);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 10px 12px;
@@ -387,7 +387,7 @@ form {
   margin-top: 10px;
 }
 .pfig {
-  background: var(--paper);
+  background: var(--linen);
   color: var(--night);
   border: 4px solid var(--night);
   border-radius: 10px;
@@ -600,7 +600,7 @@ form {
   transform: translateX(-50%);
   background: var(--night);
   border: 3px solid var(--hot);
-  color: var(--paper);
+  color: var(--linen);
   padding: 10px 16px;
   border-radius: 10px;
   font-size: 20px;
@@ -639,7 +639,7 @@ form {
   font-family: var(--num);
   font-size: 24px;
   line-height: 1.25;
-  color: var(--paper);
+  color: var(--linen);
   background: var(--night);
   border: 3px solid var(--cyan);
   border-radius: 12px;
@@ -939,8 +939,8 @@ ol.hall {
   height: 28px;
   border-radius: 50%;
   background: var(--hot);
-  color: var(--paper);
-  border: 3px dashed var(--paper);
+  color: var(--linen);
+  border: 3px dashed var(--linen);
   display: inline-grid;
   place-items: center;
   font-size: 17px;
@@ -959,7 +959,7 @@ ol.hall {
   margin-top: 0;
 }
 .token-pill.src {
-  color: var(--paper);
+  color: var(--linen);
   border-color: var(--cyan);
   padding: 4px 16px 4px 10px;
 }
@@ -1023,7 +1023,7 @@ ol.hall {
   border-left: 4px solid var(--money);
   padding: 8px 12px;
   border-radius: 6px;
-  color: var(--paper);
+  color: var(--linen);
 }
 .swatches {
   display: grid;
@@ -1038,7 +1038,7 @@ ol.hall {
   align-items: center;
   gap: 6px;
   background: var(--night);
-  color: var(--paper);
+  color: var(--linen);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 10px 6px 8px;
@@ -1114,7 +1114,7 @@ ol.hall {
   padding: 8px 12px;
 }
 .safety b {
-  color: var(--paper);
+  color: var(--linen);
   font-weight: 400;
 }
 .daily-tag {
@@ -1209,12 +1209,12 @@ ol.hall {
   padding: 4px 10px;
 }
 .privacy b {
-  color: var(--paper);
+  color: var(--linen);
   font-weight: 400;
 }
 .via {
   margin: 0;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .note.off {
   margin: 0;
@@ -1224,8 +1224,8 @@ ol.hall {
   flex: none;
 }
 .token-pill.xlink {
-  color: var(--paper);
-  border-color: var(--paper2);
+  color: var(--linen);
+  border-color: var(--linen2);
   padding: 4px 16px 4px 12px;
 }
 .token-pill .xl {
@@ -1238,7 +1238,7 @@ ol.hall {
   max-width: min(600px, 100%);
   font-size: 15px;
   line-height: 1.3;
-  color: var(--paper2);
+  color: var(--linen2);
   background: var(--night);
   border-radius: 8px;
   padding: 4px 12px;
@@ -1368,7 +1368,7 @@ ol.hall {
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
 }
 .icon-toggle.on {
-  color: var(--paper);
+  color: var(--linen);
   border-color: var(--cyan);
 }
 .acct {
@@ -1396,8 +1396,8 @@ ol.hall {
   height: 30px;
   border-radius: 50%;
   background: var(--hot);
-  color: var(--paper);
-  border: 2px dashed var(--paper);
+  color: var(--linen);
+  border: 2px dashed var(--linen);
   display: grid;
   place-items: center;
   font-size: 17px;
@@ -1407,7 +1407,7 @@ ol.hall {
 }
 .acct.in {
   background: var(--night);
-  color: var(--paper);
+  color: var(--linen);
   border-color: var(--cyan);
   padding: 4px 14px;
 }
@@ -1480,7 +1480,7 @@ ol.hall {
 .textlink {
   background: none;
   border: 0;
-  color: var(--paper2);
+  color: var(--linen2);
   font-family: var(--font);
   font-size: 18px;
   text-decoration: underline;
@@ -1503,7 +1503,7 @@ ol.hall {
   justify-content: center;
 }
 .foot-links a {
-  color: var(--paper2);
+  color: var(--linen2);
   font-family: var(--num);
   font-size: 19px;
   text-decoration: none;
@@ -1518,7 +1518,7 @@ ol.hall {
 }
 .foot-links a:hover {
   border-color: var(--cyan);
-  color: var(--paper);
+  color: var(--linen);
 }
 .title-main .quiet {
   margin: 0;
@@ -1696,7 +1696,7 @@ ol.hall {
 .side-note {
   margin: 0;
   font-size: 17px;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .side-board {
   list-style: none;
@@ -1793,7 +1793,7 @@ ol.hall {
   width: 56px;
   height: 56px;
   image-rendering: pixelated;
-  border: 3px solid var(--paper);
+  border: 3px solid var(--linen);
   border-radius: 6px;
   background: var(--night2);
   flex: none;
@@ -1818,7 +1818,7 @@ ol.hall {
 }
 .side-hot span {
   font-size: 14px;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .side-facts {
   margin: 0;
@@ -1826,7 +1826,7 @@ ol.hall {
   justify-content: space-between;
   gap: 8px;
   font-size: 15px;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .side-facts .gold {
   font-family: var(--num);
@@ -1871,7 +1871,7 @@ ol.hall {
 }
 .inspect dd {
   margin: 0;
-  color: var(--paper);
+  color: var(--linen);
 }
 
 /* ---------------------------------------------------------- 1.2: side panels, v2 (bigger, richer) */
@@ -1944,13 +1944,13 @@ ol.hall {
   flex-wrap: wrap;
   gap: 4px 14px;
   font-size: 15px;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .side-meta b {
   font-family: var(--num);
   font-weight: 400;
   font-size: 19px;
-  color: var(--paper);
+  color: var(--linen);
 }
 .ic {
   font-style: normal;
@@ -2005,7 +2005,7 @@ hr.pix {
   color: var(--dim);
 }
 .side-hint b {
-  color: var(--paper2);
+  color: var(--linen2);
   font-weight: 400;
 }
 .side-rows {
@@ -2017,13 +2017,13 @@ hr.pix {
   margin: 0;
   font-size: 15px;
   line-height: 1.3;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 .row-fact b {
   font-family: var(--num);
   font-weight: 400;
   font-size: 19px;
-  color: var(--paper);
+  color: var(--linen);
 }
 .row-fact small {
   display: block;
@@ -2099,7 +2099,7 @@ hr.pix {
   width: 44px;
   height: 44px;
   image-rendering: pixelated;
-  border: 3px solid var(--paper);
+  border: 3px solid var(--linen);
   border-radius: 5px;
   background: var(--night2);
   flex: none;
@@ -2120,7 +2120,7 @@ hr.pix {
 }
 .side-hots span {
   font-size: 13px;
-  color: var(--paper2);
+  color: var(--linen2);
 }
 /* lower-priority rows step out first on shorter screens */
 @media (max-height: 960px) {
@@ -2293,7 +2293,7 @@ hr.pix {
   bottom: -4%;
   font-family: var(--font);
   font-size: max(12px, calc(var(--s) * 0.2));
-  color: var(--paper);
+  color: var(--linen);
   background: var(--night);
   padding: 0 0.35em;
   border-radius: 4px;
@@ -2325,7 +2325,7 @@ hr.pix {
 }
 .s-pw {
   background: var(--hot);
-  color: var(--paper) !important;
+  color: var(--linen) !important;
 }
 .s-pc {
   background: var(--cyan);
@@ -2347,7 +2347,7 @@ hr.pix {
 }
 .badge.pw {
   background: var(--hot);
-  color: var(--paper);
+  color: var(--linen);
 }
 .badge.pc {
   background: var(--cyan);
@@ -2386,7 +2386,7 @@ hr.pix {
 .boss-rule {
   font-size: 22px;
   margin: 6px 0 4px;
-  color: var(--paper);
+  color: var(--linen);
 }
 .crest {
   width: 96px;
@@ -2401,7 +2401,7 @@ hr.pix {
 .crest span {
   font-family: var(--num);
   font-size: 56px;
-  color: var(--paper);
+  color: var(--linen);
   text-shadow: 3px 3px 0 var(--night);
   margin-top: -14px;
 }
@@ -2418,4 +2418,173 @@ hr.pix {
 }
 .hfigs span {
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------- 2.1: Haunted table, seed links, walkthrough */
+.haunt-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 12px;
+  font-family: var(--font);
+  color: var(--linen);
+  text-align: left;
+  cursor: pointer;
+  background: linear-gradient(100deg, #0b1a20 0%, #142a33 55%, #2a1408 100%);
+  border: 3px solid #cfe3ee;
+  border-radius: 12px;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45), inset 0 0 22px rgba(255, 138, 28, 0.18);
+  transition: transform 0.08s, filter 0.12s;
+}
+.haunt-tile:hover {
+  filter: brightness(1.12);
+}
+.haunt-tile:active {
+  transform: translateY(3px);
+}
+.ht-art {
+  position: relative;
+  flex: 0 0 52px;
+  height: 46px;
+}
+.ht-art .pumpkin {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 30px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffb35c, #f07a12 60%, #a84a06);
+  border: 2px solid var(--night);
+  box-shadow: 0 0 12px rgba(255, 138, 28, 0.7);
+}
+.ht-art .pumpkin::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: -7px;
+  width: 4px;
+  height: 7px;
+  background: #3d7a2a;
+}
+.ht-art .ghost {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 24px;
+  height: 30px;
+  border-radius: 12px 12px 4px 4px;
+  background: #eaf6ff;
+  opacity: 0.85;
+  border: 2px solid var(--night);
+  animation: ghostbob 3.2s ease-in-out infinite;
+}
+.ht-art .ghost::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  width: 4px;
+  height: 6px;
+  background: var(--night);
+  border-radius: 2px;
+  box-shadow: 7px 0 0 var(--night);
+}
+@keyframes ghostbob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.ht-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ht-text b {
+  font-size: 24px;
+  color: #ffb35c;
+  line-height: 1;
+}
+.ht-text small {
+  font-size: 15px;
+  color: #cfe3ee;
+  line-height: 1.2;
+}
+.ht-go {
+  flex: 0 0 auto;
+  font-size: 22px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #f07a12;
+  color: var(--night);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
+}
+.haunt-archive {
+  margin: 0;
+  text-align: center;
+  color: var(--dim);
+  font-size: 17px;
+}
+.challenge.pending {
+  border-color: var(--cyan);
+}
+.challenge.pending .row {
+  margin-top: 8px;
+}
+.gmark {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px;
+  border: 2px solid #cfe3ee;
+  border-radius: 50%;
+  background: #0b1a20;
+  color: #ffb35c;
+  font-size: 14px;
+  line-height: 1;
+  vertical-align: 2px;
+}
+.pill.haunt.on {
+  color: #ffb35c;
+  border-color: #cfe3ee;
+}
+.btn.haunt-btn {
+  background: #142a33;
+  border: 2px solid #cfe3ee;
+  color: #ffb35c;
+}
+.daily-tag.haunt {
+  color: #cfe3ee;
+}
+.coach.tut {
+  border-color: var(--cyan);
+}
+@media (min-aspect-ratio: 105/100) {
+  .coach.in-round {
+    left: 1.1vw;
+    transform: none;
+    top: auto;
+    bottom: 12vh;
+    width: 22.4vw;
+    font-size: clamp(15px, 1.35vw, 20px);
+  }
+}
+@media (max-aspect-ratio: 105/100) {
+  .coach.in-round {
+    top: 0.8vh;
+    font-size: 17px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ht-art .ghost {
+    animation: none;
+  }
 }

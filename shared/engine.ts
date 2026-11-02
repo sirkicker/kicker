@@ -1,10 +1,12 @@
 // The whole game as a pure state machine. The browser and the server run the same code: the server re-runs a
 // shared season from its action list to check the result. Nothing in here is random at play time: every choice
 // the rival makes comes from the position on the table and the seed.
-import { buildSquad, STAT, type Edition, type Launch } from "./data.js";
+import { buildSquad, ghostSquad, rivalSquad, STAT, type Edition, type Launch } from "./data.js";
 import {
+  BOSS,
   BOSSES,
   CLUBS,
+  HAUNT,
   COACHES,
   DRILLS,
   FINAL_BOSS,
@@ -22,11 +24,15 @@ import {
   START_OFF,
   WIN_FANS,
   drillCost,
+  styleOf,
   type DrillId,
+  type StyleId,
 } from "./content.js";
 import { pickWeighted, shuffle, stream } from "./rng.js";
 
 export type Side = 0 | 1;
+/** A full season, or the Haunted table: three matches against ghost clubs with ghost rules. */
+export type RunMode = "season" | "haunt";
 export type Dir = -1 | 0 | 1;
 export type Phase = "fixture" | "attack" | "defend" | "fulltime" | "room" | "over" | "won";
 
@@ -51,7 +57,8 @@ export type Action =
   | { t: "sell"; i: number }
   | { t: "collect" }
   | { t: "buy"; i: number }
-  | { t: "next" };
+  | { t: "next" }
+  | { t: "back" };
 
 export interface Owned {
   id: string;
@@ -83,7 +90,7 @@ export interface Trace {
 
 /** What happened, in order, so the table can play it back. */
 export type Ev =
-  | { e: "slide"; side: Side; r: number; d: number; why: "you" | "react" | "mirror" | "ai" | "block" }
+  | { e: "slide"; side: Side; r: number; d: number; why: "you" | "react" | "mirror" | "ai" | "block" | "ghost" }
   | { e: "kick"; side: Side; rod: number; fig: number; kick: Kick; steps: Step[]; result: "goal" | "pass" | "blocked" | "kept"; at: { rod: number; fig: number } | null; beaten: number; to: number; drift: number }
   | { e: "goal"; side: Side; rating: number; style: string }
   | { e: "turnover"; to: Side; why: "touches" | "blocked" | "dead" }
@@ -139,6 +146,22 @@ export interface Match {
   drift: number;
   pref: number[];
   fans: number;
+  /** How the club plays. */
+  style: StyleId;
+  /** Haunted table only: the ghost rules. */
+  ghost: Ghost | null;
+}
+
+/**
+ * The Haunted table's ghost rules. `rod` is their phasing rod: it blocks only while `tick` (your touches this match)
+ * is even. After each kick of yours, `drift` moves one of their rods a lane on its own; it is shown a touch before.
+ */
+export interface Ghost {
+  rod: number;
+  tick: number;
+  drift: { r: number; d: Dir };
+  n: number;
+  due: boolean;
 }
 
 export interface Fulltime {
@@ -148,6 +171,7 @@ export interface Fulltime {
 
 export interface RunState {
   seed: string;
+  mode: RunMode;
   edition: number;
   editionAt: number; // unix seconds
   squad: Launch[];
@@ -257,13 +281,15 @@ export const KICKS: Kick[] = [];
 for (const r of [1, 2, 3, 4]) for (const d of [0, -1, 1] as Dir[]) KICKS.push({ r, d });
 
 /** How sharp the rival club plays, by its level (round, fixture and the final). */
-export function aiParams(level: number) {
+export function aiParams(level: number, style: StyleId = "press") {
   return {
+    style,
     react: level >= 10 ? 3 : level >= 3 ? 2 : 1, // slides after each of your touches
-    passes: level >= 2, // also shuts passing lanes, not only shots
+    passes: style === "press" ? true : style === "long" ? level >= 6 : level >= 2, // also shuts passing lanes, not only shots
     look: level >= 4, // also covers the lanes you are one slide from
     read: level >= 4, // picks its kick after your block slides, instead of committing first
     power: level >= 8 ? 1 : 0, // their shots go through one blocker
+    deep: style === "long" && level >= 3 ? 1 : 0, // a long-range club's shots from deep go through one more
     touches: 4 + (level >= 3 ? 1 : 0) + (level >= 6 ? 1 : 0),
   };
 }
@@ -285,22 +311,30 @@ export class Run {
   trail: Action[] = [];
   events: Ev[] = [];
 
+  /** Rounds in this run: 8 for a season, 1 for the Haunted table. */
+  readonly rounds: number;
+
   constructor(
     public ed: Edition,
     seed: string,
+    public mode: RunMode = "season",
   ) {
     const squad = buildSquad(ed, seed);
+    const haunt = mode === "haunt";
+    this.rounds = haunt ? 1 : ROUNDS;
     const bag = shuffle(
       BOSSES.map((b) => b.id),
       stream(seed, "boss"),
     );
     const bosses: string[] = [];
-    for (let r = 1; r <= ROUNDS; r++) bosses.push(r === ROUNDS ? FINAL_BOSS.id : bag[(r - 1) % bag.length]);
+    if (haunt) bosses.push(HAUNT.boss.id);
+    else for (let r = 1; r <= ROUNDS; r++) bosses.push(r === ROUNDS ? FINAL_BOSS.id : bag[(r - 1) % bag.length]);
     const names = shuffle(CLUBS, stream(seed, "clubs"));
-    const clubs: string[] = [];
-    for (let i = 0; i < ROUNDS * 2; i++) clubs.push(names[i % names.length]);
+    const clubs: string[] = haunt ? HAUNT.clubs.slice() : [];
+    if (!haunt) for (let i = 0; i < ROUNDS * 2; i++) clubs.push(names[i % names.length]);
     this.s = {
       seed,
+      mode,
       edition: ed.id,
       editionAt: Math.floor(Date.parse(ed.at) / 1000) || ed.id * 3600,
       squad,
@@ -334,7 +368,7 @@ export class Run {
   // ------------------------------------------------------------ the fixture
   /** Who you meet in a fixture of this round. */
   clubName(kind = this.s.kind, round = this.s.round): string {
-    if (kind === 2) return BOSSES.find((b) => b.id === this.s.bosses[round - 1])?.name || FINAL_BOSS.name;
+    if (kind === 2) return BOSS[this.s.bosses[round - 1]]?.name || FINAL_BOSS.name;
     return this.s.clubs[(round - 1) * 2 + kind];
   }
   bossOf(kind = this.s.kind, round = this.s.round): string | null {
@@ -342,14 +376,24 @@ export class Run {
   }
   levelOf(kind = this.s.kind, round = this.s.round): number {
     // a boss club plays like the league side of its round; its rule is the difference. The final is the sharpest.
+    if (this.mode === "haunt") return HAUNT.levels[kind];
     if (this.bossOf(kind, round) === "bell") return FINAL_LEVEL;
     return round - 1 + Math.min(kind, 1);
   }
   isFinal(kind = this.s.kind, round = this.s.round) {
-    return round === ROUNDS && kind === 2;
+    return round === this.rounds && kind === 2;
+  }
+  /** How a fixture's club plays. */
+  styleOf(kind = this.s.kind, round = this.s.round): StyleId {
+    return styleOf(this.clubName(kind, round), this.bossOf(kind, round));
   }
   ai() {
-    return aiParams(this.s.match ? this.s.match.level : this.levelOf());
+    const m = this.s.match;
+    return aiParams(m ? m.level : this.levelOf(), m ? m.style : this.styleOf());
+  }
+  /** The launches on the other side of the table for a fixture (pictures only: they don't change how it plays). */
+  rivals(kind = this.s.kind, round = this.s.round): Launch[] {
+    return this.mode === "haunt" ? ghostSquad(this.ed, this.s.seed, this.s.squad, round, kind) : rivalSquad(this.ed, this.s.seed, this.s.squad, round, kind);
   }
 
   // ------------------------------------------------------------ figures and their numbers
@@ -455,8 +499,22 @@ export class Run {
     return m.boss === "gasspike" ? 2 : 1;
   }
 
+  /** Their phasing rod while it is faded (lets the ball through), or -1. Only ever while you have the ball. */
+  fadedRod(): number {
+    const g = this.s.match?.ghost;
+    return g && this.s.phase === "attack" && g.tick % 2 === 1 ? g.rod : -1;
+  }
+  /** Where the poltergeist moves next: the telegraphed rod, turned back at its end stop. */
+  driftNow(): { r: number; d: Dir } | null {
+    const g = this.s.match?.ghost;
+    if (!g) return null;
+    const { r, d } = g.drift;
+    if (this.canMove(1, r, d)) return { r, d };
+    if (this.canMove(1, r, -d as Dir)) return { r, d: -d as Dir };
+    return null;
+  }
   pulledArr(): number[] {
-    return [this.m.pulled, -1];
+    return [this.m.pulled, this.fadedRod()];
   }
   ballLane(off = this.m.off, ball = this.m.ball): number {
     return laneOf(ball.rod, off[ball.side][ball.rod], ball.fig);
@@ -519,8 +577,9 @@ export class Run {
         pass = Math.max(pass, v);
       }
     }
-    let v = shots ? 100 + 25 * (shots - 1) : 0;
-    v += pass;
+    const style = this.ai().style;
+    let v = shots ? (style === "bus" ? 130 : 100) + (style === "bus" ? 30 : 25) * (shots - 1) : 0;
+    v += style === "press" ? Math.round(pass * 1.5) : pass;
     if (deep && this.ai().look) {
       for (const d of [-1, 1]) {
         if (!this.canMove(0, ball.rod, d, off)) continue;
@@ -554,7 +613,12 @@ export class Run {
   }
 
   /** Where the rival's rods end up after it reacts to the position `off`. */
-  reactTo(off: number[][], ball = this.m.ball, n = this.ai().react): { off: number[][]; moves: { r: number; d: Dir }[] } {
+  /** Slides the rival makes after a touch: its level, plus one at the back for a club parking the bus once your ball reaches your attack. */
+  reactCount(ball = this.m.ball): number {
+    const p = this.ai();
+    return p.react + (p.style === "bus" && ball.side === 0 && ball.rod === 3 ? 1 : 0);
+  }
+  reactTo(off: number[][], ball = this.m.ball, n = this.reactCount(ball)): { off: number[][]; moves: { r: number; d: Dir }[] } {
     const moves: { r: number; d: Dir }[] = [];
     let cur = off;
     for (let k = 0; k < n; k++) {
@@ -571,14 +635,16 @@ export class Run {
   /** The rival's kicks from its ball, against your figures where they stand in `off`. */
   theirKicks(off = this.m.off, ball = this.m.ball) {
     const lane = laneOf(ball.rod, off[1][ball.rod], ball.fig);
-    const pw = this.ai().power;
+    const p = this.ai();
     const keeperHolds = has(this.s, "diamond");
     const out: { kick: Kick; tr: Trace; open: boolean; at: Trace["blockers"][number] | null; beaten: number; value: number }[] = [];
     for (const kick of KICKS) {
       if (kick.r !== 4 && kick.r <= ball.rod) continue;
+      // a club that parks the bus only shoots from midfield up
+      if (kick.r === 4 && p.style === "bus" && ball.rod < 2) continue;
       const tr = trace(off, this.pulledArr(), 1, ball.rod, lane, kick);
       if (!tr.legal) continue;
-      const res = resolveBlock(tr.blockers, kick.r === 4 ? pw : 0, keeperHolds);
+      const res = resolveBlock(tr.blockers, kick.r === 4 ? this.theirPower(ball.rod) : 0, keeperHolds);
       out.push({ kick, tr, open: !res.at, at: res.at, beaten: res.beaten, value: 0 });
     }
     for (const o of out) {
@@ -591,9 +657,15 @@ export class Run {
     }
     return out;
   }
+  /** Power on the rival's shot from a rod: its level, plus one from deep for a long-range club. */
+  theirPower(rod: number): number {
+    const p = this.ai();
+    return p.power + (rod <= 1 ? p.deep : 0);
+  }
   private theirKicks2(off: number[][], ball: Ball): boolean {
     const lane = laneOf(ball.rod, off[1][ball.rod], ball.fig);
-    const pw = this.ai().power;
+    if (this.ai().style === "bus" && ball.rod < 2) return false;
+    const pw = this.theirPower(ball.rod);
     const keeperHolds = has(this.s, "diamond");
     const tr0 = (d: Dir) => trace(off, this.pulledArr(), 1, ball.rod, lane, { r: 4, d });
     for (const d of [0, -1, 1] as Dir[]) {
@@ -677,9 +749,10 @@ export class Run {
       m.longball = false;
       m.dummy = 0;
       // the rival gets its defence set before your first touch
-      this.react(SETUP_SLIDES);
+      this.react(SETUP_SLIDES + (this.ai().style === "press" ? 1 : 0));
     } else {
       s.phase = "defend";
+      this.settleGhost();
       m.aiTouches = this.ai().touches;
       m.blockSlides = this.blockBase() + (why === "lost" && has(s, "paper") ? 1 : 0);
       m.intent = this.aiChoose();
@@ -826,7 +899,13 @@ export class Run {
           drift: boss === "depeg" ? (rnd() < 0.5 ? -1 : 1) : 0,
           pref: shuffle([0, 1, 2, 3], rnd),
           fans: 0,
+          style: this.styleOf(),
+          ghost: null,
         };
+        if (this.mode === "haunt") {
+          const g = stream(s.seed, "phasing", s.round, s.kind);
+          s.match.ghost = { rod: [1, 2, 3][Math.floor(g() * 3)], tick: 0, drift: this.nextDrift(0), n: 0, due: false };
+        }
         this.events.push({ e: "kickoff", side: 0 });
         this.startPossession(0, 2, 2, "kickoff");
         break;
@@ -845,6 +924,7 @@ export class Run {
           if (cost) s.touchesTotal++;
           m.off[0][r] += a.d;
           m.afterPass = false;
+          if (m.ghost) m.ghost.tick++;
           this.events.push({ e: "slide", side: 0, r, d: a.d, why: "you" });
           if (m.boss === "wash") {
             const facing = [0, 3, 2, 1][r];
@@ -890,6 +970,10 @@ export class Run {
         }
         const power = isShot ? this.shotPower(slot, ball.rod, tr, touchesBefore, m.afterPass) : 0;
         const res = !isShot && m.longball ? { at: null, beaten: 0 } : resolveBlock(tr.blockers, power, false, m.boss === "bell" ? FINAL_KEEPER : 1);
+        if (m.ghost) {
+          m.ghost.tick++;
+          m.ghost.due = true;
+        }
         if (isShot) {
           m.shots++;
           if (m.freekick > 0) m.freekick--;
@@ -912,6 +996,7 @@ export class Run {
             else {
               if (m.boss !== "jam") this.react();
               this.afterTouch();
+              if (s.phase === "attack") this.settleGhost();
             }
           } else {
             this.events.push({ e: "turnover", to: 1, why: "blocked" });
@@ -947,6 +1032,7 @@ export class Run {
         else {
           if (m.boss !== "jam") this.react();
           this.afterTouch();
+          if (s.phase === "attack") this.settleGhost();
         }
         break;
       }
@@ -967,7 +1053,7 @@ export class Run {
             this.turnover(0, "dead");
             break;
           }
-          const res = resolveBlock(tr.blockers, plan.kick.r === 4 ? p.power : 0, has(s, "diamond"));
+          const res = resolveBlock(tr.blockers, plan.kick.r === 4 ? this.theirPower(ball.rod) : 0, has(s, "diamond"));
           if (res.at) {
             this.events.push({ e: "kick", side: 1, rod: ball.rod, fig: ball.fig, kick: plan.kick, steps: tr.steps, result: "blocked", at: { rod: res.at.rod, fig: res.at.fig }, beaten: res.beaten, to: -1, drift: 0 });
             if (has(s, "bag")) m.fans++;
@@ -1062,8 +1148,13 @@ export class Run {
       }
       case "next": {
         if (s.phase !== "room") fail("the dressing room is closed");
+        // the shelf stays as it was: "back" reopens the dressing room before kick-off
         s.phase = "fixture";
-        s.offers = [];
+        break;
+      }
+      case "back": {
+        if (s.phase !== "fixture" || s.visit === 0) fail("no dressing room before your first match");
+        s.phase = "room";
         break;
       }
       default:
@@ -1087,7 +1178,7 @@ export class Run {
   }
 
   /** The rival reacts to your touch (unless a Dummy Run has it frozen). */
-  private react(n = this.ai().react) {
+  private react(n = this.reactCount()) {
     const m = this.m;
     if (m.dummy > 0) {
       m.dummy--;
@@ -1098,10 +1189,32 @@ export class Run {
     for (const mv of moves) this.events.push({ e: "slide", side: 1, r: mv.r, d: mv.d, why: "react" });
   }
 
+  /** The poltergeist's next drift, fixed by the seed: rod and way. */
+  private nextDrift(n: number): { r: number; d: Dir } {
+    const s = this.s;
+    const rnd = stream(s.seed, "polter", s.round, s.kind, n);
+    return { r: Math.floor(rnd() * 4), d: rnd() < 0.5 ? -1 : 1 };
+  }
+  /** After one of your kicks: the telegraphed rod drifts, and the next drift is set. */
+  private settleGhost() {
+    const m = this.s.match;
+    const g = m?.ghost;
+    if (!m || !g || !g.due) return;
+    g.due = false;
+    const mv = this.driftNow();
+    if (mv) {
+      m.off[1][mv.r] += mv.d;
+      this.events.push({ e: "slide", side: 1, r: mv.r, d: mv.d, why: "ghost" });
+    }
+    g.n++;
+    g.drift = this.nextDrift(g.n);
+  }
+
   summary() {
     const s = this.s;
     return {
       seed: s.seed,
+      mode: s.mode,
       edition: s.edition,
       round: s.round,
       fixture: s.kind,
@@ -1118,14 +1231,24 @@ export class Run {
 }
 
 /** Re-runs an action list; throws on the first illegal action. */
-export function rerun(ed: Edition, seed: string, actions: Action[]): Run {
-  const r = new Run(ed, seed);
+export function rerun(ed: Edition, seed: string, actions: Action[], mode: RunMode = "season"): Run {
+  const r = new Run(ed, seed, mode);
   for (const a of actions) r.apply(a);
   return r;
 }
 
 // ------------------------------------------------------------ compact action trail
-export function encodeTrail(actions: Action[]): string {
+/** A Haunted table trail starts with an "H" token, so a trail can't be posted under the other mode. */
+export function encodeTrail(actions: Action[], mode: RunMode = "season"): string {
+  return (mode === "haunt" ? (actions.length ? "H_" : "H") : "") + encodeTrail0(actions);
+}
+/** Splits a posted trail into its mode and actions. Throws on anything malformed. */
+export function parseTrail(str: string): { mode: RunMode; actions: Action[] } {
+  if (str === "H") return { mode: "haunt", actions: [] };
+  if (str.startsWith("H_")) return { mode: "haunt", actions: decodeTrail(str.slice(2)) };
+  return { mode: "season", actions: decodeTrail(str) };
+}
+function encodeTrail0(actions: Action[]): string {
   return actions
     .map((a) => {
       switch (a.t) {
@@ -1149,6 +1272,8 @@ export function encodeTrail(actions: Action[]): string {
           return "b" + a.i;
         case "next":
           return "n";
+        case "back":
+          return "v";
       }
     })
     .join("_");
@@ -1204,6 +1329,9 @@ export function decodeTrail(str: string): Action[] {
       case "n":
         none();
         return { t: "next" };
+      case "v":
+        none();
+        return { t: "back" };
     }
     throw new Error("bad trail");
   });

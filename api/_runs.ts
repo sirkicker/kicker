@@ -1,5 +1,6 @@
 // Posted seasons: re-run on the server from the action trail, then frozen.
-import { decodeTrail, rerun, type FigInfo } from "../shared/engine.js";
+import { parseTrail, rerun, type FigInfo } from "../shared/engine.js";
+import { HAUNT } from "../shared/content.js";
 import { normSeed } from "../shared/rng.js";
 import { hash32 } from "../shared/rng.js";
 import { getEdition } from "./_cut.js";
@@ -31,6 +32,8 @@ export interface Result {
   against: number;
   at: string;
   daily?: string; // the UTC day whose Daily Match this was
+  mode?: "haunt"; // a Haunted table run (2.1); absent for a season
+  kit?: boolean; // a Haunted match won while the event ran: the Haunted kit (cosmetic only)
   house?: boolean; // a $KICKER holder's house mark (cosmetic only)
   verified?: boolean; // posted by the address that owns the name
 }
@@ -55,7 +58,7 @@ export const ID_RE = /^[0-9a-z]{10}$/;
 export const resultPath = (id: string) => `showdowns/${id}.json`;
 
 export async function verifyAndStore(
-  input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown; house?: unknown; session?: unknown },
+  input: { seed?: unknown; edition?: unknown; trail?: unknown; mode?: unknown; name?: unknown; house?: unknown; session?: unknown },
   now = Date.now(),
 ): Promise<Result> {
   const seed = normSeed(String(input.seed || ""));
@@ -66,7 +69,11 @@ export async function verifyAndStore(
   if (trail.length > 60000) throw new Error("trail too long");
   const ed = await getEdition(edition);
   if (!ed) throw new Error("squad cut not found");
-  const run = rerun(ed, seed, decodeTrail(trail)); // throws on any illegal touch
+  // the mode rides in the trail itself; a mode flag that says otherwise is refused
+  const parsed = parseTrail(trail);
+  if (input.mode !== undefined && input.mode !== null && input.mode !== parsed.mode) throw new Error("mode does not match the trail");
+  const mode = parsed.mode;
+  const run = rerun(ed, seed, parsed.actions, mode); // throws on any illegal touch
   const sum = run.summary();
   if (!sum.over) throw new PostError("That season is not finished yet.");
   const rawName = typeof input.name === "string" ? cleanName(input.name) : "";
@@ -81,7 +88,8 @@ export async function verifyAndStore(
   const verified = !!owner && !!sess;
   // the house mark rides along only with a valid claim for this very name; it never touches the replay above
   const house = !!name && claimOk(input.house, name, now);
-  const daily = await dailyDayOf(seed, edition, now);
+  const daily = mode === "haunt" ? null : await dailyDayOf(seed, edition, now);
+  const kit = mode === "haunt" && sum.cleared > 0 && now <= HAUNT.end;
   const id = shortId(`v2|${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}${verified ? "|verified" : ""}`);
   const rec: Result = {
     v: 2,
@@ -101,6 +109,8 @@ export async function verifyAndStore(
     against: sum.against,
     at: new Date(now).toISOString(),
     ...(daily ? { daily } : {}),
+    ...(mode === "haunt" ? { mode } : {}),
+    ...(kit ? { kit } : {}),
     ...(house ? { house } : {}),
     ...(verified ? { verified } : {}),
   };
@@ -125,6 +135,8 @@ export async function verifyAndStore(
       won: rec.won,
       at: rec.at,
       ...(rec.daily ? { daily: rec.daily } : {}),
+      ...(rec.mode ? { mode: rec.mode } : {}),
+      ...(rec.kit ? { kit: true } : {}),
     });
   }
   return rec;
@@ -145,6 +157,7 @@ export interface HallEntry {
   at: string;
   house?: boolean;
   verified?: boolean;
+  mode?: "haunt";
 }
 export interface Hall {
   day: string;
@@ -153,6 +166,8 @@ export interface Hall {
 export const HALL_SIZE = 50;
 /** New in 2.0: the old game's day files stay where they were and are not read for the Hall. */
 export const hallPath = (day: string) => `goals/${day}.json`;
+/** New in 2.1: the Haunted table's own day board. Same single put per named post as the Hall, just another file. */
+export const hauntPath = (day: string) => `haunt/${day}.json`;
 
 export function hallEntry(rec: Result): HallEntry {
   return {
@@ -169,12 +184,14 @@ export function hallEntry(rec: Result): HallEntry {
     at: rec.at,
     ...(rec.house ? { house: true } : {}),
     ...(rec.verified ? { verified: true } : {}),
+    ...(rec.mode ? { mode: rec.mode } : {}),
   };
 }
 
 async function addToHall(rec: Result): Promise<void> {
   const day = utcDay(new Date(rec.at));
-  const hall = (await loadFresh<Hall>(hallPath(day), 0)) || { day, entries: [] };
+  const path = rec.mode === "haunt" ? hauntPath(day) : hallPath(day);
+  const hall = (await loadFresh<Hall>(path, 0)) || { day, entries: [] };
   if (hall.entries.some((e) => e.id === rec.id)) return;
   const entry = hallEntry(rec);
   // one line per player per seed: keep their best
@@ -184,11 +201,11 @@ async function addToHall(rec: Result): Promise<void> {
     .sort((a, b) => b.total - a.total || a.at.localeCompare(b.at))
     .slice(0, HALL_SIZE);
   if (!next.some((e) => e.id === entry.id)) return;
-  await saveOver(hallPath(day), { day, entries: next } satisfies Hall);
+  await saveOver(path, { day, entries: next } satisfies Hall);
 }
 
-export async function getHall(day: string): Promise<Hall> {
-  return (await loadFresh<Hall>(hallPath(day))) || { day, entries: [] };
+export async function getHall(day: string, board: "goals" | "haunt" = "goals"): Promise<Hall> {
+  return (await loadFresh<Hall>(board === "haunt" ? hauntPath(day) : hallPath(day))) || { day, entries: [] };
 }
 
 export async function getResult(id: string): Promise<Result | null> {

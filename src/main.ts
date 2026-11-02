@@ -1,7 +1,7 @@
 // Boot: fonts, Pixi, the squad cut, URL seeds and challenges, the saved season, the Daily Match, and the coach's tips.
 import { Application } from "pixi.js";
 import type { Edition } from "../shared/data.js";
-import { decodeTrail, encodeTrail, rerun, Run, type Action } from "../shared/engine.js";
+import { encodeTrail, parseTrail, rerun, Run, type Action, type RunMode } from "../shared/engine.js";
 import { newSeed, normSeed } from "../shared/rng.js";
 import { bumpStreak, type Streak } from "../shared/daily.js";
 import { cleanName } from "../shared/names.js";
@@ -13,12 +13,14 @@ import { local, setUi, toast, ui, type Challenge, type Daily } from "./store.js"
 import { house } from "./house.js";
 import { rememberedAddress } from "./signin.js";
 import { me, receipts, refreshProfile } from "./me.js";
-import { mountUi, VERSION, type LocalGoal } from "./ui.js";
+import { mountUi, VERSION, type LocalGoal, type UiActions } from "./ui.js";
+import { gainHauntKit } from "./haunt.js";
 import "./style.css";
 
 interface Saved {
   seed: string;
   edition: number;
+  /** encodeTrail with the mode: a Haunted table trail starts with "H". */
   trail: string;
   challenge: Challenge | null;
 }
@@ -42,17 +44,43 @@ let coachStep = local.get<number>("kk.tips", 0);
 function save(run: Run) {
   const over = run.s.phase === "over" || run.s.phase === "won";
   if (over) local.del(SAVE_KEY);
-  else local.set(SAVE_KEY, { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), challenge: ui.challenge } satisfies Saved);
+  else local.set(SAVE_KEY, { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode), challenge: ui.challenge } satisfies Saved);
 }
 
-function setUrl(run: Run | null) {
+/** The address bar stays bare during play: a reload or a bookmark always lands on the title (with Continue). */
+function setUrl() {
   const u = new URL(location.href);
+  if (!u.search && u.pathname === "/") return;
   u.search = "";
-  if (run) {
-    u.searchParams.set("s", run.s.seed);
-    u.searchParams.set("e", String(run.s.edition));
-  }
+  u.pathname = "/";
   history.replaceState(null, "", u.toString());
+}
+
+/** The share link for a seed. Opening it shows the seed on the title; it never starts by itself. */
+export function seedUrl(seed: string, edition: number, mode: RunMode = "season") {
+  return `${location.origin}/?s=${seed}&e=${edition}${mode === "haunt" ? "&m=haunt" : ""}`;
+}
+
+/** The first-match walkthrough: four prompts, each moves on when the player does the thing. Shown once, skippable. */
+function tutorial(a: Action, run: Run) {
+  const done = () => {
+    local.set("kk.tut", "done");
+    setUi({ tut: null });
+  };
+  let t = ui.tut;
+  if (t === null) {
+    if (a.t === "go" && local.get<string>("kk.tut", "") !== "done" && run.s.phase === "attack") setUi({ tut: 0 });
+    return;
+  }
+  const ph = run.s.phase;
+  if (ph !== "attack" && ph !== "defend") return done();
+  if (t === 0 && a.t === "slide") t = 1;
+  else if (t === 1 && a.t === "kick") t = a.r === 4 ? 3 : 2;
+  else if (t === 2 && a.t === "kick" && a.r === 4) t = 3;
+  else if (t === 3 && a.t === "hold") return done();
+  if (ph === "defend" && t < 3) t = 3;
+  if (t === 3 && ph === "attack" && a.t === "hold") return done();
+  if (t !== ui.tut) setUi({ tut: t });
 }
 
 function coach(step: number, text: string) {
@@ -62,17 +90,17 @@ function coach(step: number, text: string) {
   setUi({ coach: { step, text } });
 }
 
-async function startRun(seed: string, edition: Edition, trail: Action[] = []) {
+async function startRun(seed: string, edition: Edition, trail: Action[] = [], mode: RunMode = "season") {
   unlock();
   let run: Run;
   try {
-    run = rerun(edition, seed, trail);
+    run = rerun(edition, seed, trail, mode);
   } catch {
-    run = new Run(edition, seed);
+    run = new Run(edition, seed, mode);
   }
-  setUi({ run, overlay: null, coach: null, bossSeen: false });
+  setUi({ run, overlay: null, coach: null, bossSeen: false, pendingSeed: null, tut: null });
   game.start(run);
-  setUrl(run);
+  setUrl();
   save(run);
   if (run.s.phase === "fixture" && run.trail.length === 0)
     coach(0, "Your eleven are live vibe/vibe launches. Curve progress gives a figure Power, trades give Pace, holders give Grip. Press Kick off.");
@@ -122,10 +150,8 @@ async function boot() {
     onAction(a, run) {
       save(run);
       setUi({});
-      if (a.t === "go" && run.s.round === 1 && run.s.kind === 0)
-        coach(1, "The gold lines are your kicks: a disc in their goal is a shot, a ring on your figure is a pass. Slide a rod with the arrows under it. They react to every touch.");
-      if (run.s.phase === "defend" && run.s.round === 1)
-        coach(2, "Their ball. Red lines show where it can go. Slide your rods into those lanes, then press Ready.");
+      tutorial(a, run);
+      if (run.mode === "haunt" && run.events.some((e) => e.e === "end" && e.won) && gainHauntKit()) toast("Haunted kit: yours, on this device. For the look only.");
       if (a.t === "collect" && run.s.visit === 1) coach(3, "The dressing room. Coaches read the launches on your rods; training lasts the season; a set piece is used once. Prices are fixed.");
       if (a.t === "next" && run.s.kind === 2 && run.s.round === 1) coach(4, "A boss club next: it changes one rule for the match. Read it before you kick off.");
     },
@@ -166,12 +192,12 @@ async function boot() {
     },
   };
 
-  mountUi(document.getElementById("ui")!, {
-    async newRun() {
+  const actions: UiActions = {
+    async newRun(mode: RunMode = "season") {
       try {
         const ed = await fetchEdition();
         setUi({ edition: ed, challenge: null });
-        await startRun(newSeed(), ed);
+        await startRun(newSeed(), ed, [], mode);
       } catch (e) {
         toast("Could not load the squad: " + (e as Error).message);
       }
@@ -186,7 +212,8 @@ async function boot() {
         const ed = await fetchEdition(d.edition);
         const sv = local.get<Saved | null>(SAVE_KEY, null);
         setUi({ challenge: null });
-        if (sv && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, decodeTrail(sv.trail));
+        const p = sv ? parseSaved(sv) : null;
+        if (sv && p && p.mode === "season" && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, p.actions);
         else await startRun(d.seed, ed);
       } catch (e) {
         toast("Could not load the daily squad: " + (e as Error).message);
@@ -205,7 +232,8 @@ async function boot() {
         try {
           const ed = await fetchEdition(sv.edition);
           setUi({ challenge: sv.challenge });
-          await startRun(sv.seed, ed, decodeTrail(sv.trail));
+          const p = parseSaved(sv);
+          await startRun(sv.seed, ed, p?.actions || [], p?.mode || "season");
         } catch {
           toast("That season's squad cut is gone");
           local.del(SAVE_KEY);
@@ -217,10 +245,12 @@ async function boot() {
       const text = raw.trim();
       let seed: string | null = null;
       let edition: number | undefined;
+      let mode: RunMode = "season";
       try {
         const u = new URL(text);
         seed = normSeed(u.searchParams.get("s") || "");
         edition = Number(u.searchParams.get("e")) || undefined;
+        if (u.searchParams.get("m") === "haunt") mode = "haunt";
         const c = u.pathname.match(/\/c\/([0-9a-z]{10})/);
         if (c) {
           location.href = `/c/${c[1]}`;
@@ -237,7 +267,7 @@ async function boot() {
       try {
         const ed = await fetchEdition(edition);
         setUi({ challenge: null });
-        await startRun(seed, ed);
+        await startRun(seed, ed, [], mode);
         return true;
       } catch {
         return false;
@@ -246,11 +276,11 @@ async function boot() {
     restartSeed() {
       const run = ui.run;
       if (!run) return;
-      void startRun(run.s.seed, run.ed);
+      void startRun(run.s.seed, run.ed, [], run.mode);
     },
     abandon() {
       game.root.visible = false;
-      setUi({ overlay: "title", coach: null });
+      setUi({ overlay: "title", coach: null, tut: null });
     },
     acceptChallenge() {
       const ch = ui.challenge;
@@ -259,7 +289,7 @@ async function boot() {
       void (async () => {
         try {
           const ed = await fetchEdition(sd.edition);
-          await startRun(sd.seed, ed);
+          await startRun(sd.seed, ed, [], sd.mode);
         } catch {
           toast("The challenge's squad cut is gone");
         }
@@ -274,12 +304,12 @@ async function boot() {
         const claim = h && mine(h.name) ? h.claim : undefined;
         const s = me.get();
         const session = s && mine(s.name) ? s.session : undefined;
-        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name, house: claim, session });
+        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode), mode: run.mode, name, house: claim, session });
         const j = await postJson("/api/result", body);
         if (j.receipt && name) receipts.add(name, j.receipt);
         if (j.result?.verified) void refreshProfile();
         sfx.coin();
-        return { id: j.id, url: j.url, daily: j.result?.daily || null, house: !!j.result?.house, verified: !!j.result?.verified };
+        return { id: j.id, url: j.url, daily: j.result?.daily || null, house: !!j.result?.house, verified: !!j.result?.verified, kit: !!j.result?.kit };
       } catch (e) {
         toast("Could not verify the season: " + (e as Error).message);
         return null;
@@ -288,7 +318,7 @@ async function boot() {
     seedLink() {
       const run = ui.run;
       if (!run) return location.origin;
-      return `${location.origin}/?s=${run.s.seed}&e=${run.s.edition}`;
+      return seedUrl(run.s.seed, run.s.edition, run.mode);
     },
     swap(a, b) {
       return game.swap(a, b);
@@ -302,7 +332,7 @@ async function boot() {
         try {
           const ed = await fetchEdition(h.edition);
           setUi({ challenge: { id: h.id, name: h.name, round: h.round, cleared: h.cleared, won: h.won, best: h.total, style: h.style } });
-          await startRun(h.seed, ed);
+          await startRun(h.seed, ed, [], h.mode === "haunt" ? "haunt" : "season");
         } catch {
           toast("That season's squad cut is gone");
         }
@@ -311,7 +341,30 @@ async function boot() {
     hasSaved() {
       return !!local.get<Saved | null>(SAVE_KEY, null);
     },
-  });
+    savedMode() {
+      const sv = local.get<Saved | null>(SAVE_KEY, null);
+      return sv ? parseSaved(sv)?.mode || null : null;
+    },
+    playPending() {
+      const p = ui.pendingSeed;
+      if (!p) return;
+      void (async () => {
+        try {
+          const ed = await fetchEdition(p.edition || undefined);
+          const sv = local.get<Saved | null>(SAVE_KEY, null);
+          const sp = sv ? parseSaved(sv) : null;
+          setUi({ challenge: null });
+          // the same season already under way on this device: carry on where it was
+          if (sv && sp && sv.seed === p.seed && sv.edition === ed.id && sp.mode === p.mode) await startRun(sv.seed, ed, sp.actions, sp.mode);
+          else await startRun(p.seed, ed, [], p.mode);
+        } catch {
+          toast("That seed's squad cut is gone");
+        }
+      })();
+    },
+  };
+  mountUi(document.getElementById("ui")!, actions);
+  Object.assign((window as unknown as { kicker: object }).kicker, { newRun: actions.newRun, playPending: actions.playPending, continueRun: actions.continueRun });
 
   const first = () => {
     unlock();
@@ -330,7 +383,7 @@ async function boot() {
       if (r.ok) {
         const rec = await r.json();
         if (rec.v === 2) {
-          pendingChallenge = { seed: rec.seed, edition: rec.edition };
+          pendingChallenge = { seed: rec.seed, edition: rec.edition, mode: rec.mode === "haunt" ? "haunt" : "season" };
           setUi({ challenge: { id: rec.id, name: rec.name, round: rec.round, cleared: rec.cleared, won: rec.won, best: rec.best?.total || 0, style: rec.best?.style || "" } });
           const ed = await fetchEdition(rec.edition);
           setUi({ edition: ed });
@@ -339,19 +392,14 @@ async function boot() {
         toast("That link is from an older season of KICKER. Its run can't be replayed on today's table.");
       }
     }
+    // a seed link shows the seed on the title with a button; nothing starts until the player presses it
     if (sParam) {
-      const sv = local.get<Saved | null>(SAVE_KEY, null);
-      const ed = await fetchEdition(eParam);
-      setUi({ edition: ed });
-      if (sv && sv.seed === sParam && sv.edition === ed.id) {
-        setUi({ challenge: sv.challenge });
-        await startRun(sv.seed, ed, decodeTrail(sv.trail));
-      } else await startRun(sParam, ed);
-      return;
+      setUi({ pendingSeed: { seed: sParam, edition: eParam || 0, mode: q.get("m") === "haunt" ? "haunt" : "season" } });
+      setUrl();
     }
     const ed = await fetchEdition();
     setUi({ edition: ed });
-    if (ui.overlay === "title" && local.get<string>("kk.news", "") !== VERSION) setUi({ overlay: "news" });
+    if (!sParam && ui.overlay === "title" && local.get<string>("kk.news", "") !== VERSION) setUi({ overlay: "news" });
   } catch (e) {
     setUi({ editionError: (e as Error).message });
   }
@@ -360,7 +408,7 @@ async function boot() {
 interface Posted {
   id: string;
   url: string;
-  result?: { daily?: string; house?: boolean; verified?: boolean };
+  result?: { daily?: string; house?: boolean; verified?: boolean; kit?: boolean };
   receipt?: string;
 }
 
@@ -384,7 +432,15 @@ function postJson(url: string, body: string): Promise<Posted> {
   });
 }
 
-let pendingChallenge: { seed: string; edition: number } | null = null;
+let pendingChallenge: { seed: string; edition: number; mode: RunMode } | null = null;
+
+function parseSaved(sv: Saved): { mode: RunMode; actions: Action[] } | null {
+  try {
+    return parseTrail(sv.trail);
+  } catch {
+    return null;
+  }
+}
 
 // the pill shows the last address this browser signed in with; Para itself loads only when sign-in is touched
 setUi({ signedIn: rememberedAddress() });

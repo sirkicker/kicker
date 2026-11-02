@@ -74,17 +74,22 @@ function tone(freq: number, dur: number, type: OscillatorType, vol: number, when
   o.stop(t + dur + 0.02);
 }
 
-function noise(dur: number, freq: number, q: number, vol: number, when = 0) {
+function noise(dur: number, freq: number, q: number, vol: number, when = 0, swell = 0) {
   if (!ctx || !master || !noiseBuf) return;
   const t = ctx.currentTime + when;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuf;
+  src.loop = dur > 0.45;
   const f = ctx.createBiquadFilter();
   f.type = "bandpass";
   f.frequency.value = freq;
   f.Q.value = q;
   const g = ctx.createGain();
-  g.gain.setValueAtTime(vol, t);
+  if (swell) {
+    // a crowd: rises, holds, falls away
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + swell);
+  } else g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   src.connect(f).connect(g).connect(master);
   src.start(t, Math.random() * 0.3);
@@ -106,11 +111,45 @@ export const sfx = {
     noise(0.04, 2600, 2, 0.4);
     tone(hard ? 120 : 160, 0.09, "square", 0.07, 0, undefined, hard ? 70 : 110);
   },
-  /** The ball stops dead against a figure. */
+  /** The ball stops dead against a figure: a hard wooden clack. */
   block() {
     if (!on()) return;
-    noise(0.07, 700, 1.5, 0.45);
+    noise(0.035, 2400, 3, 0.5);
+    noise(0.08, 650, 1.5, 0.4, 0.01);
     tone(95, 0.12, "triangle", 0.12);
+  },
+  /** A rod hitting its lane stop: a heavy thunk. */
+  thunk() {
+    if (!on()) return;
+    tone(70, 0.09, "sine", 0.12, 0, undefined, 52);
+    noise(0.03, 900, 2, 0.15);
+  },
+  /** The stands after a goal: a short swell. */
+  crowd() {
+    if (!on()) return;
+    noise(1.2, 900, 0.35, 0.22, 0.05, 0.25);
+    noise(1.0, 2200, 0.6, 0.08, 0.1, 0.3);
+  },
+  /** A ghost figure takes the ball: a falling, wavering sine. */
+  ghostBlock() {
+    if (!on()) return;
+    tone(740, 0.5, "sine", 0.06, 0, undefined, 260);
+    tone(749, 0.5, "sine", 0.05, 0.02, undefined, 262);
+    noise(0.06, 1800, 3, 0.25);
+  },
+  /** The poltergeist moves a rod: a low hum and a breath. */
+  polter() {
+    if (!on()) return;
+    noise(0.4, 500, 0.6, 0.16);
+    tone(110, 0.45, "sawtooth", 0.035, 0, undefined, 82);
+    tone(165, 0.45, "sine", 0.04, 0.05, undefined, 123);
+  },
+  /** A goal on the Haunted table: a minor organ arpeggio. */
+  hauntGoal() {
+    if (!on()) return;
+    noise(0.4, 500, 0.5, 0.2);
+    [0, 3, 7, 12, 15].forEach((s, i) => tone(220 * Math.pow(2, s / 12), 0.42, "triangle", 0.06, i * 0.08));
+    tone(110, 0.9, "sawtooth", 0.025, 0.1);
   },
   /** A clean pass, trapped. */
   trap() {

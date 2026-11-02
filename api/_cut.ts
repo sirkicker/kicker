@@ -96,7 +96,14 @@ export async function cutEdition(id: number, deadline = Date.now() + 20000): Pro
     }
     return out;
   });
-  return { id, at: new Date().toISOString(), block, scanned, dropped, pool };
+  // the Haunted table's ghosts: launches with no trades in 24h that are not on the list, the most-held first
+  const listed = new Set(pool.flat().map((c) => c.t));
+  const ghosts = kinds
+    .flat()
+    .filter((c) => c.k === 0 && !listed.has(c.t))
+    .sort((a, b) => b.h - a.h || (a.t < b.t ? -1 : 1))
+    .slice(0, 16);
+  return { id, at: new Date().toISOString(), block, scanned, dropped, pool, ...(ghosts.length ? { ghosts } : {}) };
 }
 
 const key = (id: number) => `editions/${id}.json`;

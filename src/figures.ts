@@ -10,7 +10,7 @@ import { look } from "./house.js";
 export const PW = 112;
 export const PH = 156;
 /** Figure head radius on the table. */
-export const FR = 19;
+export const FR = 21;
 
 export function txt(text: string, style: TextStyleOptions): Text {
   const st: TextStyleOptions = { ...style };
@@ -86,12 +86,19 @@ export function pairGlyph(g: Graphics, u: number, x: number, y: number, s: numbe
 }
 
 // ------------------------------------------------------------ a figure on a rod, seen from above
+/** How a figure is dressed: your kit, the rival's turquoise, or a ghost club's pale sheet. */
+export type FigLook = "you" | "them" | "ghost";
+export const GHOST = { main: 0xcfe3ee, hi: 0xf4fbff, trim: 0x8fb6c8 };
+
 /**
- * A table-football man from above: shoulders along the rod, a boot pointing at the goal it attacks,
- * and the launch's own picture as the head. Your side wears the kit (house colours); theirs is turquoise.
+ * A table-football man from above: shoulders and arms across the rod in the kit colour, the launch's own picture
+ * as the head, and a boot that shows under the body towards the goal it attacks (it swings out on a kick).
+ * Your side wears the kit (house colours); a rival wears turquoise; a ghost club is pale and see-through.
  */
 export class FigureView extends Container {
+  glow = new Graphics();
   body = new Graphics();
+  foot = new Graphics();
   head = new Graphics();
   ring = new Graphics();
   pips = new Graphics();
@@ -99,14 +106,17 @@ export class FigureView extends Container {
   tag: Text | null = null;
   tex: Texture | null = null;
   hover = 0;
+  look: FigLook;
 
   constructor(
     public side: 0 | 1,
     public launch: Launch | null,
     public number = 0,
+    look?: FigLook,
   ) {
     super();
-    this.addChild(this.syn, this.body, this.head, this.ring, this.pips);
+    this.look = look || (side === 0 ? "you" : "them");
+    this.addChild(this.syn, this.glow, this.foot, this.body, this.head, this.ring, this.pips);
     this.draw();
     if (launch) {
       tokenTexture(launch.c, launch.s, (t) => {
@@ -114,57 +124,94 @@ export class FigureView extends Container {
         this.tex = t;
         this.drawHead();
       });
-      const lb = txt("$" + launch.s.slice(0, 6), { fontSize: 9, fill: COL.cream, stroke: { color: COL.ink, width: 3 } });
+      const lb = txt("$" + launch.s.slice(0, 6), { fontSize: 11, fill: this.look === "you" ? COL.cream : this.look === "ghost" ? GHOST.hi : THEM.hi, stroke: { color: COL.ink, width: 4 } });
       lb.anchor.set(0.5, 0);
-      lb.position.set(0, FR + 3);
+      lb.position.set(0, FR + 12);
       this.tag = lb;
       this.addChild(lb);
     }
+    if (this.look === "ghost") this.alpha = 0.82;
     this.eventMode = "static";
     this.cursor = "pointer";
     // a finger is bigger than a figure: the whole lane square answers
-    this.hitArea = new Circle(0, 0, FR + 8);
+    this.hitArea = new Circle(0, 0, FR + 10);
   }
 
   kit(): { main: number; hi: number; trim: number } {
-    if (this.side === 1) return THEM;
+    if (this.look === "ghost") return GHOST;
+    if (this.look === "them") return THEM;
     const lk = look();
     return { main: lk.kit, hi: lk.kitHi, trim: lk.trim };
+  }
+
+  get fwd() {
+    return this.side === 0 ? 1 : -1;
   }
 
   draw() {
     const k = this.kit();
     const b = this.body;
+    const fwd = this.fwd;
+    const ghost = this.look === "ghost";
     b.clear();
-    const fwd = this.side === 0 ? 1 : -1;
-    // shadow, then shoulders along the rod, then the boot towards the goal it attacks
-    b.roundRect(-9 + 3, -24 + 4, 18, 48, 8).fill({ color: 0x000000, alpha: 0.35 });
-    b.roundRect(fwd * 8 - 6, -6, 14, 12, 5).fill(COL.ink);
-    b.roundRect(fwd * 8 - 5, -5, 12, 10, 4).fill(k.trim);
-    b.roundRect(-9, -24, 18, 48, 8).fill(COL.ink);
-    b.roundRect(-7, -22, 14, 44, 6).fill(k.main);
-    b.roundRect(-7, -22, 5, 44, 3).fill({ color: k.hi, alpha: 0.55 });
-    if (this.launch) pairGlyph(b, this.launch.u, 0, -16, 7, k.trim);
+    // shadow across the felt
+    b.roundRect(-13 + 4, -FR - 12 + 5, 26, 2 * FR + 24, 12).fill({ color: 0x000000, alpha: ghost ? 0.15 : 0.35 });
+    // shoulders and arms along the rod: a long capsule, darker at the hands
+    b.roundRect(-13, -FR - 12, 26, 2 * FR + 24, 12).fill(COL.ink);
+    b.roundRect(-11, -FR - 10, 22, 2 * FR + 20, 10).fill(k.main);
+    b.roundRect(-11, -FR - 10, 22, 9, 6).fill({ color: k.trim, alpha: 0.9 });
+    b.roundRect(-11, FR + 1, 22, 9, 6).fill({ color: k.trim, alpha: 0.9 });
+    // a shirt highlight on the side facing the light
+    b.roundRect(-10, -FR - 6, 6, 2 * FR + 12, 3).fill({ color: k.hi, alpha: 0.5 });
+    if (this.launch) pairGlyph(b, this.launch.u, fwd * -6, -FR - 5, 7, COL.ink);
+    // the boot: under the body, pointing at the goal this side attacks
+    this.foot.clear();
+    if (ghost) {
+      // a ghost has no boot: a ragged sheet hem instead
+      this.foot.poly([0, -10, fwd * 22, -9, fwd * 17, -3, fwd * 24, 2, fwd * 17, 7, fwd * 22, 10, 0, 10]).fill({ color: k.main, alpha: 0.75 });
+    } else {
+      this.foot.roundRect(fwd > 0 ? 4 : -26, -7, 22, 14, 6).fill(COL.ink);
+      this.foot.roundRect(fwd > 0 ? 6 : -24, -5, 18, 10, 5).fill(k.trim);
+      this.foot.rect(fwd > 0 ? 20 : -24, -5, 4, 10).fill({ color: COL.ink, alpha: 0.5 });
+    }
     this.drawHead();
   }
 
   drawHead() {
     const k = this.kit();
     const h = this.head;
+    const ghost = this.look === "ghost";
     h.clear();
-    h.circle(0, 0, FR - 4).fill(COL.ink);
+    h.circle(0, 0, FR).fill(COL.ink);
     if (this.launch && this.tex && this.tex !== Texture.WHITE) {
-      h.circle(0, 0, FR - 6).fill({ texture: this.tex, textureSpace: "local" });
+      h.circle(0, 0, FR - 3).fill({ texture: this.tex, textureSpace: "local", color: ghost ? 0xbfe0f0 : 0xffffff });
+      if (ghost) h.circle(0, 0, FR - 3).fill({ color: GHOST.hi, alpha: 0.28 });
     } else if (this.launch) {
-      h.circle(0, 0, FR - 6).fill(k.hi);
+      h.circle(0, 0, FR - 3).fill(k.hi);
       const n = hash32(this.launch.s);
-      h.rect(-4, -4, 8, 8).fill({ color: COL.ink, alpha: 0.4 + (n % 5) / 10 });
+      h.rect(-5, -5, 10, 10).fill({ color: COL.ink, alpha: 0.4 + (n % 5) / 10 });
     } else {
-      h.circle(0, 0, FR - 6).fill(k.hi);
-      h.circle(-4, -3, 2).fill(COL.ink);
-      h.circle(4, -3, 2).fill(COL.ink);
+      h.circle(0, 0, FR - 3).fill(k.hi);
+      h.circle(-5, -4, 2.5).fill(COL.ink);
+      h.circle(5, -4, 2.5).fill(COL.ink);
     }
-    h.circle(0, 0, FR - 5).stroke({ width: 2, color: k.trim, alpha: 0.9 });
+    h.circle(0, 0, FR - 2).stroke({ width: 3, color: k.trim, alpha: 0.95 });
+    if (ghost) {
+      // two hollow eyes over the picture
+      h.ellipse(-6, -3, 3, 4).fill({ color: COL.ink, alpha: 0.75 });
+      h.ellipse(6, -3, 3, 4).fill({ color: COL.ink, alpha: 0.75 });
+    }
+  }
+
+  /** The kick: the boot swings out and back, the shoulders flick round the rod. */
+  swing(tween: (o: object, to: Keyed<string, number>, ms: number, e?: (t: number) => number) => Promise<void>, back: (t: number) => number) {
+    const fwd = this.fwd;
+    this.foot.x = 0;
+    this.rotation = -fwd * 0.28;
+    this.body.scale.x = 0.7;
+    void tween(this.foot, { x: fwd * 14 }, 90).then(() => tween(this.foot, { x: 0 }, 220, back));
+    void tween(this.body.scale, { x: 1 }, 260, back);
+    void tween(this, { rotation: 0 }, 280, back);
   }
 
   /** Small coloured pips for the stats this figure plays with: Power, Pace, Grip. */
@@ -176,12 +223,12 @@ export class FigureView extends Container {
     if (st.power) list.push(COL.pink);
     if (st.pace) list.push(COL.cyan);
     if (st.grip) list.push(COL.money);
+    const fwd = this.fwd;
     list.forEach((c, i) => {
-      const a = -Math.PI / 2 - 0.62 + i * 0.62;
-      const x = Math.cos(a) * (FR + 1);
-      const y = Math.sin(a) * (FR + 1) - 2;
-      g.circle(x, y, 5).fill(COL.ink);
-      g.circle(x, y, 3.4).fill(c);
+      const x = -fwd * 18;
+      const y = -12 + i * 12;
+      g.circle(x, y, 6).fill(COL.ink);
+      g.circle(x, y, 4.2).fill(c);
     });
   }
 
@@ -189,15 +236,23 @@ export class FigureView extends Container {
   setRing(color: number | null, width = 3) {
     this.ring.clear();
     if (color === null) return;
-    this.ring.circle(0, 0, FR + 1).stroke({ width, color });
+    this.ring.circle(0, 0, FR + 3).stroke({ width, color });
+  }
+
+  /** The ball holder: a soft halo under the figure, pulsed by the table's frame loop. */
+  setGlow(color: number | null) {
+    this.glow.clear();
+    if (color === null) return;
+    this.glow.circle(0, 0, FR + 16).fill({ color, alpha: 0.18 });
+    this.glow.circle(0, 0, FR + 9).fill({ color, alpha: 0.3 });
   }
 
   /** A soft halo in a coach's hue while that coach is hovered. */
   setSynergy(color: number | null) {
     this.syn.clear();
     if (color === null) return;
-    this.syn.circle(0, 0, FR + 9).fill({ color, alpha: 0.28 });
-    this.syn.circle(0, 0, FR + 5).stroke({ width: 3, color, alpha: 0.9 });
+    this.syn.circle(0, 0, FR + 12).fill({ color, alpha: 0.28 });
+    this.syn.circle(0, 0, FR + 7).stroke({ width: 3, color, alpha: 0.9 });
   }
 }
 

@@ -1,10 +1,12 @@
 // The table: everything drawn in Pixi. State lives in the shared engine; this file shows it and plays back
 // what the engine says happened (slides, kicks, blocks, goals), one event at a time.
-import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
-import { BOSS, COACH, DRILL, DRILLS, FIXTURE_NAME, LANES, MAX_COACHES, MAX_PLAYS, MOUTH, PLAY, RARITY_NAME, RODS, ROUNDS, WIN_FANS, drillCost, type DrillId } from "../shared/content.js";
+import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, type FederatedPointerEvent } from "pixi.js";
+import { BOSS, COACH, DRILL, DRILLS, FIXTURE_NAME, GHOST_RULES, LANES, MAX_COACHES, MAX_PLAYS, MOUTH, PLAY, RARITY_NAME, RODS, STYLES, WIN_FANS, drillCost, type DrillId } from "../shared/content.js";
 import { colOf, laneOf, slotOf, type Action, type Dir, type Ev, type Kick, type Run } from "../shared/engine.js";
+import { ghostWhy, type Launch } from "../shared/data.js";
 import { bestBlock, bestTouch } from "../shared/bot.js";
 import { figureFacts, roomHint } from "../shared/insight.js";
+import { hash32 } from "../shared/rng.js";
 import { sfx } from "./audio.js";
 import { setUi, toast, ui } from "./store.js";
 import { CoachView, FR, FigureView, ItemView, PH, PW, hslHex, tokenTexture, txt } from "./figures.js";
@@ -13,6 +15,7 @@ import { BRASS, COL, NUM, THEM } from "./theme.js";
 import { look } from "./house.js";
 import { ease, reduced, tween, wait } from "./tween.js";
 import { Button, Tip, fmt, panel } from "./widgets.js";
+import { hudOf, hudStep, type Hud } from "./hud.js";
 
 type Mode = "land" | "port";
 interface Layout {
@@ -24,10 +27,10 @@ interface Layout {
   coachX: number;
   coachY: number;
   coachStep: number;
-  coachScale: number;
   playX: number;
   playY: number;
   playStep: number;
+  benchScale: number;
   btnY: number;
   btnX: number;
 }
@@ -39,17 +42,20 @@ export interface GameHooks {
 }
 
 // ------------------------------------------------------------ table space (drawn flat, turned upright on phones)
-const TX0 = 74; // your goal line
-const TX1 = 926; // theirs
+const TX0 = 70; // your goal line
+const TX1 = 930; // theirs
 const LH = 47; // one lane
-const LANE0 = 52; // top edge of lane 0
+const LANE0 = 86; // top edge of lane 0 (room above for their handles and the ghost marks)
 const PITCH_H = LANES * LH;
 const RAIL = 22;
-const CTRL_Y = LANE0 + PITCH_H + RAIL + 18; // your rod controls, below the rod ends
-const ARROW_W = 84;
-const ARROW_H = 58;
+const HANDLE_Y = LANE0 + PITCH_H + RAIL; // where your rods leave the cabinet
+const CTRL_Y = HANDLE_Y + 6; // your handles: the slide buttons sit on the rod end
+const ARROW_W = 92;
+/** Handle buttons are taller (wider on screen) on phones, where the table stands upright and has no labels under them. */
+let ARROW_H = 58;
+const capY = () => CTRL_Y + ARROW_H * 2 + 24;
 const TS_W = 1000;
-const TS_H = CTRL_Y + ARROW_H * 2 + 26;
+const TS_H = CTRL_Y + 58 * 2 + 46;
 const colX = (x: number) => TX0 + (x * (TX1 - TX0)) / 9;
 const laneY = (l: number) => LANE0 + (l + 0.5) * LH;
 
@@ -60,10 +66,79 @@ function mirror(v: number): number {
   return m < LANES ? m - 0.5 : p - 0.5 - m;
 }
 
+/** A soft black vignette with a clear centre: the Graveyard shift's lantern, drawn once. */
+let lanternTex: Texture | null = null;
+function lantern(): Texture {
+  if (lanternTex) return lanternTex;
+  const N = 256;
+  const cv = document.createElement("canvas");
+  cv.width = N;
+  cv.height = N;
+  const g = cv.getContext("2d")!;
+  const r = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+  r.addColorStop(0, "rgba(10,4,12,0)");
+  r.addColorStop(0.09, "rgba(10,4,12,0)");
+  r.addColorStop(0.22, "rgba(10,4,12,0.5)");
+  r.addColorStop(0.36, "rgba(10,4,12,0.66)");
+  r.addColorStop(1, "rgba(10,4,12,0.7)");
+  g.fillStyle = r;
+  g.fillRect(0, 0, N, N);
+  lanternTex = Texture.from(cv);
+  return lanternTex;
+}
+
 interface RodView {
   c: Container;
   bar: Graphics;
   figs: FigureView[];
+}
+
+/** A club crest from its name: two colours, a field pattern and an emblem. A boss crest is spiked; a ghost club's is a headstone. */
+export function crest(name: string, kind: "club" | "boss" | "ghost", R: number): Graphics {
+  const g = new Graphics();
+  const h = hash32(name);
+  const c1 = hslHex(h % 360, 0.62, 0.42);
+  const c2 = hslHex((h >> 9) % 360, 0.7, 0.62);
+  if (kind === "ghost") {
+    g.roundRect(-R * 0.9, -R * 1.05, R * 1.8, R * 2.15, R * 0.9).fill(0x3b4a55).stroke({ width: 5, color: COL.ink });
+    g.roundRect(-R * 0.7, -R * 0.85, R * 1.4, R * 1.8, R * 0.7).fill(0x56697a);
+    g.poly([-R * 0.38, R * 0.55, -R * 0.38, -R * 0.15, 0, -R * 0.5, R * 0.38, -R * 0.15, R * 0.38, R * 0.55, R * 0.22, R * 0.38, R * 0.07, R * 0.55, -R * 0.07, R * 0.38, -R * 0.22, R * 0.55]).fill(0xeaf6ff);
+    g.ellipse(-R * 0.14, -R * 0.12, R * 0.07, R * 0.1).fill(COL.ink);
+    g.ellipse(R * 0.14, -R * 0.12, R * 0.07, R * 0.1).fill(COL.ink);
+    return g;
+  }
+  const shield = [-R, -R * 0.9, R, -R * 0.9, R, R * 0.25, 0, R * 1.15, -R, R * 0.25];
+  if (kind === "boss") {
+    g.poly([-R * 1.12, -R * 1.2, -R * 0.55, -R * 0.92, 0, -R * 1.3, R * 0.55, -R * 0.92, R * 1.12, -R * 1.2, R, R * 0.25, 0, R * 1.2, -R, R * 0.25]).fill(COL.ink);
+    g.poly(shield).fill(0x2a0618).stroke({ width: 5, color: COL.pink });
+    g.poly([-R, -R * 0.2, R, -R * 0.2, R, R * 0.1, -R, R * 0.1]).fill({ color: COL.pink, alpha: 0.85 });
+  } else {
+    g.poly(shield).fill(c1).stroke({ width: 5, color: COL.ink });
+    const p = (h >> 4) % 4;
+    if (p === 0) for (let i = -2; i <= 2; i += 2) g.rect(i * R * 0.22 - R * 0.11, -R * 0.9, R * 0.22, R * 1.9).fill({ color: c2, alpha: 0.9 });
+    else if (p === 1) g.poly([0, -R * 0.9, R, -R * 0.9, R, R * 0.25, 0, R * 1.15]).fill({ color: c2, alpha: 0.9 });
+    else if (p === 2) g.poly([-R, -R * 0.1, 0, R * 0.55, R, -R * 0.1, R, R * 0.25, 0, R * 1.0, -R, R * 0.25]).fill({ color: c2, alpha: 0.9 });
+    else for (let y = -0.6; y < 0.4; y += 0.5) g.rect(-R, y * R, R * 2, R * 0.22).fill({ color: c2, alpha: 0.9 });
+    g.poly(shield).stroke({ width: 5, color: COL.ink });
+  }
+  // the emblem in a disc
+  g.circle(0, -R * 0.05, R * 0.44).fill(COL.cream).stroke({ width: 3, color: COL.ink });
+  const e = (h >> 12) % 5;
+  const ec = kind === "boss" ? COL.pink : c1;
+  const s = R * 0.26;
+  if (e === 0) g.circle(0, -R * 0.05, s * 0.8).fill(COL.ink);
+  else if (e === 1) {
+    const pts: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const rr = i % 2 ? s * 0.45 : s;
+      pts.push(Math.cos(a) * rr, -R * 0.05 + Math.sin(a) * rr);
+    }
+    g.poly(pts).fill(ec);
+  } else if (e === 2) g.poly([0, -R * 0.05 - s, s, -R * 0.05, 0, -R * 0.05 + s, -s, -R * 0.05]).fill(ec);
+  else if (e === 3) g.poly([-s * 0.2, -R * 0.05 - s, s * 0.6, -R * 0.05 - s * 0.1, 0, -R * 0.05, s * 0.3, -R * 0.05 + s, -s * 0.6, -R * 0.05 + s * 0.05, 0, -R * 0.05]).fill(ec);
+  else g.poly([-s, -R * 0.05 + s * 0.5, -s, -R * 0.05 - s * 0.4, -s * 0.5, -R * 0.05, 0, -R * 0.05 - s * 0.7, s * 0.5, -R * 0.05, s, -R * 0.05 - s * 0.4, s, -R * 0.05 + s * 0.5]).fill(ec);
+  return g;
 }
 
 export class Game {
@@ -75,10 +150,14 @@ export class Game {
   tbl = new Container();
   pitch = new Graphics();
   mark = new Container();
+  mistLayer = new Container();
+  dragLayer = new Container();
   rodLayer = new Container();
   rodMask = new Graphics();
   rail = new Graphics();
   knobLayer = new Container();
+  dark = new Sprite(Texture.EMPTY);
+  darkMask = new Graphics();
   guideLayer = new Container();
   ballLayer = new Container();
   ctrlLayer = new Container();
@@ -88,7 +167,6 @@ export class Game {
   tipLayer = new Container();
   tip = new Tip();
   ball = new Graphics();
-  trail: Graphics[] = [];
   L!: Layout;
   run: Run | null = null;
   rods: RodView[][] = [[], []];
@@ -103,6 +181,13 @@ export class Game {
   synFocus: string | null = null;
   tipPinned = false;
   hoverKick: number | null = null;
+  /** The HUD's numbers: from the engine when still, stepped by events during playback. */
+  hudNow: Hud | null = null;
+  mists: { g: Graphics; x0: number; y0: number; ph: number }[] = [];
+  /** Drag on a rod: the rod, where the pointer started (table space), whether it already moved the rod. */
+  drag: { r: number; y0: number; done: boolean; id: number } | null = null;
+  dragged = false;
+  arrows: Keyed<string, Container> = {};
   // hud parts
   clubName!: Text;
   clubRule!: Text;
@@ -116,7 +201,8 @@ export class Game {
   btnReady!: Button;
   btnHint!: Button;
   benchLabel!: Text;
-  particles: { g: Graphics; vx: number; vy: number; life: number }[] = [];
+  playLabel!: Text;
+  particles: { g: Graphics; vx: number; vy: number; life: number; up?: boolean }[] = [];
 
   constructor(
     public app: Application,
@@ -130,7 +216,14 @@ export class Game {
     this.root.addChild(this.hud, this.tbl, this.benchLayer, this.stageLayer, this.tipLayer);
     this.root.visible = false;
     this.rodLayer.mask = this.rodMask;
-    this.tbl.addChild(this.pitch, this.mark, this.rodMask, this.rodLayer, this.rail, this.knobLayer, this.guideLayer, this.ballLayer, this.ctrlLayer, this.fxLayer);
+    this.dark.texture = lantern();
+    this.dark.anchor.set(0.5);
+    this.dark.width = this.dark.height = 1500;
+    this.dark.mask = this.darkMask;
+    this.dark.eventMode = "none";
+    this.dark.visible = false;
+    this.mistLayer.eventMode = "none";
+    this.tbl.addChild(this.pitch, this.mark, this.mistLayer, this.rodMask, this.dragLayer, this.rodLayer, this.rail, this.knobLayer, this.darkMask, this.dark, this.guideLayer, this.ballLayer, this.ctrlLayer, this.fxLayer);
     this.ballLayer.addChild(this.ball);
     this.tipLayer.addChild(this.tip);
     app.stage.filters = [this.crt];
@@ -141,6 +234,9 @@ export class Game {
     app.stage.on("pointertap", (e) => {
       if (e.target === app.stage || e.target === this.bg) this.tip.hide();
     });
+    app.stage.on("globalpointermove", (e) => this.dragMove(e));
+    app.stage.on("pointerup", () => this.dragEnd());
+    app.stage.on("pointerupoutside", () => this.dragEnd());
     app.ticker.add((tk) => this.frame(tk.deltaMS));
     window.addEventListener("resize", () => this.resize());
     window.addEventListener("keydown", (e) => this.key(e));
@@ -150,6 +246,10 @@ export class Game {
     window.addEventListener("wheel", drop, { passive: true });
     window.addEventListener("scroll", drop, { passive: true, capture: true });
     this.resize();
+  }
+
+  get haunted() {
+    return this.run?.mode === "haunt";
   }
 
   // ================================================================ frame loop
@@ -174,11 +274,24 @@ export class Game {
         v.body.y = Math.sin(this.t * 1.4 + v.wob) * 2;
         v.body.rotation = Math.sin(this.t * 0.9 + v.wob) * 0.02;
       }
+      for (const m of this.mists) {
+        m.g.x = m.x0 + Math.sin(this.t * 0.35 + m.ph) * 26;
+        m.g.y = m.y0 + Math.cos(this.t * 0.27 + m.ph) * 14;
+        m.g.alpha = 0.55 + 0.35 * Math.sin(this.t * 0.6 + m.ph * 2);
+      }
     }
     // the held ball rides with its figure
     if (!this.ballFree) this.placeBall();
+    if (this.dark.visible) this.dark.position.set(this.ball.visible ? this.ball.x : (TX0 + TX1) / 2, this.ball.visible ? this.ball.y : LANE0 + PITCH_H / 2);
+    // the figure on the ball breathes
+    const b = this.disp.ball;
+    if (b && !this.ballFree) {
+      const fv = this.rods[b.side]?.[b.rod]?.figs[b.fig];
+      if (fv) fv.glow.alpha = rm ? 1 : 0.65 + 0.35 * Math.sin(this.t * 5);
+    }
     for (const p of this.particles) {
-      p.vy += 0.35;
+      if (p.up) p.vy -= 0.04;
+      else p.vy += 0.35;
       p.g.x += p.vx;
       p.g.y += p.vy;
       p.life -= dt;
@@ -190,6 +303,10 @@ export class Game {
   }
 
   calmSwirl() {
+    if (this.haunted) {
+      setSwirlColors(this.swirl, 0x0a0710, 0x10232a, 0x5a2a08);
+      return;
+    }
     const [a, b, c] = look().swirl;
     setSwirlColors(this.swirl, a, b, c);
   }
@@ -203,6 +320,12 @@ export class Game {
   // ================================================================ layout
   get port() {
     return this.L.mode === "port";
+  }
+
+  /** Phones keep a bench row only when something sits on it. */
+  benchRow(): boolean {
+    const s = this.run?.s;
+    return !!s && (s.coaches.length > 0 || s.plays.length > 0);
   }
 
   resize() {
@@ -225,41 +348,43 @@ export class Game {
     this.app.stage.filterArea = new Rectangle(0, 0, sw, sh);
     this.app.stage.hitArea = new Rectangle(0, 0, sw, sh);
     if (mode === "land") {
-      const left = 380;
+      // a slim column on the left (club, score, touches, bench), the table takes the rest
+      const left = 352;
       this.L = {
         mode,
         W,
         H,
-        area: { x: left, y: 186, w: W - left - 20, h: H - 186 - 92 },
-        coachX: left + 58,
-        coachY: 100,
-        coachStep: 100,
-        coachScale: 0.74,
-        playX: W - 210,
-        playY: 100,
-        playStep: 92,
-        btnY: H - 52,
-        btnX: (left + W - 20) / 2,
+        area: { x: left, y: 12, w: W - left - 16, h: H - 12 - 96 },
+        coachX: 62,
+        coachY: 570,
+        coachStep: 60,
+        playX: 62,
+        playY: 702,
+        playStep: 60,
+        benchScale: 0.5,
+        btnY: H - 50,
+        btnX: left + (W - left - 16) / 2,
       };
     } else {
-      const top = 248;
-      const bench = 118;
+      const top = 236;
+      const bench = this.benchRow() ? 104 : 0;
       this.L = {
         mode,
         W,
         H,
-        area: { x: 12, y: top + bench, w: W - 24, h: H - top - bench - 108 },
-        coachX: 54,
-        coachY: top + bench / 2 - 2,
-        coachStep: 74,
-        coachScale: 0.56,
-        playX: W - 128,
-        playY: top + bench / 2 - 2,
-        playStep: 72,
-        btnY: H - 56,
+        area: { x: 10, y: top + bench, w: W - 20, h: H - top - bench - 104 },
+        coachX: 46,
+        coachY: top + bench / 2 - 4,
+        coachStep: 62,
+        playX: W - 106,
+        playY: top + bench / 2 - 4,
+        playStep: 62,
+        benchScale: 0.5,
+        btnY: H - 54,
         btnX: W / 2,
       };
     }
+    ARROW_H = mode === "port" ? 72 : 58;
     this.buildHud();
     this.buildTable();
     this.placeTable();
@@ -315,26 +440,28 @@ export class Game {
     };
     this.pips = new Graphics();
     if (!port) {
-      mk(20, 20, 340, L.H - 40, COL.ink2, COL.edge);
-      // the bench band above the table
-      mk(L.area.x, 14, L.W - L.area.x - 20, 160, COL.ink, COL.edge).alpha = 0.7;
-      this.clubName = label("", 190, 56, 26, COL.cream);
-      this.clubRule = txt("", { fontSize: 14, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: 300, lineHeight: 18 });
+      const cx = 176;
+      mk(16, 16, 320, L.H - 32, COL.ink2, COL.edge);
+      this.clubName = label("", cx, 46, 26, COL.cream);
+      this.clubRule = txt("", { fontSize: 13, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: 292, lineHeight: 17 });
       this.clubRule.anchor.set(0.5, 0);
-      this.clubRule.position.set(190, 80);
+      this.clubRule.position.set(cx, 66);
       this.hud.addChild(this.clubRule);
       // score
-      mk(36, 150, 308, 104, COL.ink, COL.edge);
-      label("YOU", 104, 172, 14, COL.dim);
-      label("THEM", 276, 172, 14, COL.dim);
-      this.scoreYou = big(104, 214, 62, look().kitHi);
-      this.scoreThem = big(276, 214, 62, THEM.hi);
-      label(":", 190, 208, 40, COL.dim);
+      mk(30, 150, 292, 96, COL.ink, COL.edge);
+      label("YOU", 96, 170, 14, COL.dim);
+      label("THEM", 256, 170, 14, COL.dim);
+      this.scoreYou = big(96, 210, 60, look().kitHi);
+      this.scoreThem = big(256, 210, 60, THEM.hi);
+      label(":", cx, 204, 40, COL.dim);
       // the possession: whose ball, touches as pips
-      mk(36, 268, 308, 128, COL.ink, COL.edge);
-      this.possText = label("", 190, 292, 18, COL.cream);
-      this.touchText = label("", 190, 372, 14, COL.dim);
-      this.pips.position.set(190, 330);
+      mk(30, 258, 292, 136, COL.ink, COL.edge);
+      this.possText = label("", cx, 280, 17, COL.cream);
+      this.touchText = txt("", { fontSize: 13, fill: COL.dim, align: "center", wordWrap: true, wordWrapWidth: 270, lineHeight: 16 });
+      this.touchText.anchor.set(0.5, 0);
+      this.touchText.position.set(cx, 332);
+      this.hud.addChild(this.touchText);
+      this.pips.position.set(cx, 310);
       this.hud.addChild(this.pips);
       const stats: [string, string, number][] = [
         ["round", "Round", COL.cream],
@@ -343,99 +470,107 @@ export class Game {
         ["wins", "Wins", COL.cyan],
       ];
       stats.forEach(([k, name, color], i) => {
-        const x = 36 + (i % 2) * 156;
-        const y = 410 + Math.floor(i / 2) * 82;
-        mk(x, y, 152, 72, COL.ink, COL.edge);
-        label(name, x + 76, y + 16, 13);
-        const v = txt("-", { fontFamily: NUM, fontSize: 40, fill: color });
+        const x = 30 + i * 74;
+        const y = 406;
+        mk(x, y, 70, 70, COL.ink, COL.edge);
+        label(name, x + 35, y + 15, 12);
+        const v = txt("-", { fontFamily: NUM, fontSize: 32, fill: color });
         v.anchor.set(0.5);
-        v.position.set(x + 76, y + 46);
+        v.position.set(x + 35, y + 45);
         this.hud.addChild(v);
         this.stat[k] = v;
       });
-      const by = Math.min(L.H - 70, 650);
-      const b1 = new Button("Squad", 96, 54, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 18 });
-      b1.position.set(36 + 48, by);
-      const b2 = new Button("Rules", 96, 54, COL.neutral, () => this.hooks.openOverlay("how"), { size: 18 });
-      b2.position.set(36 + 48 + 106, by);
-      const b3 = new Button("Menu", 96, 54, COL.neutral, () => this.hooks.openOverlay("options"), { size: 18 });
-      b3.position.set(36 + 48 + 212, by);
+      this.benchLabel = label("", 32, 500, 13, COL.dim, 0);
+      this.playLabel = label("", 32, 632, 13, COL.dim, 0);
+      const by = L.H - 58;
+      const b1 = new Button("Squad", 92, 54, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 18 });
+      b1.position.set(30 + 46, by);
+      const b2 = new Button("Rules", 92, 54, COL.neutral, () => this.hooks.openOverlay("how"), { size: 18 });
+      b2.position.set(30 + 46 + 100, by);
+      const b3 = new Button("Menu", 92, 54, COL.neutral, () => this.hooks.openOverlay("options"), { size: 18 });
+      b3.position.set(30 + 46 + 200, by);
       this.hud.addChild(b1, b2, b3);
-      this.chalText = txt("", { fontSize: 14, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: 300 });
-      this.chalText.anchor.set(0.5, 0);
-      this.chalText.position.set(190, by + 40);
+      this.chalText = txt("", { fontSize: 13, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: 290 });
+      this.chalText.anchor.set(0.5, 1);
+      this.chalText.position.set(cx, by - 40);
       this.hud.addChild(this.chalText);
-      this.benchLabel = label("", L.area.x + 18, 28, 14, COL.dim, 0);
     } else {
       const W = L.W;
       // row 1: the club and its rule, the score
-      mk(16, 16, W * 0.6, 122, COL.ink2, COL.edge);
-      this.clubName = label("", 16 + W * 0.3, 40, 22, COL.cream);
-      this.clubRule = txt("", { fontSize: 13, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: W * 0.56, lineHeight: 17 });
+      mk(14, 14, W * 0.62, 112, COL.ink2, COL.edge);
+      this.clubName = label("", 14 + W * 0.31, 36, 22, COL.cream);
+      this.clubRule = txt("", { fontSize: 12, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: W * 0.58, lineHeight: 16 });
       this.clubRule.anchor.set(0.5, 0);
-      this.clubRule.position.set(16 + W * 0.3, 58);
+      this.clubRule.position.set(14 + W * 0.31, 54);
       this.hud.addChild(this.clubRule);
-      const sx = 28 + W * 0.6;
-      const swd = W - sx - 16;
-      mk(sx, 16, swd, 122, COL.ink2, COL.edge);
-      label("YOU", sx + swd * 0.25, 36, 13);
-      label("THEM", sx + swd * 0.75, 36, 13);
-      this.scoreYou = big(sx + swd * 0.25, 86, 58, look().kitHi);
-      this.scoreThem = big(sx + swd * 0.75, 86, 58, THEM.hi);
-      label(":", sx + swd / 2, 80, 36, COL.dim);
+      const sx = 26 + W * 0.62;
+      const swd = W - sx - 14;
+      mk(sx, 14, swd, 112, COL.ink2, COL.edge);
+      label("YOU", sx + swd * 0.25, 32, 13);
+      label("THEM", sx + swd * 0.75, 32, 13);
+      this.scoreYou = big(sx + swd * 0.25, 80, 58, look().kitHi);
+      this.scoreThem = big(sx + swd * 0.75, 80, 58, THEM.hi);
+      label(":", sx + swd / 2, 74, 36, COL.dim);
       // row 2: the possession
-      mk(16, 150, W - 32, 88, COL.ink, COL.edge);
-      this.possText = label("", 32, 176, 17, COL.cream, 0);
-      this.touchText = label("", 32, 212, 13, COL.dim, 0);
-      this.pips.position.set(W - 150, 194);
+      mk(14, 138, W - 28, 88, COL.ink, COL.edge);
+      this.possText = label("", 30, 162, 17, COL.cream, 0);
+      this.touchText = txt("", { fontSize: 12, fill: COL.dim, wordWrap: true, wordWrapWidth: W - 250, lineHeight: 16 });
+      this.touchText.anchor.set(0, 0);
+      this.touchText.position.set(30, 182);
+      this.hud.addChild(this.touchText);
+      this.pips.position.set(W - 130, 192);
       this.hud.addChild(this.pips);
       this.stat.round = txt("", { fontSize: 1 });
-      this.stat.fans = label("", W - 32, 176, 15, COL.money, 1);
+      this.stat.fans = label("", W - 30, 162, 15, COL.money, 1);
       this.stat.goals = txt("", { fontSize: 1 });
       this.stat.wins = txt("", { fontSize: 1 });
-      this.benchLabel = label("", 18, L.coachY - 52, 13, COL.dim, 0);
-      this.chalText = txt("", { fontSize: 13, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: W - 360 });
+      this.benchLabel = txt("", { fontSize: 1 });
+      this.playLabel = txt("", { fontSize: 1 });
+      this.chalText = txt("", { fontSize: 12, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: W - 360 });
       this.chalText.anchor.set(0.5, 0.5);
-      this.chalText.position.set(W / 2 + 60, L.H - 22);
+      this.chalText.position.set(W / 2, L.H - 112);
       this.hud.addChild(this.chalText);
-      const b1 = new Button("Squad", 104, 60, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 17 });
-      const b3 = new Button("Menu", 104, 60, COL.neutral, () => this.hooks.openOverlay("options"), { size: 17 });
+      const b1 = new Button("Squad", 110, 64, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 17 });
+      const b3 = new Button("Menu", 110, 64, COL.neutral, () => this.hooks.openOverlay("options"), { size: 17 });
       b1.position.set(70, L.btnY);
       b3.position.set(W - 70, L.btnY);
       this.hud.addChild(b1, b3);
     }
     // the main button: let the rival take its touch while you defend
-    const bw = port ? 260 : 300;
-    this.btnReady = new Button("Ready", bw, port ? 76 : 70, COL.play, () => void this.doHold(), { size: 26 });
-    this.btnReady.position.set(port ? L.W / 2 : L.btnX + 110, L.btnY);
-    this.btnHint = new Button("Show me a touch", port ? 200 : 230, port ? 60 : 56, COL.neutral, () => this.hint(), { size: 17 });
-    this.btnHint.position.set(port ? L.W / 2 : L.btnX - 200, port ? L.btnY : L.btnY);
+    const bw = port ? 280 : 300;
+    this.btnReady = new Button("Ready", bw, port ? 76 : 68, COL.play, () => void this.doHold(), { size: 26 });
+    this.btnReady.position.set(port ? L.W / 2 : L.btnX + 160, L.btnY);
+    this.btnHint = new Button("Show me a touch", port ? 260 : 240, port ? 70 : 58, COL.neutral, () => this.hint(), { size: 18 });
+    this.btnHint.position.set(port ? L.W / 2 : L.btnX - 160, L.btnY);
     this.hud.addChild(this.btnReady, this.btnHint);
   }
 
   // ================================================================ the table
   buildTable() {
     const lk = look();
+    const night = this.haunted;
+    const felt = night ? 0x071a1e : lk.felt;
+    const feltHi = night ? 0x10303a : lk.feltHi;
+    const wood = night ? 0x1c0b18 : BRASS.wood;
     const g = this.pitch;
     g.clear();
     // the cabinet and its wooden rail
     g.roundRect(TX0 - 70, LANE0 - RAIL - 18, TX1 - TX0 + 140, PITCH_H + 2 * RAIL + 36, 26).fill({ color: 0x000000, alpha: 0.35 });
-    g.roundRect(TX0 - 64, LANE0 - RAIL - 12, TX1 - TX0 + 128, PITCH_H + 2 * RAIL + 24, 22).fill(BRASS.wood);
-    // goal mouths: dark nets behind each goal line
+    g.roundRect(TX0 - 64, LANE0 - RAIL - 12, TX1 - TX0 + 128, PITCH_H + 2 * RAIL + 24, 22).fill(wood);
+    // goal mouths: dark nets behind each goal line (the net lines live in fxLayer so a goal can shake them)
     for (const side of [0, 1]) {
       const gx = side === 0 ? TX0 - 50 : TX1;
       const y0 = laneY(MOUTH[0] - 0.5);
       const h = (MOUTH[1] - MOUTH[0] + 1) * LH;
+      if (night) g.circle(gx + 25, y0 + h / 2, 70).fill({ color: 0xff8a1c, alpha: 0.12 });
       g.rect(gx, y0, 50, h).fill(0x08030a);
-      for (let i = 1; i < 5; i++) g.moveTo(gx + i * 10, y0).lineTo(gx + i * 10, y0 + h);
-      for (let j = 1; j < h / 10; j++) g.moveTo(gx, y0 + j * 10).lineTo(gx + 50, y0 + j * 10);
-      g.stroke({ width: 1, color: COL.cream, alpha: 0.18 });
     }
+    this.drawNets(0, 0);
     // the felt
-    g.rect(TX0, LANE0, TX1 - TX0, PITCH_H).fill(lk.felt);
+    g.rect(TX0, LANE0, TX1 - TX0, PITCH_H).fill(felt);
     for (let i = 0; i < 6; i++) {
       const k = i / 6;
-      g.roundRect(TX0 + 20 + k * 120, LANE0 + 14 + k * 70, TX1 - TX0 - 40 - k * 240, PITCH_H - 28 - k * 140, 30).fill({ color: lk.feltHi, alpha: 0.05 });
+      g.roundRect(TX0 + 20 + k * 120, LANE0 + 14 + k * 70, TX1 - TX0 - 40 - k * 240, PITCH_H - 28 - k * 140, 30).fill({ color: feltHi, alpha: 0.05 });
     }
     // felt grain: faint diagonal threads
     for (let x = TX0 - PITCH_H; x < TX1; x += 9) {
@@ -460,42 +595,108 @@ export class Game {
     g.rect(TX1 - 96, cy - 150, 96, 300);
     g.rect(TX0, cy - 72, 36, 144);
     g.rect(TX1 - 36, cy - 72, 36, 144);
-    g.stroke({ width: 3, color: COL.cream, alpha: 0.22 });
+    g.stroke({ width: 3, color: night ? 0xbfe6ef : COL.cream, alpha: night ? 0.14 : 0.22 });
     // goal posts
     for (const gx of [TX0, TX1]) {
       g.rect(gx - 4, laneY(MOUTH[0] - 0.5) - 6, 8, 8).fill(COL.cream);
       g.rect(gx - 4, laneY(MOUTH[1] + 0.5) - 2, 8, 8).fill(COL.cream);
     }
-    this.drawMark(COL.cream);
+    this.drawMark(night ? 0xbfe6ef : COL.cream);
     // the mask that keeps rod bars inside the cabinet
     this.rodMask.clear();
     this.rodMask.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, PITCH_H + 2 * RAIL).fill(0xffffff);
+    this.darkMask.clear();
+    this.darkMask.roundRect(TX0 - 64, LANE0 - RAIL - 12, TX1 - TX0 + 128, PITCH_H + 2 * RAIL + 24, 22).fill(0xffffff);
+    this.dark.visible = night;
     // the rail on top of the bars, with brass bearings where the rods pass
     const r = this.rail;
     r.clear();
-    r.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, RAIL).fill(BRASS.rail);
-    r.rect(TX0 - 64, LANE0 + PITCH_H, TX1 - TX0 + 128, RAIL).fill(BRASS.rail);
+    r.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, RAIL).fill(night ? 0x14060f : BRASS.rail);
+    r.rect(TX0 - 64, LANE0 + PITCH_H, TX1 - TX0 + 128, RAIL).fill(night ? 0x14060f : BRASS.rail);
     r.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, 4).fill({ color: 0xffffff, alpha: 0.06 });
     for (let x = 1; x <= 8; x++) {
       for (const y of [LANE0 - RAIL / 2, LANE0 + PITCH_H + RAIL / 2]) r.circle(colX(x), y, 8).fill(BRASS.lo).stroke({ width: 2, color: BRASS.hi, alpha: 0.6 });
     }
-    // rod ends with grips: yours stick out the bottom, theirs the top (fixed; the rod slides through the bearing)
-    this.knobLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const kg = new Graphics();
-    for (const side of [0, 1] as (0 | 1)[]) {
-      for (let rod = 0; rod < 4; rod++) {
-        const x = colX(colOf(side, rod));
-        const kit = side === 0 ? { main: lk.kit, trim: lk.trim } : { main: THEM.main, trim: THEM.trim };
-        if (side === 0) {
-          kg.rect(x - 4, LANE0 + PITCH_H + RAIL, 8, 12).fill(BRASS.bar);
-          kg.roundRect(x - 12, LANE0 + PITCH_H + RAIL + 8, 24, 14, 6).fill(kit.main).stroke({ width: 2, color: COL.ink });
-        } else {
-          kg.rect(x - 4, LANE0 - RAIL - 14, 8, 14).fill(BRASS.bar);
-          kg.roundRect(x - 12, LANE0 - RAIL - 26, 24, 16, 6).fill(kit.main).stroke({ width: 2, color: COL.ink });
+    if (night) {
+      // cobwebs in the four corners of the frame
+      const web = (x: number, y: number, sx: number, sy: number) => {
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 4) * (Math.PI / 2);
+          r.moveTo(x, y).lineTo(x + sx * Math.cos(a) * 64, y + sy * Math.sin(a) * 64);
         }
+        for (const k of [18, 34, 50]) {
+          r.moveTo(x + sx * k, y);
+          for (let i = 1; i <= 4; i++) {
+            const a = (i / 4) * (Math.PI / 2);
+            r.quadraticCurveTo(x + sx * Math.cos(a - 0.2) * k * 0.8, y + sy * Math.sin(a - 0.2) * k * 0.8, x + sx * Math.cos(a) * k, y + sy * Math.sin(a) * k);
+          }
+        }
+        r.stroke({ width: 1.5, color: 0xdbe9f0, alpha: 0.45 });
+      };
+      web(TX0 - 64, LANE0 - RAIL - 12, 1, 1);
+      web(TX1 + 64, LANE0 - RAIL - 12, -1, 1);
+      web(TX0 - 64, LANE0 + PITCH_H + RAIL + 12, 1, -1);
+      web(TX1 + 64, LANE0 + PITCH_H + RAIL + 12, -1, -1);
+      // a carved lantern on each goal
+      for (const gx of [TX0 - 58, TX1 + 58]) {
+        const y = laneY(MOUTH[0] - 0.5) - 26;
+        r.circle(gx, y, 15).fill(0xff8a1c).stroke({ width: 3, color: COL.ink });
+        r.rect(gx - 2, y - 20, 4, 7).fill(0x3d7a2a);
+        r.poly([gx - 8, y - 4, gx - 3, y - 4, gx - 5.5, y - 9]).fill(0xffe28a);
+        r.poly([gx + 3, y - 4, gx + 8, y - 4, gx + 5.5, y - 9]).fill(0xffe28a);
+        r.poly([gx - 8, y + 4, gx + 8, y + 4, gx + 4, y + 8, gx, y + 5, gx - 4, y + 8]).fill(0xffe28a);
       }
     }
+    // mist drifting at the goal mouths
+    this.mistLayer.removeChildren().forEach((c) => c.destroy());
+    this.mists = [];
+    if (night) {
+      for (let i = 0; i < 8; i++) {
+        const side = i % 2;
+        const m = new Graphics();
+        const w = 120 + (i % 3) * 40;
+        m.ellipse(0, 0, w, 40).fill({ color: 0xcfe3ee, alpha: 0.05 });
+        m.ellipse(0, 0, w * 0.6, 24).fill({ color: 0xcfe3ee, alpha: 0.06 });
+        const x0 = side === 0 ? TX0 + 40 + (i % 3) * 30 : TX1 - 40 - (i % 3) * 30;
+        const y0 = LANE0 + PITCH_H / 2 + (Math.floor(i / 2) - 1.5) * 70;
+        m.position.set(x0, y0);
+        this.mistLayer.addChild(m);
+        this.mists.push({ g: m, x0, y0, ph: i * 1.7 });
+      }
+    }
+    // rod ends with grips: theirs stick out the top; yours end in the handle controls (drawn with them)
+    this.knobLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    const kg = new Graphics();
+    for (let rod = 0; rod < 4; rod++) {
+      const x = colX(colOf(1, rod));
+      kg.rect(x - 4, LANE0 - RAIL - 14, 8, 14).fill(BRASS.bar);
+      kg.roundRect(x - 13, LANE0 - RAIL - 30, 26, 20, 7).fill(night ? 0x8fb6c8 : THEM.main).stroke({ width: 2, color: COL.ink });
+    }
     this.knobLayer.addChild(kg);
+  }
+
+  /** The two nets; `side` ripples with `amp` (0 = still). */
+  netG = new Graphics();
+  drawNets(side: number, amp: number) {
+    const g = this.netG;
+    if (!g.parent) this.fxLayer.addChildAt(g, 0);
+    g.clear();
+    for (const s of [0, 1]) {
+      const gx = s === 0 ? TX0 - 50 : TX1;
+      const y0 = laneY(MOUTH[0] - 0.5);
+      const h = (MOUTH[1] - MOUTH[0] + 1) * LH;
+      const a = s === side ? amp : 0;
+      const bend = (y: number) => a * Math.sin(((y - y0) / h) * Math.PI) * (s === 0 ? -1 : 1);
+      for (let i = 1; i < 5; i++) {
+        g.moveTo(gx + i * 10 + bend(y0), y0);
+        for (let y = y0; y <= y0 + h; y += 8) g.lineTo(gx + i * 10 + bend(y) * (i / 5), y);
+      }
+      for (let j = 1; j < h / 10; j++) {
+        const y = y0 + j * 10;
+        g.moveTo(gx, y).lineTo(gx + 50 + bend(y), y);
+      }
+    }
+    g.stroke({ width: 1, color: this.haunted ? 0xcfe3ee : COL.cream, alpha: 0.2 });
   }
 
   /** A faint woven KICKER mark in the centre circle: stitched ring, a weave, the name. */
@@ -527,20 +728,24 @@ export class Game {
     m.position.set((TX0 + TX1) / 2, LANE0 + PITCH_H / 2);
   }
 
-  /** Builds the eight rods with their figures from the run (your squad, their plain turquoise men). */
+  /** Builds the eight rods with their figures: your squad, and the rival's own launches (ghosts on the Haunted table). */
   buildRods() {
     const run = this.run;
     this.rodLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.dragLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.rods = [[], []];
     if (!run) return;
     const m = run.s.match;
     const off = m ? m.off : [[4, 2, 0, 1], [5, 3, 1, 2]];
+    const rivals = run.rivals();
+    const ghost = run.mode === "haunt";
     this.disp.off = off.map((o) => o.slice());
     for (const side of [0, 1] as (0 | 1)[]) {
       for (let r = 0; r < 4; r++) {
         const d = RODS[r];
         const c = new Container();
         c.position.set(colX(colOf(side, r)), LANE0 + off[side][r] * LH);
+        c.zIndex = colOf(side, r);
         const bar = new Graphics();
         const span = (d.max + 2) * LH + PITCH_H + 200;
         bar.rect(-5, -span, 10, span * 2).fill(BRASS.bar);
@@ -552,16 +757,21 @@ export class Game {
         if (!pulled) {
           for (let f = 0; f < d.n; f++) {
             const slot = slotOf(r, f);
-            const fv = new FigureView(side, side === 0 ? run.s.squad[slot] : null, f);
+            const l = side === 0 ? run.s.squad[slot] : rivals[slot] || null;
+            const fv = new FigureView(side, l, f, side === 0 ? "you" : ghost ? "ghost" : "them");
             fv.position.set(0, (f * d.gap + 0.5) * LH);
             if (fv.tag) {
               this.upright(fv.tag);
-              if (this.port) fv.tag.position.set(-(FR + 3), 0);
+              if (this.port) {
+                fv.tag.anchor.set(0, 0.5);
+                fv.tag.position.set(-(FR + 4), side === 0 ? -FR - 18 : FR + 18);
+                fv.tag.anchor.set(0.5, 0.5);
+              }
             }
             if (side === 0) {
               fv.setStats(run.stats(slot));
-              this.bindFigure(fv, slot);
-            }
+              this.bindFigure(fv, slot, r);
+            } else this.bindRival(fv);
             c.addChild(fv);
             figs.push(fv);
           }
@@ -572,10 +782,31 @@ export class Game {
         }
         this.rodLayer.addChild(c);
         this.rods[side].push({ c, bar, figs });
+        // your rods can be dragged by the bar itself: a wide strip along the rod answers
+        if (side === 0 && !pulled) {
+          const hit = new Container();
+          hit.position.set(colX(colOf(0, r)), LANE0 - RAIL);
+          hit.hitArea = new Rectangle(-30, 0, 60, PITCH_H + 2 * RAIL);
+          hit.eventMode = "static";
+          hit.cursor = "ns-resize";
+          hit.on("pointerdown", (e) => this.dragStart(r, e));
+          this.dragLayer.addChild(hit);
+        }
       }
     }
-    // their side in front of yours where they cross, like a real table: draw order by column
+    // the figures cross in column order, like a real table
     this.rodLayer.sortableChildren = true;
+    this.syncGhostLook();
+  }
+
+  /** The phasing rod: see-through while it lets the ball pass. */
+  syncGhostLook() {
+    const run = this.run;
+    const g = run?.s.match?.ghost;
+    for (const rv of this.rods[1]) rv.c.alpha = 1;
+    if (!run || !g) return;
+    const rv = this.rods[1][g.rod];
+    if (rv) rv.c.alpha = run.fadedRod() === g.rod ? 0.3 : 1;
   }
 
   figPos(side: 0 | 1, rod: number, fig: number): { x: number; y: number } {
@@ -591,14 +822,26 @@ export class Game {
     const rv = this.rods[b.side][b.rod];
     const fwd = b.side === 0 ? 1 : -1;
     this.ball.visible = true;
-    this.ball.position.set(rv.c.x + fwd * 15, rv.c.y + (b.fig * RODS[b.rod].gap + 0.5) * LH + 9);
+    this.ball.position.set(rv.c.x + fwd * 30, rv.c.y + (b.fig * RODS[b.rod].gap + 0.5) * LH);
   }
 
   drawBall() {
-    this.ball.clear();
-    this.ball.circle(3, 4, 9).fill({ color: 0x000000, alpha: 0.4 });
-    this.ball.circle(0, 0, 9).fill(0xfff6e6).stroke({ width: 2, color: COL.ink });
-    this.ball.circle(-3, -3, 3).fill({ color: 0xffffff, alpha: 0.9 });
+    const g = this.ball;
+    g.clear();
+    if (this.haunted) {
+      // a pumpkin: ribs, a stem
+      g.circle(3, 4, 11).fill({ color: 0x000000, alpha: 0.45 });
+      g.circle(0, 0, 18).fill({ color: 0xff8a1c, alpha: 0.12 });
+      g.ellipse(0, 0, 11, 10).fill(0xf07a12).stroke({ width: 2, color: COL.ink });
+      g.ellipse(0, 0, 5, 10).stroke({ width: 1.5, color: 0xb04a08 });
+      g.moveTo(0, -10).lineTo(0, 10).stroke({ width: 1.5, color: 0xb04a08 });
+      g.rect(-1.5, -14, 3, 5).fill(0x3d7a2a);
+      g.circle(-4, -4, 2.5).fill({ color: 0xffd28a, alpha: 0.8 });
+      return;
+    }
+    g.circle(3, 4, 10).fill({ color: 0x000000, alpha: 0.4 });
+    g.circle(0, 0, 10).fill(0xfff6e6).stroke({ width: 2, color: COL.ink });
+    g.circle(-3, -3, 3).fill({ color: 0xffffff, alpha: 0.9 });
   }
 
   // ================================================================ run lifecycle
@@ -607,17 +850,24 @@ export class Game {
     for (const l of run.s.squad) tokenTexture(l.c, l.s, () => {});
     this.run = run;
     this.busy = false;
-    this.refreshAll();
+    this.calmSwirl();
+    this.resize();
   }
 
   refreshAll() {
     const run = this.run;
     if (!run) return;
     this.tip.hide();
+    // a phone's bench row comes and goes with what sits on it
+    if (this.port && (this.L.area.y > 236) !== this.benchRow()) {
+      this.resize();
+      return;
+    }
     this.drawBall();
     this.buildRods();
     this.syncBall();
     this.syncBench();
+    this.hudNow = null;
     this.syncHud();
     this.showStage();
     this.syncControls();
@@ -628,6 +878,9 @@ export class Game {
     this.ballFree = null;
     this.disp.ball = m && (this.run!.s.phase === "attack" || this.run!.s.phase === "defend") ? { ...m.ball } : null;
     this.placeBall();
+    for (const side of this.rods) for (const rv of side) for (const f of rv.figs) f.setGlow(null);
+    const b = this.disp.ball;
+    if (b) this.rods[b.side]?.[b.rod]?.figs[b.fig]?.setGlow(b.side === 0 ? COL.money : COL.bad);
   }
 
   inMatch() {
@@ -635,45 +888,73 @@ export class Game {
     return p === "attack" || p === "defend";
   }
 
+  /** The left column (or the phone's top rows). Numbers come from `hudNow` while a touch plays back. */
   syncHud() {
     const run = this.run;
     if (!run) return;
     const s = run.s;
     const m = s.match;
+    const h = this.hudNow || hudOf(run);
     const kind = m ? m.kind : s.kind;
     const boss = m ? m.boss : run.bossOf();
     const name = m ? m.club : run.clubName();
+    const style = STYLES[m ? m.style : run.styleOf()];
     this.clubName.text = name;
-    this.clubName.style.fill = kind === 0 ? COL.cyan : kind === 1 ? COL.money : COL.pink;
-    this.clubRule.text = boss ? BOSS[boss].text : `${FIXTURE_NAME[kind]} · round ${Math.min(s.round, ROUNDS)} of ${ROUNDS} · first to ${m ? m.target : 2}`;
-    this.scoreYou.text = String(m ? m.score[0] : 0);
-    this.scoreThem.text = String(m ? m.score[1] : 0);
+    this.clubName.style.fill = run.mode === "haunt" ? 0xcfe3ee : kind === 0 ? COL.cyan : kind === 1 ? COL.money : COL.pink;
+    const ghost = m?.ghost;
+    const ghostLine = run.mode === "haunt" ? ` · ${GHOST_RULES.phasing.name}, ${GHOST_RULES.polter.name}, ${GHOST_RULES.dark.name}` : "";
+    this.clubRule.text = boss
+      ? `${BOSS[boss].text}. ${style.name}.${ghostLine}`
+      : `${FIXTURE_NAME[kind]} · ${run.mode === "haunt" ? "Haunted table" : `round ${Math.min(s.round, run.rounds)} of ${run.rounds}`} · first to ${m ? m.target : 2} · ${style.name}${ghostLine}`;
+    this.scoreYou.text = String(h.you);
+    this.scoreThem.text = String(h.them);
     this.scoreYou.style.fill = look().kitHi;
-    this.stat.round.text = `${Math.min(s.round, ROUNDS)}/${ROUNDS}`;
+    this.stat.round.text = run.mode === "haunt" ? `${Math.min(s.kind + 1, 3)}/3` : `${Math.min(s.round, run.rounds)}/${run.rounds}`;
     this.stat.fans.text = this.port ? `${s.fans} fans` : String(s.fans);
-    this.stat.goals.text = String(s.goalsFor);
-    this.stat.wins.text = String(s.cleared);
+    this.stat.goals.text = String(h.goals);
+    this.stat.wins.text = String(h.wins);
     const g = this.pips;
     g.clear();
-    if (m && s.phase === "attack") {
+    if (h.mode === "goal") {
+      this.possText.text = "Goal";
+      this.touchText.text = "Kick-off next";
+    } else if (m && h.mode === "attack" && s.phase === "attack" && !this.hudNow) {
       this.possText.text = `Your ball · possession ${m.poss[0]} of ${m.limit}`;
       const free = m.free.reduce((a, b) => a + b, 0) + m.freeAny;
-      this.touchText.text = `${m.touches} touch${m.touches === 1 ? "" : "es"} left${free ? ` · ${free} free slide${free === 1 ? "" : "s"}` : ""}${m.dummy ? ` · they freeze for ${m.dummy}` : ""}`;
+      const lines = [`${m.touches} touch${m.touches === 1 ? "" : "es"} left${free ? ` · ${free} free slide${free === 1 ? "" : "s"}` : ""}${m.dummy ? ` · they freeze for ${m.dummy}` : ""}`];
+      if (ghost) {
+        lines.push(run.fadedRod() >= 0 ? `Their ${RODS[ghost.rod].name.toLowerCase()} is FADED this touch` : `Their ${RODS[ghost.rod].name.toLowerCase()} is SOLID this touch, faded next`);
+        const mv = run.driftNow();
+        if (mv) lines.push(`After your next kick their ${RODS[mv.r].name.toLowerCase()} drifts ${mv.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down"}`);
+      }
+      this.touchText.text = lines.join("\n");
       for (let i = 0; i < m.touches; i++) g.circle((i - (m.touches - 1) / 2) * 30, 0, 11).fill(COL.money).stroke({ width: 3, color: COL.ink });
-    } else if (m && s.phase === "defend") {
+    } else if (m && h.mode === "defend" && s.phase === "defend" && !this.hudNow) {
       this.possText.text = `Their ball · ${m.aiTouches} touch${m.aiTouches === 1 ? "" : "es"} left`;
-      this.touchText.text = `${m.blockSlides} block slide${m.blockSlides === 1 ? "" : "s"} left this possession`;
+      this.touchText.text = `${m.blockSlides} block slide${m.blockSlides === 1 ? "" : "s"} left. Slide into the red lanes, then Ready.`;
       for (let i = 0; i < m.blockSlides; i++) g.roundRect((i - (m.blockSlides - 1) / 2) * 30 - 10, -10, 20, 20, 4).fill(COL.cyan).stroke({ width: 3, color: COL.ink });
-    } else {
-      this.possText.text = s.phase === "room" ? "Dressing room" : s.phase === "fulltime" ? "Full time" : s.phase === "fixture" ? "Next up" : "";
+    } else if (this.hudNow && (h.mode === "attack" || h.mode === "defend")) {
+      // mid-playback: whose ball it is, the counts settle when the touch is done
+      this.possText.text = h.mode === "attack" ? "Your ball" : "Their ball";
       this.touchText.text = "";
+    } else {
+      const ph = s.phase;
+      if (ph === "fixture") {
+        this.possText.text = `Next up: ${FIXTURE_NAME[s.kind].toLowerCase()}`;
+        this.touchText.text = `${run.clubName()} · first to ${boss === "bell" ? 3 : 2} · a win is +${WIN_FANS[s.kind]} fans`;
+      } else {
+        this.possText.text = ph === "room" ? "Dressing room" : ph === "fulltime" ? "Full time" : ph === "won" ? "Champions" : ph === "over" ? "Season over" : "";
+        this.touchText.text = ph === "room" ? `${s.fans} fans to spend` : "";
+      }
     }
     const ch = ui.challenge;
     this.chalText.text = ch ? `Beat ${ch.name || "the challenger"}: ${ch.won ? "won the season" : `round ${ch.round}`}, best goal ${fmt(ch.best)}` : "";
-    this.benchLabel.text = `COACHES ${s.coaches.length}/${MAX_COACHES}${this.port ? "" : `      SET PIECES ${s.plays.length}/${MAX_PLAYS}`}`;
-    this.btnReady.visible = s.phase === "defend";
-    this.btnHint.visible = s.phase === "attack" || (s.phase === "defend" && false);
-    if (this.port) this.btnHint.visible = s.phase === "attack";
+    this.benchLabel.text = `COACHES ${s.coaches.length}/${MAX_COACHES}`;
+    this.playLabel.text = `SET PIECES ${s.plays.length}/${MAX_PLAYS}`;
+    // during playback the buttons follow what is on the table, not where the engine already is
+    const shown = this.hudNow ? this.hudNow.mode : s.phase;
+    this.btnReady.visible = shown === "defend";
+    this.btnHint.visible = shown === "attack";
     this.btnReady.setEnabled(!this.busy);
     this.btnHint.setEnabled(!this.busy);
     if (s.phase === "defend" && m) {
@@ -691,17 +972,40 @@ export class Game {
     this.benchLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.coachViews = [];
     this.playViews = [];
-    const slots = new Graphics();
-    const sc = L.coachScale;
-    for (let i = 0; i < MAX_COACHES; i++) {
-      const x = L.coachX + i * L.coachStep;
-      slots.roundRect(x - (PW * sc) / 2, L.coachY - (PH * sc) / 2, PW * sc, PH * sc, 10).fill({ color: 0x000000, alpha: 0.22 }).stroke({ width: 2, color: COL.edge, alpha: 0.7 });
+    if (this.port && !this.benchRow()) return;
+    const sc = L.benchScale;
+    const w = PW * sc;
+    const h = PH * sc;
+    // empty seats read as seats: a dim silhouette and what goes there
+    const seat = (x: number, y: number, what: string, coach: boolean) => {
+      const c = new Container();
+      const g = new Graphics();
+      g.roundRect(-w / 2, -h / 2, w, h, 8).fill({ color: 0x000000, alpha: 0.2 }).stroke({ width: 2, color: COL.edge, alpha: 0.8 });
+      if (coach) {
+        g.circle(0, -h * 0.18, w * 0.17).fill({ color: COL.edge, alpha: 0.6 });
+        g.roundRect(-w * 0.28, -h * 0.02, w * 0.56, h * 0.22, 8).fill({ color: COL.edge, alpha: 0.6 });
+      } else {
+        // a corner flag: pole, pennant and the corner arc
+        g.moveTo(-w * 0.12, h * 0.14).lineTo(-w * 0.12, -h * 0.34).stroke({ width: 2, color: COL.edge, alpha: 0.8 });
+        g.poly([-w * 0.12, -h * 0.34, w * 0.2, -h * 0.24, -w * 0.12, -h * 0.13]).fill({ color: COL.edge, alpha: 0.6 });
+        g.arc(-w * 0.12, h * 0.14, w * 0.22, -Math.PI / 2, 0).stroke({ width: 2, color: COL.edge, alpha: 0.5 });
+      }
+      const t = txt(what, { fontSize: 9, fill: COL.dim, align: "center", wordWrap: true, wordWrapWidth: w - 6, lineHeight: 10 });
+      t.anchor.set(0.5, 0);
+      t.position.set(0, h * 0.24);
+      t.alpha = 0.85;
+      c.addChild(g, t);
+      c.position.set(x, y);
+      this.benchLayer.addChild(c);
+    };
+    for (let i = run.s.coaches.length; i < MAX_COACHES; i++) seat(L.coachX + i * L.coachStep, L.coachY, "Coach slot", true);
+    for (let i = run.s.plays.length; i < MAX_PLAYS; i++) seat(L.playX + i * L.playStep, L.playY, "Set piece", false);
+    if (!this.port && !run.s.coaches.length && !run.s.plays.length) {
+      const t = txt("Empty for now. Coaches and set pieces come from the dressing room after your first match.", { fontSize: 11, fill: COL.dim, wordWrap: true, wordWrapWidth: 170, lineHeight: 14 });
+      t.position.set(150, L.playY - 30);
+      t.alpha = 0.8;
+      this.benchLayer.addChild(t);
     }
-    for (let i = 0; i < MAX_PLAYS; i++) {
-      const x = L.playX + i * L.playStep;
-      slots.roundRect(x - (PW * sc * 0.92) / 2, L.playY - (PH * sc * 0.92) / 2, PW * sc * 0.92, PH * sc * 0.92, 10).fill({ color: 0x000000, alpha: 0.22 }).stroke({ width: 2, color: COL.edge, alpha: 0.7 });
-    }
-    this.benchLayer.addChild(slots);
     run.s.coaches.forEach((j, i) => {
       const v = new CoachView(j.id);
       v.scale.set(sc);
@@ -725,7 +1029,7 @@ export class Game {
     });
     run.s.plays.forEach((id, i) => {
       const v = new ItemView("play", id);
-      v.scale.set(sc * 0.92);
+      v.scale.set(sc);
       v.position.set(L.playX + i * L.playStep, L.playY);
       v.on("pointertap", () => this.playTip(i, v));
       v.on("pointerover", (e) => {
@@ -802,8 +1106,8 @@ export class Game {
     this.tip.show(d.name, body, at.x, at.y, { w: this.L.W, h: this.L.H }, COL.cyan, 300);
   }
 
-  // ================================================================ figures: the data tag
-  bindFigure(fv: FigureView, slot: number) {
+  // ================================================================ figures: the data tag, and dragging their rod
+  bindFigure(fv: FigureView, slot: number, rod: number) {
     let timer = 0;
     let hoverT = 0;
     let held = false;
@@ -821,6 +1125,7 @@ export class Game {
       held = false;
       stop();
       clearTimeout(hoverT);
+      this.dragStart(rod, e);
       if (e.pointerType === "mouse") {
         timer = window.setTimeout(full, 650);
         return;
@@ -837,8 +1142,15 @@ export class Game {
       stop();
       if (held) this.tip.hide();
     });
+    fv.on("globalpointermove", () => {
+      if (this.dragged) stop();
+    });
     fv.on("pointertap", () => {
       stop();
+      if (this.dragged) {
+        this.dragged = false;
+        return;
+      }
       if (held) {
         held = false;
         return;
@@ -850,7 +1162,7 @@ export class Game {
       if (e.pointerType !== "mouse") return;
       clearTimeout(hoverT);
       hoverT = window.setTimeout(() => {
-        if (!fv.destroyed) this.figTag(fv, slot, false);
+        if (!fv.destroyed && !this.drag) this.figTag(fv, slot, false);
       }, 280);
     });
     fv.on("pointerout", (e) => {
@@ -860,52 +1172,164 @@ export class Game {
     });
   }
 
+  /** Their figures are launches too: hover or tap for the tag, hold for the full page. */
+  bindRival(fv: FigureView) {
+    const l = fv.launch;
+    if (!l) return;
+    let timer = 0;
+    fv.on("pointerover", (e) => {
+      if (e.pointerType === "mouse") this.rivalTag(fv, l, false);
+    });
+    fv.on("pointerout", (e) => {
+      if (e.pointerType === "mouse" && !this.tipPinned) this.tip.hide();
+    });
+    fv.on("pointerdown", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setUi({ detail: { l } }), 800);
+    });
+    fv.on("pointerup", () => clearTimeout(timer));
+    fv.on("pointerupoutside", () => clearTimeout(timer));
+    fv.on("pointertap", () => {
+      clearTimeout(timer);
+      this.rivalTag(fv, l, true);
+    });
+  }
+
+  rivalTag(fv: FigureView, l: Launch, pinned: boolean) {
+    const run = this.run;
+    if (!run || fv.destroyed) return;
+    const f = figureFacts(l, run.ageHours(l));
+    const club = run.s.match?.club || run.clubName();
+    const lines = [run.mode === "haunt" ? `Ghost: ${ghostWhy(l)}` : `Plays for ${club}`, ...f.lines.slice(1, 7).map(([k, v]) => `${k}: ${v}`)];
+    this.tipPinned = pinned;
+    this.tip.hide();
+    const p = this.root.toLocal(fv.getGlobalPosition());
+    this.tip.show(`${f.title} · ${club}`, lines.join("\n"), p.x, p.y - 30, { w: this.L.W, h: this.L.H }, run.mode === "haunt" ? 0xcfe3ee : THEM.hi, 360);
+  }
+
   figTag(fv: FigureView, slot: number, pinned: boolean) {
     const run = this.run;
     if (!run || fv.destroyed) return;
     const l = run.s.squad[slot];
     const f = figureFacts(l, run.ageHours(l), run.statSources(l));
     const lines = f.lines.map(([k, v]) => `${k}: ${v}`);
-    lines.push(pinned ? "Keep holding for its launch page" : "Hold the figure for its launch page");
+    lines.push(pinned ? "Keep holding for its launch page" : "Hold the figure for its launch page. Drag it to slide its rod.");
     this.tipPinned = pinned;
     this.tip.hide();
     const p = this.root.toLocal(fv.getGlobalPosition());
     this.tip.show(`${f.title} · ${RODS[slot === 0 ? 0 : slot <= 2 ? 1 : slot <= 7 ? 2 : 3].name.toLowerCase()}`, lines.join("\n"), p.x, p.y - 30, { w: this.L.W, h: this.L.H }, look().kitHi, 380);
   }
 
-  // ================================================================ controls: rod arrows, kick targets, threats
+  // ---------------------------------------------------------------- drag a rod: half a lane of travel slides it one lane
+  dragStart(r: number, e: FederatedPointerEvent) {
+    if (!this.inMatch() || this.busy) return;
+    this.dragged = false;
+    this.drag = { r, y0: this.tbl.toLocal(e.global).y, done: false, id: e.pointerId };
+  }
+  dragMove(e: FederatedPointerEvent) {
+    const d = this.drag;
+    if (!d || d.done || e.pointerId !== d.id) return;
+    const dy = this.tbl.toLocal(e.global).y - d.y0;
+    if (Math.abs(dy) > 10) this.dragged = true;
+    if (Math.abs(dy) < LH * 0.45) return;
+    d.done = true;
+    const dir: Dir = dy < 0 ? -1 : 1;
+    this.tip.hide();
+    const run = this.run;
+    if (!run || this.busy) return;
+    if (!run.canMove(0, d.r, dir) || (run.s.phase === "attack" ? run.slideCost(d.r) > run.m.touches : run.m.blockSlides <= 0)) {
+      sfx.error();
+      // the rod knocks against its stop
+      const rv = this.rods[0][d.r];
+      if (rv) {
+        const y = rv.c.y;
+        void tween(rv.c, { y: y + dir * 6 }, 60).then(() => tween(rv.c, { y }, 140, ease.outBack));
+      }
+      return;
+    }
+    this.doSlide(d.r, dir);
+  }
+  dragEnd() {
+    this.drag = null;
+    // the tap that ends a drag must not count as a tap on a figure
+    setTimeout(() => (this.dragged = false), 0);
+  }
+
+  // ================================================================ controls: rod handles, kick targets, threats
   syncControls() {
     const run = this.run;
     this.ctrlLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.guideLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.arrows = {};
     if (!run || !this.inMatch()) return;
+    this.syncGhostLook();
     const s = run.s;
     const m = run.m;
     const attack = s.phase === "attack";
-    // rod arrows under your rod ends
+    // your handles: the rod comes out of the cabinet, the two slide buttons are its grip
+    const hg = new Graphics();
+    this.ctrlLayer.addChild(hg);
     for (let r = 0; r < 4; r++) {
       const x = colX(colOf(0, r));
       const pulled = m.pulled === r;
       const locked = m.frozen === r || (r === 0 && m.boss === "lockup");
       const cost = attack ? run.slideCost(r) : 0;
+      hg.rect(x - 5, HANDLE_Y - 4, 10, ARROW_H * 2 + 18).fill(pulled ? { color: BRASS.bar, alpha: 0.25 } : BRASS.bar);
+      hg.roundRect(x - ARROW_W / 2 - 4, CTRL_Y - 2, ARROW_W + 8, ARROW_H * 2 + 14, 14).fill({ color: COL.ink, alpha: 0.85 });
       for (const d of [-1, 1] as Dir[]) {
         const ok = !this.busy && !pulled && run.canMove(0, r, d) && (attack ? cost <= m.touches : m.blockSlides > 0);
         const b = this.arrow(d, ok, () => void this.doSlide(r, d));
-        b.position.set(x, CTRL_Y + (d === -1 ? ARROW_H / 2 : ARROW_H * 1.5 + 6));
+        b.position.set(x, CTRL_Y + 2 + ARROW_H / 2 + (d === -1 ? 0 : ARROW_H + 6));
         this.ctrlLayer.addChild(b);
+        this.arrows[`${r}${d}`] = b;
       }
-      const cap = txt(pulled ? "PULLED" : locked ? "LOCKED" : attack && cost === 0 && (m.free[r] > 0 || m.freeAny > 0) ? "FREE" : attack && cost === 2 ? "2 TOUCH" : RODS[r].name.toUpperCase(), {
-        fontSize: 9,
-        fill: pulled || locked ? COL.bad : cost === 0 && attack ? COL.cyan : COL.dim,
-      });
+      const capText = pulled ? "PULLED" : locked ? "LOCKED" : attack && cost === 0 && (m.free[r] > 0 || m.freeAny > 0) ? "FREE SLIDE" : attack && cost === 2 ? "2 TOUCHES" : RODS[r].name.toUpperCase();
+      const cap = txt(capText, { fontSize: 13, fill: pulled || locked ? COL.bad : cost === 0 && attack && capText === "FREE SLIDE" ? COL.cyan : COL.cream2, stroke: { color: COL.ink, width: 4 } });
       cap.anchor.set(0.5);
-      cap.position.set(x, CTRL_Y + ARROW_H * 2 + 20);
+      cap.position.set(x, capY());
       this.upright(cap);
+      if (this.port) cap.position.set(x, CTRL_Y + ARROW_H + 6);
+      if (this.port) cap.visible = false;
       this.ctrlLayer.addChild(cap);
     }
+    this.drawGhostMarks();
     if (this.busy) return;
     if (attack) this.drawKicks();
     else this.drawThreats();
+  }
+
+  /** The ghost rules at their handles: the phasing rod's state, and the poltergeist's next drift. */
+  drawGhostMarks() {
+    const run = this.run!;
+    const g = run.s.match?.ghost;
+    if (!g) return;
+    const attack = run.s.phase === "attack";
+    const px = colX(colOf(1, g.rod));
+    const faded = run.fadedRod() === g.rod;
+    const tag = txt(attack ? (faded ? "FADED" : "SOLID") : "PHASING", {
+      fontSize: 12,
+      fill: !attack ? 0xcfe3ee : faded ? COL.dim : COL.cyan,
+      stroke: { color: COL.ink, width: 4 },
+    });
+    tag.anchor.set(0.5);
+    tag.position.set(px, LANE0 - RAIL - 38);
+    this.upright(tag);
+    this.ctrlLayer.addChild(tag);
+    const mv = run.driftNow();
+    if (!mv) return;
+    const x = colX(colOf(1, mv.r));
+    const a = new Graphics();
+    const same = mv.r === g.rod;
+    const y = LANE0 - RAIL - 38;
+    // a wisp arrow: the way the rod will drift after your next kick
+    a.circle(0, 0, 16).fill({ color: 0xcfe3ee, alpha: 0.18 }).stroke({ width: 2, color: 0xcfe3ee, alpha: 0.8 });
+    const t = 8;
+    if (mv.d < 0) a.poly([-t, 0, t * 0.6, -t * 0.9, t * 0.6, t * 0.9]).fill(0xcfe3ee);
+    else a.poly([t, 0, -t * 0.6, -t * 0.9, -t * 0.6, t * 0.9]).fill(0xcfe3ee);
+    a.rotation = Math.PI / 2;
+    a.position.set(x + (same ? 44 : 0), y);
+    (a as Container & { label: string }).label = "drift";
+    this.ctrlLayer.addChild(a);
   }
 
   arrow(d: Dir, enabled: boolean, fn: () => void): Container {
@@ -914,15 +1338,16 @@ export class Game {
     const w = ARROW_W;
     const h = ARROW_H;
     const col = enabled ? COL.play : 0x4a3346;
-    g.roundRect(-w / 2, -h / 2 + 4, w, h, 10).fill(0x0a2a30);
-    g.roundRect(-w / 2, -h / 2, w, h, 10).fill(col).stroke({ width: 3, color: COL.ink });
-    const t = 13;
+    g.roundRect(-w / 2, -h / 2 + 4, w, h, 12).fill(0x0a2a30);
+    g.roundRect(-w / 2, -h / 2, w, h, 12).fill(col).stroke({ width: 3, color: COL.ink });
+    g.roundRect(-w / 2 + 6, -h / 2 + 4, w - 12, 6, 3).fill({ color: 0xffffff, alpha: enabled ? 0.18 : 0.05 });
+    const t = 14;
     if (d === -1) g.poly([0, -t, t * 1.2, t * 0.7, -t * 1.2, t * 0.7]).fill({ color: COL.cream, alpha: enabled ? 1 : 0.35 });
     else g.poly([0, t, t * 1.2, -t * 0.7, -t * 1.2, -t * 0.7]).fill({ color: COL.cream, alpha: enabled ? 1 : 0.35 });
     c.addChild(g);
     c.eventMode = "static";
     c.cursor = enabled ? "pointer" : "default";
-    c.hitArea = new Rectangle(-w / 2, -h / 2, w, h);
+    c.hitArea = new Rectangle(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4);
     c.on("pointertap", () => {
       if (!enabled) {
         sfx.error();
@@ -986,7 +1411,7 @@ export class Game {
       const shot = k.kick.r === 4;
       const pts = this.pathPoints(0, ball.rod, lane, k.kick, shot ? m.drift : 0);
       const hl = this.hoverKick === i;
-      if (k.open) this.dashed(g, pts, shot ? COL.money : COL.cream, hl ? 1 : shot ? 0.9 : 0.55, hl ? 6 : 4);
+      if (k.open) this.dashed(g, pts, shot ? COL.money : COL.cream, hl ? 1 : shot ? 0.9 : 0.6, hl ? 6 : 4);
       else if (shot || hl) this.dashed(g, pts, COL.bad, hl ? 0.9 : 0.35, 3);
       const end = shot ? pts[pts.length - 2] : pts[pts.length - 1];
       const fig = shot ? null : this.rods[0][k.kick.r]?.figs[k.tr.to] || null;
@@ -1006,9 +1431,9 @@ export class Game {
       const mg = new Graphics();
       const col = t.open ? (t.kick.r === 4 ? COL.money : COL.cream) : COL.bad;
       if (t.kick.r === 4) {
-        mg.circle(0, 0, 24).fill({ color: COL.ink, alpha: 0.75 }).stroke({ width: 5, color: col });
+        mg.circle(0, 0, 25).fill({ color: COL.ink, alpha: 0.75 }).stroke({ width: 5, color: col });
         mg.circle(0, 0, 9).fill(col);
-      } else mg.circle(0, 0, FR + 7).stroke({ width: 4, color: col, alpha: 0.9 });
+      } else mg.circle(0, 0, FR + 9).stroke({ width: 4, color: col, alpha: 0.95 });
       c.addChild(mg);
       c.position.set(t.x, t.y);
       c.eventMode = "static";
@@ -1016,14 +1441,15 @@ export class Game {
       // generous, but never wider than a lane and a half, so two targets side by side stay apart
       c.hitArea = new Rectangle(-44, -25, 88, 50);
       c.on("pointertap", () => void this.doKick(t.kick));
-      c.on("pointerover", () => this.hoverTarget(i));
-      c.on("pointerout", () => this.hoverTarget(null));
+      // hover previews only for a mouse: a finger's pointerover would rebuild the targets under the tap
+      c.on("pointerover", (e) => e.pointerType === "mouse" && this.hoverTarget(i));
+      c.on("pointerout", (e) => e.pointerType === "mouse" && this.hoverTarget(null));
       (c as Container & { label: string }).label = t.kick.r === 4 ? "shot" : "pass";
       this.guideLayer.addChild(c);
     });
     const holder = this.rods[0][ball.rod]?.figs[ball.fig];
     for (const rv of this.rods[0]) for (const f of rv.figs) f.setRing(null);
-    holder?.setRing(COL.money, 4);
+    holder?.setRing(COL.money, 5);
   }
 
   hoverTarget(i: number | null) {
@@ -1067,7 +1493,7 @@ export class Game {
       g.circle(end.x, end.y, 12).stroke({ width: 4, color: k.kick.r === 4 ? COL.bad : COL.money });
     }
     const holder = this.rods[1][ball.rod]?.figs[ball.fig];
-    holder?.setRing(COL.bad, 4);
+    holder?.setRing(COL.bad, 5);
     if (!threats.length && m.intent && m.intent.kind === "slide") {
       // the rod it is about to move
       const x = colX(colOf(1, m.intent.r));
@@ -1095,8 +1521,11 @@ export class Game {
     if (!run || this.busy) return;
     this.hoverKick = null;
     this.tip.hide();
+    const before = hudOf(run);
     if (!this.act(a)) return;
     this.busy = true;
+    this.hudNow = before;
+    this.syncHud();
     this.syncControls();
     this.btnReady.setEnabled(false);
     this.btnHint.setEnabled(false);
@@ -1104,6 +1533,7 @@ export class Game {
       await this.playEvents(run.events.slice());
     } finally {
       this.busy = false;
+      this.hudNow = null;
       this.afterEvents();
     }
   }
@@ -1147,6 +1577,10 @@ export class Game {
     this.tip.hide();
     sfx.boost();
     this.heat = Math.min(1, this.heat + 0.3);
+    if (this.port && !this.benchRow()) {
+      this.refreshAll();
+      return;
+    }
     this.syncBench();
     this.syncHud();
     this.syncControls();
@@ -1164,6 +1598,10 @@ export class Game {
   // ================================================================ playback
   async playEvents(evs: Ev[]) {
     for (const ev of evs) {
+      if (this.hudNow) {
+        this.hudNow = hudStep(this.hudNow, ev);
+        this.syncHud();
+      }
       switch (ev.e) {
         case "slide":
           await this.animSlide(ev.side, ev.r, ev.d, ev.why);
@@ -1198,10 +1636,24 @@ export class Game {
     const rv = this.rods[side][r];
     if (!rv) return;
     this.disp.off[side][r] += d;
-    sfx.slide(side === 0);
-    const dur = why === "react" || why === "mirror" ? 150 : 190;
-    await tween(rv.c, { y: LANE0 + this.disp.off[side][r] * LH }, dur, ease.outBack);
+    const ghost = why === "ghost";
+    if (ghost) {
+      sfx.polter();
+      // a wisp runs down the rod before it moves
+      const w = new Graphics().rect(-16, LANE0, 32, PITCH_H).fill({ color: 0xcfe3ee, alpha: 0.22 });
+      w.x = rv.c.x;
+      this.fxLayer.addChild(w);
+      void tween(w, { alpha: 0 }, 700).then(() => w.destroy());
+      const p = this.root.toLocal(this.tbl.toGlobal({ x: rv.c.x, y: LANE0 + 20 }));
+      this.floatText("Poltergeist", p.x, p.y, 0xcfe3ee, 26);
+      await wait(160);
+    } else sfx.slide(side === 0);
+    // the rod carries weight: it overshoots a touch and settles with a thunk
+    const dur = why === "react" || why === "mirror" ? 160 : ghost ? 420 : 210;
+    await tween(rv.c, { y: LANE0 + this.disp.off[side][r] * LH }, dur, ghost ? ease.inOut : ease.outBack);
+    if (side === 0 && (why === "you" || why === "block")) sfx.thunk();
     if (why === "react" || why === "ai") await wait(60);
+    if (ghost) this.syncGhostLook();
   }
 
   async animKick(ev: Extract<Ev, { e: "kick" }>) {
@@ -1212,32 +1664,55 @@ export class Game {
     if (ev.at) upTo = Math.abs(colOf(side === 0 ? 1 : 0, ev.at.rod) - x0);
     const pts = this.pathPoints(side, ev.rod, lane, ev.kick, ev.drift, upTo);
     const holder = this.rods[side][ev.rod]?.figs[ev.fig];
-    // the kick: the figure rocks forward, then the ball flies
-    if (holder) {
-      holder.rotation = side === 0 ? -0.4 : 0.4;
-      void tween(holder, { rotation: 0 }, 260, ease.outBack);
-    }
+    for (const sd of this.rods) for (const rv of sd) for (const f of rv.figs) f.setGlow(null);
+    // the kick: the figure swings round its rod, then the ball flies
+    if (holder) holder.swing(tween, ease.outBack);
     sfx.kick(ev.beaten > 0);
+    await wait(70);
     this.ballFree = { x: this.ball.x, y: this.ball.y };
-    const speed = ev.kick.r === 4 ? 1.35 : 1;
+    // the ball leaves fast and loses pace along the way
     const total = pts.length;
-    const per = Math.max(6, Math.min(26, 420 / Math.max(1, total))) / speed;
-    for (let i = 0; i < total; i++) {
-      const p = pts[i];
-      this.ball.position.set(p.x, p.y);
-      if (i % 2 === 0) this.trailDot(p.x, p.y);
-      await wait(per);
-    }
+    const dur = Math.min(620, 150 + total * 11) / (ev.kick.r === 4 ? 1.3 : 1);
+    const pos = { k: 0 };
+    let last = -1;
+    const run = tween(pos, { k: 1 }, dur, (t) => 1 - Math.pow(1 - t, 2.2));
+    await new Promise<void>((res) => {
+      const step = () => {
+        const i = Math.min(total - 1, Math.floor(pos.k * (total - 1) + 1e-6));
+        if (i !== last) {
+          for (let j = last + 1; j <= i; j++) if (j % 2 === 0) this.trailDot(pts[j].x, pts[j].y);
+          last = i;
+          const p = pts[i];
+          this.ball.position.set(p.x, p.y);
+        }
+        if (pos.k >= 1) res();
+        else requestAnimationFrame(step);
+      };
+      void run.then(() => {
+        pos.k = 1;
+      });
+      step();
+    });
+    const pEnd = pts[total - 1];
+    this.ball.position.set(pEnd.x, pEnd.y);
     if (ev.result === "blocked" || ev.result === "kept") {
+      const ghostBlock = this.haunted && side === 0;
       sfx.block();
-      this.shake = Math.min(1, this.shake + 0.25);
+      if (ghostBlock) sfx.ghostBlock();
+      this.shake = Math.min(1, this.shake + 0.3);
       const blocker = ev.at ? this.rods[side === 0 ? 1 : 0][ev.at.rod]?.figs[ev.at.fig] : null;
       if (blocker) {
-        blocker.scale.set(1.25);
-        void tween(blocker.scale, { x: 1, y: 1 }, 260, ease.outBack);
+        blocker.scale.set(1.3);
+        void tween(blocker.scale, { x: 1, y: 1 }, 280, ease.outBack);
       }
+      // the clack: a white flash where ball meets figure
+      const fl = new Graphics().circle(0, 0, 22).fill({ color: ghostBlock ? 0xcfe3ee : 0xffffff, alpha: 0.7 });
+      fl.position.copyFrom(this.ball.position);
+      this.fxLayer.addChild(fl);
+      void tween(fl.scale, { x: 2, y: 2 }, 220);
+      void tween(fl, { alpha: 0 }, 220).then(() => fl.destroy());
       const p = this.root.toLocal(this.tbl.toGlobal(this.ball.position));
-      this.floatText(ev.result === "kept" ? "Kept it" : side === 0 ? "Blocked" : "Saved", p.x, p.y - 40, ev.result === "kept" ? COL.cyan : side === 0 ? COL.bad : COL.good, 30);
+      this.floatText(ev.result === "kept" ? "Kept it" : side === 0 ? (ghostBlock ? "Ghost block" : "Blocked") : "Saved", p.x, p.y - 40, ev.result === "kept" ? COL.cyan : side === 0 ? COL.bad : COL.good, 30);
       if (ev.result === "kept") {
         await wait(120);
         this.ballFree = null;
@@ -1268,29 +1743,45 @@ export class Game {
 
   trailDot(x: number, y: number) {
     if (reduced()) return;
-    const d = new Graphics().circle(0, 0, 7).fill({ color: 0xfff6e6, alpha: 0.5 });
+    const ember = this.haunted;
+    const d = new Graphics().circle(0, 0, ember ? 5 : 7).fill({ color: ember ? 0xff7a1c : 0xfff6e6, alpha: ember ? 0.85 : 0.5 });
     d.position.set(x, y);
     this.ballLayer.addChildAt(d, 0);
-    void tween(d, { alpha: 0 }, 260).then(() => d.destroy());
-    void tween(d.scale, { x: 0.3, y: 0.3 }, 260);
+    void tween(d, { alpha: 0 }, ember ? 420 : 260).then(() => d.destroy());
+    void tween(d.scale, { x: 0.2, y: 0.2 }, ember ? 420 : 260);
+    if (ember) void tween(d, { y: y - 14 }, 420);
   }
 
   async animGoal(side: 0 | 1, rating: number, style: string) {
     const L = this.L;
     const digit = side === 0 ? this.scoreYou : this.scoreThem;
-    digit.text = String((Number(digit.text) || 0) + 1);
     digit.scale.set(1.6);
     void tween(digit.scale, { x: 1, y: 1 }, 420, ease.outBack);
     const gx = side === 0 ? TX1 + 30 : TX0 - 30;
-    const net = new Graphics().rect(side === 0 ? TX1 : TX0 - 50, laneY(MOUTH[0] - 0.5), 50, (MOUTH[1] - MOUTH[0] + 1) * LH).fill({ color: side === 0 ? COL.money : COL.bad, alpha: 0.5 });
+    const net = new Graphics().rect(side === 0 ? TX1 : TX0 - 50, laneY(MOUTH[0] - 0.5), 50, (MOUTH[1] - MOUTH[0] + 1) * LH).fill({ color: side === 0 ? COL.money : COL.bad, alpha: 0.4 });
     this.fxLayer.addChild(net);
     void tween(net, { alpha: 0 }, 900).then(() => net.destroy());
     this.ball.position.set(gx, this.ball.y);
+    // the net bellies out and settles
+    const rip = { a: 18 };
+    const netSide = side === 0 ? 1 : 0;
+    if (!reduced()) {
+      const ripple = tween(rip, { a: 0 }, 700, (t) => t);
+      const step = () => {
+        this.drawNets(netSide, rip.a * Math.cos((1 - rip.a / 18) * 9));
+        if (rip.a > 0.01) requestAnimationFrame(step);
+        else this.drawNets(0, 0);
+      };
+      step();
+      void ripple;
+    }
     if (side === 0) {
-      sfx.goal();
+      if (this.haunted) sfx.hauntGoal();
+      else sfx.goal();
+      sfx.crowd();
       this.heat = 1;
       this.shake = 1;
-      const banner = txt("GOAL", { fontFamily: NUM, fontSize: this.port ? 120 : 140, fill: COL.money, stroke: { color: COL.ink, width: 12 } });
+      const banner = txt("GOAL", { fontFamily: NUM, fontSize: this.port ? 120 : 140, fill: this.haunted ? 0xff8a1c : COL.money, stroke: { color: COL.ink, width: 12 } });
       banner.anchor.set(0.5);
       const cx = L.area.x + L.area.w / 2;
       const cy = L.area.y + L.area.h / 2 - 30;
@@ -1302,7 +1793,7 @@ export class Game {
       sub.position.set(cx, cy + 92);
       sub.alpha = 0;
       this.root.addChild(sub);
-      this.burst(cx - 220, cy, COL.money, 22);
+      this.burst(cx - 220, cy, this.haunted ? 0xff8a1c : COL.money, 22);
       this.burst(cx + 220, cy, look().kitHi, 22);
       await tween(banner.scale, { x: 1, y: 1 }, 360, ease.outElastic);
       void tween(sub, { alpha: 1 }, 200);
@@ -1337,9 +1828,10 @@ export class Game {
     sfx.whistle();
     if (won || draw) sfx.clear();
     else sfx.lose();
+    if (won) sfx.crowd();
     const run = this.run!;
     const final = run.s.phase === "won";
-    const text = final ? "CHAMPIONS" : won ? "FULL TIME" : draw ? "LEVEL: THROUGH" : "KNOCKED OUT";
+    const text = final ? (run.mode === "haunt" ? "LAID TO REST" : "CHAMPIONS") : won ? "FULL TIME" : draw ? "LEVEL: THROUGH" : "KNOCKED OUT";
     const banner = txt(text, { fontFamily: NUM, fontSize: this.port ? 76 : 96, fill: won || draw ? COL.money : COL.bad, stroke: { color: COL.ink, width: 10 } });
     banner.anchor.set(0.5);
     banner.position.set(L.area.x + L.area.w / 2, L.area.y + L.area.h / 2);
@@ -1384,7 +1876,7 @@ export class Game {
     }
   }
 
-  // ================================================================ stage panels: fixtures, full time, dressing room
+  // ================================================================ stage panels: match day, full time, dressing room
   showStage() {
     const run = this.run;
     this.stageLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
@@ -1397,11 +1889,11 @@ export class Game {
     else if (ph === "room") this.roomPanel();
   }
 
-  private stageBox(h: number, title: string, color: number): { c: Container; w: number } {
+  private stageBox(h: number, title: string, color: number, full = false): { c: Container; w: number } {
     const a = this.L.area;
-    const w = Math.min(a.w, this.port ? a.w : 1000);
+    const w = full ? a.w : Math.min(a.w, this.port ? a.w : 1000);
     const x = a.x + (a.w - w) / 2;
-    const y = this.port ? a.y : a.y + Math.max(0, (a.h - h) / 2 - 20);
+    const y = this.port || full ? a.y : a.y + Math.max(0, (a.h - h) / 2 - 20);
     const c = new Container();
     c.position.set(x, y);
     c.addChild(panel(w, h, COL.ink2, color));
@@ -1416,65 +1908,142 @@ export class Game {
     return { c, w };
   }
 
+  /** Match day: the round's three clubs with their crests and how they play, your eleven, and the way to the dressing room. */
   fixturePanel() {
     const run = this.run!;
     const s = run.s;
     const port = this.port;
-    const h = Math.min(this.L.area.h, port ? 640 : 540);
-    const { c, w } = this.stageBox(h, `ROUND ${s.round}`, COL.money);
-    const tw = (w - 48 - 2 * 16) / 3;
+    const haunt = run.mode === "haunt";
+    const h = this.L.area.h;
+    const { c, w } = this.stageBox(h, haunt ? "HAUNTED TABLE" : `ROUND ${s.round} · MATCH DAY`, haunt ? 0xcfe3ee : COL.money, true);
+    const sub = txt(
+      haunt
+        ? `Three ghost clubs made of the cut's quietest launches. Live ${"through " + "6 Nov"}. ${s.fans} fans.`
+        : `${s.fans} fans · ${s.cleared} won · round ${s.round} of ${run.rounds}`,
+      { fontSize: 15, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: w - 40 },
+    );
+    sub.anchor.set(0.5, 0);
+    sub.position.set(w / 2, 62);
+    c.addChild(sub);
+    // the three tiles take the upper part, your line-up the lower
+    const tilesTop = 96;
+    let lineupH = port ? 330 : 290;
+    const buttonsH = 84;
+    const spare = h - tilesTop - lineupH - buttonsH - 10;
+    const th = Math.min(spare, port ? 440 : 420);
+    lineupH += spare - th;
+    const gap = 14;
+    const tw = (w - 32 - 2 * gap) / 3;
     for (let k = 0; k < 3; k++) {
-      const x = 24 + k * (tw + 16);
-      const y = 76;
-      const th = h - 100;
+      const x = 16 + k * (tw + gap);
+      const y = tilesTop;
       const cur = k === s.kind;
       const done = k < s.kind;
       const boss = run.bossOf(k);
-      const col = k === 0 ? COL.cyan : k === 1 ? COL.money : COL.pink;
+      const col = haunt ? 0xcfe3ee : k === 0 ? COL.cyan : k === 1 ? COL.money : COL.pink;
       const tile = panel(tw, th, cur ? COL.panelHi : COL.ink, cur ? col : COL.edge);
       tile.position.set(x, y);
+      if (done) tile.alpha = 0.6;
       c.addChild(tile);
-      const kindT = txt(FIXTURE_NAME[k].toUpperCase(), { fontSize: 13, fill: COL.dim });
+      const kindT = txt(FIXTURE_NAME[k].toUpperCase(), { fontSize: 12, fill: COL.dim });
       kindT.anchor.set(0.5, 0);
-      kindT.position.set(x + tw / 2, y + 12);
-      const name = txt(run.clubName(k), { fontSize: port ? 18 : 22, fill: col, align: "center", wordWrap: true, wordWrapWidth: tw - 16 });
+      kindT.position.set(x + tw / 2, y + 10);
+      const nm = run.clubName(k);
+      const name = txt(nm, { fontSize: port ? 16 : 20, fill: col, align: "center", wordWrap: true, wordWrapWidth: tw - 14 });
       name.anchor.set(0.5, 0);
-      name.position.set(x + tw / 2, y + 34);
+      name.position.set(x + tw / 2, y + 30);
       c.addChild(kindT, name);
-      // a crest: a shield in the club's colour with a ball
-      const em = new Graphics();
-      const R = port ? 30 : 40;
-      em.poly([-R, -R * 0.9, R, -R * 0.9, R, R * 0.2, 0, R * 1.1, -R, R * 0.2]).fill(boss ? COL.pink : THEM.main).stroke({ width: 5, color: COL.ink });
-      em.circle(0, -R * 0.05, R * 0.42).fill(COL.cream).stroke({ width: 3, color: COL.ink });
-      em.poly([0, -R * 0.3, R * 0.2, -R * 0.12, R * 0.12, R * 0.15, -R * 0.12, R * 0.15, -R * 0.2, -R * 0.12]).fill(COL.ink);
-      em.position.set(x + tw / 2, y + (port ? 116 : 130));
+      const R = Math.max(22, Math.min(port ? 34 : 46, th * 0.11));
+      const em = crest(nm, haunt ? "ghost" : boss ? "boss" : "club", R);
+      em.position.set(x + tw / 2, name.y + name.height + R * 1.25);
       c.addChild(em);
       const lv = run.levelOf(k);
+      const st = STYLES[run.styleOf(k)];
       const p = lv >= 10 ? "Full strength" : lv >= 8 ? "Shoots through a blocker" : lv >= 6 ? "More touches" : lv >= 4 ? "Reads your blocks" : lv >= 3 ? "Two slides a touch" : lv >= 2 ? "Shuts passing lanes" : "Covers the shots";
-      const info = txt(`First to ${boss === "bell" ? 3 : 2}\n${p}\nWin: +${WIN_FANS[k]} fans`, { fontSize: 14, fill: COL.cream2, align: "center", lineHeight: 19 });
+      const info = txt(`${st.name}\n${p}\nFirst to ${boss === "bell" ? 3 : 2} · win +${WIN_FANS[k]} fans`, { fontSize: port ? 12 : 14, fill: COL.cream2, align: "center", lineHeight: port ? 16 : 19, wordWrap: true, wordWrapWidth: tw - 12 });
       info.anchor.set(0.5, 0);
-      info.position.set(x + tw / 2, y + (port ? 160 : 186));
+      info.position.set(x + tw / 2, em.y + R * 1.3);
       c.addChild(info);
+      const bottom = y + th - (cur ? (port ? 84 : 76) : 50);
       if (boss) {
-        const bt = txt(BOSS[boss].text, { fontSize: port ? 13 : 15, fill: COL.cream, align: "center", wordWrap: true, wordWrapWidth: tw - 20 });
+        const bt = txt(BOSS[boss].text, { fontSize: port ? 12 : 14, fill: COL.cream, align: "center", wordWrap: true, wordWrapWidth: tw - 16, lineHeight: port ? 15 : 18 });
         bt.anchor.set(0.5, 0);
-        bt.position.set(x + tw / 2, info.y + info.height + 10);
-        const room = y + th - (cur ? 92 : 70) - bt.y;
-        if (bt.height > room) bt.scale.set(Math.max(0.55, room / bt.height));
+        bt.position.set(x + tw / 2, info.y + info.height + 8);
+        const room = bottom - bt.y;
+        if (bt.height > room) bt.scale.set(Math.max(0.6, room / bt.height));
         c.addChild(bt);
       }
       if (cur) {
-        const btn = new Button("Kick off", Math.min(tw - 16, 190), port ? 76 : 64, COL.play, () => this.doGo(), { size: 24 });
-        btn.position.set(x + tw / 2, y + th - (port ? 58 : 52));
-        btn.hitArea = new Rectangle(-tw / 2 + 4, -(port ? 64 : 56), tw - 8, port ? 120 : 104);
+        const btn = new Button("Kick off", Math.min(tw - 16, 200), port ? 72 : 62, COL.play, () => this.doGo(), { size: 24 });
+        btn.position.set(x + tw / 2, y + th - (port ? 46 : 42));
+        btn.hitArea = new Rectangle(-tw / 2 + 4, -(port ? 44 : 40), tw - 8, port ? 84 : 76);
         c.addChild(btn);
       } else {
-        const st = txt(done ? "DONE" : "UP NEXT", { fontFamily: NUM, fontSize: 30, fill: done ? COL.good : COL.dim });
-        st.anchor.set(0.5);
-        st.position.set(x + tw / 2, y + th - 46);
-        c.addChild(st);
+        const st2 = txt(done ? "DONE" : "UP NEXT", { fontFamily: NUM, fontSize: 28, fill: done ? COL.good : COL.dim });
+        st2.anchor.set(0.5);
+        st2.position.set(x + tw / 2, y + th - 28);
+        c.addChild(st2);
       }
     }
+    // your eleven on four short rods, front line first, each rod across the box like the table seen from your end
+    const ly = tilesTop + th + 10;
+    const box = panel(w - 32, lineupH - 10, COL.ink, COL.edge);
+    box.position.set(16, ly);
+    c.addChild(box);
+    const head = txt("YOUR ELEVEN · tap a figure for its launch", { fontSize: 12, fill: COL.dim });
+    head.position.set(30, ly + 8);
+    c.addChild(head);
+    const rowH = (lineupH - 46) / 4;
+    const labW = port ? 0 : 110;
+    [3, 2, 1, 0].forEach((r, i) => {
+      const cy = ly + 34 + rowH * (i + 0.5);
+      if (labW) {
+        const lab = txt(RODS[r].name.toUpperCase(), { fontSize: 12, fill: COL.cream2 });
+        lab.anchor.set(0, 0.5);
+        lab.position.set(32, cy);
+        c.addChild(lab);
+      }
+      const x0 = 32 + labW;
+      const x1 = w - 40;
+      const bar = new Graphics().rect(x0, -3, x1 - x0, 6).fill(BRASS.bar);
+      bar.y = cy;
+      c.addChild(bar);
+      const n = RODS[r].n;
+      const k = Math.min(port ? 1.05 : 0.78, rowH / 78);
+      for (let f = 0; f < n; f++) {
+        const slot = RODS[r].slot + f;
+        const fv = new FigureView(0, s.squad[slot], f);
+        fv.rotation = -Math.PI / 2;
+        fv.scale.set(k);
+        if (fv.tag) {
+          fv.tag.rotation = Math.PI / 2;
+          fv.tag.anchor.set(0, 0.5);
+          fv.tag.position.set(0, 0);
+          fv.tag.position.set(-6, FR + 16);
+        }
+        fv.setStats(run.stats(slot));
+        fv.position.set(x0 + ((x1 - x0) * (f + 0.5)) / n - 20 * k, cy);
+        fv.on("pointertap", () => setUi({ detail: { l: s.squad[slot], slot } }));
+        c.addChild(fv);
+      }
+    });
+    // the way to the line-up and the dressing room
+    const by = h - buttonsH / 2 - 6;
+    const bw = Math.min(260, (w - 60) / 2);
+    const sq = new Button("Line-up", bw, 62, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 21 });
+    sq.position.set(w / 2 - bw / 2 - 10, by);
+    const canRoom = s.visit > 0;
+    const room = new Button(canRoom ? `Dressing room · ${s.fans} fans` : "Dressing room after match 1", bw, 62, canRoom ? COL.money : COL.neutral, () => this.doBack(), { size: canRoom ? 19 : 15 });
+    if (canRoom) room.caption.style.fill = COL.ink;
+    room.setEnabled(canRoom);
+    room.position.set(w / 2 + bw / 2 + 10, by);
+    c.addChild(sq, room);
+  }
+
+  doBack() {
+    if (!this.act({ t: "back" })) return;
+    sfx.click();
+    this.refreshAll();
   }
 
   /** Kick off; a boss club gets its intro first (once, from the overlay). */
@@ -1489,13 +2058,14 @@ export class Game {
     setUi({ bossSeen: false });
     const boss = run.bossOf();
     if (!this.act({ t: "go" })) return;
-    if (boss) {
+    if (boss && !this.haunted) {
       setSwirlColors(this.swirl, 0x2e0612, 0x3d0b1c, 0xb3123f);
       this.heat = 0.6;
     } else this.calmSwirl();
     this.busy = true;
     this.buildRods();
     this.showStage();
+    this.hudNow = null;
     this.syncHud();
     this.syncControls();
     void this.playEvents(run.events.slice()).finally(() => {
@@ -1544,7 +2114,7 @@ export class Game {
     const run = this.run!;
     const s = run.s;
     const port = this.port;
-    const h = Math.min(this.L.area.h - 6, port ? 700 : 560);
+    const h = Math.min(this.L.area.h - 6, port ? 640 : 600);
     const { c, w } = this.stageBox(h, "DRESSING ROOM", COL.cyan);
     const fans = txt(`${s.fans} fans in the stands`, { fontSize: 20, fill: COL.money });
     fans.anchor.set(0.5, 0);
@@ -1560,8 +2130,8 @@ export class Game {
       drop = Math.max(0, ht.height - 6);
     }
     const n = s.offers.length;
-    const sc = port ? 1.1 : 1.08;
-    const step = Math.min((w - 40) / Math.max(1, n), PW * sc + 40);
+    const sc = port ? 1.1 : 1.12;
+    const step = Math.min((w - 40) / Math.max(1, n), PW * sc + 44);
     const y0 = (port ? 112 : 120) + (PH * sc) / 2 + drop;
     const desc = txt("Tap an item to read it. Coaches work every match; training stays for the season; a set piece is used once.", {
       fontSize: port ? 15 : 16,
@@ -1608,9 +2178,9 @@ export class Game {
       c.addChild(b);
     });
     const by = h - 50;
-    const sq = new Button("Line-up", port ? 230 : 230, 64, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 21 });
+    const sq = new Button("Line-up", 230, 64, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 21 });
     sq.position.set(w / 2 - (port ? 130 : 140), by);
-    const next = new Button("Next match", port ? 230 : 230, 64, COL.play, () => this.doNext(), { size: 21 });
+    const next = new Button("Match day", 230, 64, COL.play, () => this.doNext(), { size: 21 });
     next.position.set(w / 2 + (port ? 130 : 140), by);
     c.addChild(sq, next);
     // training levels, printed: nothing on this shelf is hidden
@@ -1658,7 +2228,7 @@ export class Game {
         if (i >= 0) this.hoverTarget(i);
         setUi({ coach: { step: 9, text: p.r === 4 ? "Shoot: the gold disc in their goal mouth." : "Pass: the ringed figure. Tap it." } });
       } else {
-        setUi({ coach: { step: 9, text: `Slide your ${RODS[p.r].name.toLowerCase()} ${p.d < 0 ? "up" : "down"} one lane: ${p.d < 0 ? "the top" : "the bottom"} arrow under that rod.` } });
+        setUi({ coach: { step: 9, text: `Slide your ${RODS[p.r].name.toLowerCase()} ${p.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down"} one lane: drag the rod, or the ${p.d < 0 ? "top" : "bottom"} button at its handle.` } });
         this.pulseArrow(p.r, p.d);
       }
     } else if (run.s.phase === "defend") {
@@ -1669,7 +2239,7 @@ export class Game {
   }
 
   pulseArrow(r: number, d: Dir) {
-    const a = this.ctrlLayer.children[r * 3 + (d === -1 ? 0 : 1)] as Container | undefined;
+    const a = this.arrows[`${r}${d}`];
     if (!a) return;
     a.scale.set(1.3);
     void tween(a.scale, { x: 1, y: 1 }, 400, ease.outElastic);
@@ -1712,5 +2282,11 @@ export class Game {
     const p = fv.getGlobalPosition();
     return { x: p.x, y: p.y };
   }
+  /** For QA: where a handle button of your rod is on screen. */
+  screenOfArrow(r: number, d: Dir): { x: number; y: number } | null {
+    const a = this.arrows[`${r}${d}`];
+    if (!a) return null;
+    const p = a.getGlobalPosition();
+    return { x: p.x, y: p.y };
+  }
 }
-

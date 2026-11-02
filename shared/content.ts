@@ -203,3 +203,55 @@ export const WIN_FANS = [2, 3, 4];
 export const MAX_COACHES = 5;
 export const MAX_PLAYS = 2;
 export const START_FANS = 4;
+
+// ---------------------------------------------------------------- how a rival club plays
+export type StyleId = "bus" | "press" | "long";
+export const STYLES: Keyed<StyleId, { name: string; text: string }> = {
+  bus: { name: "Parks the bus", text: "Sits deep: an extra slide at the back once your ball reaches your attack, and it only shoots from midfield up" },
+  press: { name: "Presses high", text: "Shuts your passing lanes from the first whistle and sets up with an extra slide when you win the ball" },
+  long: { name: "Shoots from distance", text: "Covers shots before passes; from round 3 its shots from deep go through one blocker" },
+};
+const CLUB_STYLE: StyleId[] = ["press", "bus", "long"];
+/** A club always plays the same way: by its name for the everyday clubs, by its rule for a boss club. */
+export function styleOf(club: string, boss: string | null): StyleId {
+  if (boss) return BOSS_STYLE[boss] || "press";
+  const h = HAUNT.clubs.indexOf(club);
+  if (h >= 0) return HAUNT.clubStyle[h];
+  const i = CLUBS.indexOf(club);
+  return CLUB_STYLE[(i < 0 ? 0 : i) % 3];
+}
+const BOSS_STYLE: Keyed<string, StyleId> = {
+  rug: "bus",
+  halt: "press",
+  vcheck: "long",
+  depeg: "long",
+  gasspike: "press",
+  jam: "press",
+  slip: "bus",
+  lockup: "long",
+  wash: "bus",
+  bell: "press",
+  haunt: "long",
+};
+
+// ---------------------------------------------------------------- Haunted table: a time-limited event mode
+/**
+ * Three matches against ghost clubs built from the quietest launches of the cut, with two ghost rules
+ * (a phasing rod and a poltergeist) and the lights turned low. Live through Fri 6 Nov 2026, 23:59 UTC;
+ * after that it stays playable as a past event.
+ */
+export const HAUNT = {
+  end: Date.UTC(2026, 10, 6, 23, 59, 59),
+  endLabel: "6 Nov",
+  clubs: ["Crypt Rovers", "Graveyard United"],
+  clubStyle: ["bus", "press"] as StyleId[],
+  levels: [4, 7, 10],
+  boss: { id: "haunt", name: "The Haunted XI", text: "The last of the ghost clubs: both ghost rules, lights low, and it has to be beaten" } as ClubDef,
+};
+export const hauntLive = (now = Date.now()) => now <= HAUNT.end;
+BOSS.haunt = HAUNT.boss;
+export const GHOST_RULES = {
+  phasing: { name: "Phasing", text: "One of their rods is a ghost: it blocks on every other touch of yours. It shows SOLID or FADED at its handle." },
+  polter: { name: "Poltergeist", text: "After each of your kicks one of their rods drifts a lane on its own. The arrow at its handle shows which, a touch before." },
+  dark: { name: "Graveyard shift", text: "The lights are low. The ball carries a lantern; your kick lines and their threats stay lit." },
+};

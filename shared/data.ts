@@ -56,6 +56,8 @@ export interface Edition {
   scanned: number; // launches read from the index
   dropped: number; // filtered as farm bots / dead
   pool: Launch[][]; // per pair kind
+  /** New in 2.1: launches with no trades in the last 24h that passed the farm filter, for the Haunted table's ghost clubs. */
+  ghosts?: Launch[];
 }
 
 export const editionNow = (ms = Date.now()) => Math.floor(ms / 3_600_000);
@@ -174,6 +176,43 @@ export function buildSquad(ed: Edition, seed: string): Launch[] {
   const mid = rest.slice(3, 8).sort((a, b) => b.k - a.k || (a.t < b.t ? -1 : 1));
   return [gk, ...def, ...mid, ...att].filter(Boolean);
 }
+
+/** The other side of the table for one fixture: 11 launches from the cut that are not in your squad. */
+export function rivalSquad(ed: Edition, seed: string, mine: Launch[], round: number, kind: number): Launch[] {
+  const own = new Set(mine.map((l) => l.t));
+  const all = ed.pool.flat().filter((l) => !own.has(l.t));
+  const out = shuffle(all, stream(seed, "rivals", ed.id, round, kind)).slice(0, SQUAD_SIZE);
+  while (out.length < SQUAD_SIZE && all.length) out.push(all[out.length % all.length]);
+  return out;
+}
+
+/**
+ * The deadest launches the cut knows: first the ones with no trades in 24h (the cut keeps them aside since 2.1),
+ * then the quietest of the transfer list. Ordered by 24h trades, then holders, so the label is always honest.
+ */
+export function deadList(ed: Edition, mine: Launch[]): Launch[] {
+  const own = new Set(mine.map((l) => l.t));
+  const seen = new Set<string>();
+  const out: Launch[] = [];
+  const quiet = (a: Launch, b: Launch) => a.k - b.k || a.h - b.h || (a.t < b.t ? -1 : 1);
+  for (const l of [...(ed.ghosts || []).slice().sort(quiet), ...ed.pool.flat().sort(quiet)]) {
+    if (own.has(l.t) || seen.has(l.t)) continue;
+    seen.add(l.t);
+    out.push(l);
+  }
+  return out;
+}
+
+/** A Haunted table rival: 11 of the 22 deadest launches, drawn by the seed for each fixture. */
+export function ghostSquad(ed: Edition, seed: string, mine: Launch[], round: number, kind: number): Launch[] {
+  const dead = deadList(ed, mine).slice(0, 22);
+  const out = shuffle(dead, stream(seed, "ghosts", ed.id, round, kind)).slice(0, SQUAD_SIZE);
+  while (out.length < SQUAD_SIZE && dead.length) out.push(dead[out.length % dead.length]);
+  return out;
+}
+
+/** Why a launch plays for a ghost club, in plain numbers. */
+export const ghostWhy = (l: Launch) => (l.k === 0 ? "0 trades in 24h" : `${l.k} trade${l.k === 1 ? "" : "s"} in 24h, among the quietest in this cut`);
 
 export const tokenUrl = (t: string) => `https://testnet.vibevibe.fun/token/${t}`;
 

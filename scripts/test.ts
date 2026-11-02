@@ -4,9 +4,10 @@
 // Add `--live` to also read $KICKER balances on Robinhood Chain testnet, `--anvil` to check a real ERC-1271 account on a local anvil.
 import assert from "node:assert/strict";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { STAT, buildSquad, type Edition, type Launch, type Pair } from "../shared/data.js";
+import { STAT, buildSquad, deadList, ghostWhy, type Edition, type Launch, type Pair } from "../shared/data.js";
 import { figureFacts, roomHint, squadFacts } from "../shared/insight.js";
-import { Run, rerun, encodeTrail, decodeTrail, reflect, resolveBlock, trace, laneOf, slotOf, type Action } from "../shared/engine.js";
+import { Run, rerun, encodeTrail, decodeTrail, parseTrail, aiParams, reflect, resolveBlock, trace, laneOf, slotOf, type Action } from "../shared/engine.js";
+import { hudOf, hudStep } from "../src/hud.js";
 import { botStep, playSeason } from "../shared/bot.js";
 import { COACHES, MOUTH, RODS, START_FANS, WIN_FANS, drillCost } from "../shared/content.js";
 import { mulberry32, normSeed } from "../shared/rng.js";
@@ -980,6 +981,220 @@ if (process.argv.includes("--anvil")) {
     }
   });
 }
+
+// ------------------------------------------------------------ 2.1: the Haunted table, club styles, the HUD model
+console.info("2.1: Haunted table");
+const EDH = fakeEdition(497300);
+await putEdition(EDH);
+/** A finished Haunted table run with the bot. */
+function playHaunt(ed: Edition, seed: string) {
+  const run = new Run(ed, seed, "haunt");
+  let n = 0;
+  while (n++ < 20000 && botStep(run));
+  assert.ok(run.s.phase === "over" || run.s.phase === "won", "haunted run did not finish");
+  return run;
+}
+await test("a Haunted table run is three ghost matches, deterministic from the seed, and replays exactly", () => {
+  const a = playHaunt(EDH, "HNT0-0001");
+  const b = playHaunt(EDH, "HNT0-0001");
+  assert.equal(a.rounds, 1);
+  assert.deepEqual(a.s.bosses, ["haunt"]);
+  assert.equal(encodeTrail(a.trail, "haunt"), encodeTrail(b.trail, "haunt"));
+  assert.equal(a.s.best?.total, b.s.best?.total);
+  const p = parseTrail(encodeTrail(a.trail, "haunt"));
+  assert.equal(p.mode, "haunt");
+  const c = rerun(EDH, "HNT0-0001", p.actions, p.mode);
+  assert.equal(c.s.phase, a.s.phase);
+  assert.equal(c.s.cleared, a.s.cleared);
+  assert.equal(c.s.best?.total, a.s.best?.total);
+});
+await test("ghost clubs are the deadest launches, the same for every replay, and never your own figures", () => {
+  const r = new Run(EDH, "HNT0-0002", "haunt");
+  const g1 = r.rivals(0, 1);
+  const g2 = new Run(EDH, "HNT0-0002", "haunt").rivals(0, 1);
+  assert.deepEqual(g1.map((l) => l.t), g2.map((l) => l.t));
+  assert.equal(g1.length, 11);
+  const mine = new Set(r.s.squad.map((l) => l.t));
+  assert.ok(g1.every((l) => !mine.has(l.t)));
+  const dead = deadList(EDH, r.s.squad).slice(0, 22);
+  const maxK = Math.max(...dead.map((l) => l.k));
+  assert.ok(g1.every((l) => l.k <= maxK), "a ghost is never livelier than the 22 quietest");
+  // a cut that keeps 0-trade launches aside uses those first
+  const z: Launch = { ...EDH.pool[0][0], t: "0x" + "d".repeat(40), s: "DEAD", k: 0 };
+  const withGhosts: Edition = { ...EDH, ghosts: [z] };
+  assert.equal(deadList(withGhosts, r.s.squad)[0].t, z.t);
+  assert.equal(ghostWhy(z), "0 trades in 24h");
+  assert.match(ghostWhy({ ...z, k: 2 }), /2 trades in 24h, among the quietest/);
+});
+await test("Phasing: their ghost rod blocks only on every other touch of yours", () => {
+  const r = new Run(EDH, "HNT0-0003", "haunt");
+  r.apply({ t: "go" });
+  const g = r.m.ghost!;
+  assert.ok(g && [1, 2, 3].includes(g.rod));
+  assert.equal(r.fadedRod(), -1, "solid on your first touch");
+  const before = g.tick;
+  const mv = [0, 1, 2, 3].flatMap((rr) => [-1, 1].map((d) => ({ rr, d }))).find((x) => r.canMove(0, x.rr, x.d) && r.slideCost(x.rr) <= r.m.touches)!;
+  r.apply({ t: "slide", r: mv.rr, d: mv.d as -1 | 1 });
+  if (r.s.phase === "attack") {
+    assert.equal(r.m.ghost!.tick, before + 1);
+    assert.equal(r.fadedRod(), g.rod, "faded on the next touch");
+    assert.ok(r.pulledArr()[1] === g.rod, "a faded rod lets the ball through");
+  }
+  // never faded while they have the ball
+  const s2 = new Run(EDH, "HNT0-0003", "haunt");
+  s2.apply({ t: "go" });
+  s2.s.phase = "defend";
+  s2.m.ghost!.tick = 1;
+  assert.equal(s2.fadedRod(), -1);
+  // a season match has no ghost rules at all
+  const sea = new Run(EDH, "HNT0-0003");
+  sea.apply({ t: "go" });
+  assert.equal(sea.m.ghost, null);
+  assert.equal(sea.fadedRod(), -1);
+});
+await test("Poltergeist: after a kick, the telegraphed rod drifts the telegraphed way, then the next drift is set", () => {
+  let checked = 0;
+  for (let i = 0; i < 30 && checked < 5; i++) {
+    const r = new Run(EDH, `HNT1-${String(i).padStart(4, "0")}`, "haunt");
+    r.apply({ t: "go" });
+    for (let step = 0; step < 40 && r.s.phase === "attack"; step++) {
+      const tele = r.driftNow();
+      const ks = r.myKicks().filter((k) => k.open && k.kick.r !== 4);
+      if (!ks.length || !tele) {
+        botStep(r);
+        continue;
+      }
+      const n0 = r.m.ghost!.n;
+      r.apply({ t: "kick", r: ks[0].kick.r, d: ks[0].kick.d });
+      const ghostEv = r.events.filter((e) => e.e === "slide" && e.why === "ghost");
+      assert.equal(ghostEv.length, 1, "one ghost drift per kick");
+      const ev = ghostEv[0] as Extract<(typeof r.events)[number], { e: "slide" }>;
+      assert.equal(ev.r, tele.r);
+      assert.equal(ev.side, 1);
+      if (r.s.match) assert.equal(r.m.ghost!.n, n0 + 1);
+      checked++;
+      break;
+    }
+  }
+  assert.ok(checked >= 3, "found kicks to check: " + checked);
+});
+await test("club styles are fixed by the club, and change how the rival plays", () => {
+  const r = new Run(EDT, "STYL-0001");
+  for (let k = 0; k < 3; k++) assert.equal(r.styleOf(k, 1), new Run(EDT, "STYL-0001").styleOf(k, 1));
+  const p = aiParams(1, "press");
+  const b = aiParams(1, "bus");
+  const l = aiParams(1, "long");
+  assert.equal(p.passes, true, "a pressing club shuts passing lanes from the start");
+  assert.equal(b.passes, false);
+  assert.equal(l.deep, 0);
+  assert.equal(aiParams(3, "long").deep, 1, "from round 3 a long-range club shoots through one from deep");
+});
+await test("Dressing room from match day: back reopens the same shelf; not before the first match", () => {
+  const r = new Run(EDT, "BACK-0001");
+  assert.throws(() => r.apply({ t: "back" }));
+  let n = 0;
+  while (n++ < 4000 && r.s.phase !== "room") botStep(r);
+  assert.equal(r.s.phase, "room");
+  const shelf = JSON.stringify(r.s.offers);
+  r.apply({ t: "next" });
+  r.apply({ t: "back" });
+  assert.equal(r.s.phase, "room");
+  assert.equal(JSON.stringify(r.s.offers), shelf);
+  assert.deepEqual(decodeTrail(encodeTrail([{ t: "back" }])), [{ t: "back" }]);
+});
+
+console.info("2.1: the replay guard with the mode");
+const NOWH = Date.parse("2026-11-03T12:00:00Z");
+await test("a Haunted run posts with its mode, lands on the Haunted board, and gets the kit during the event", async () => {
+  const run = playHaunt(EDH, "HNT2-0001");
+  const trail = encodeTrail(run.trail, "haunt");
+  const rec = await verifyAndStore({ seed: "HNT2-0001", edition: EDH.id, trail, mode: "haunt", name: "Lantern" }, NOWH);
+  assert.equal(rec.mode, "haunt");
+  assert.equal(rec.kit, run.s.cleared > 0);
+  assert.equal(rec.daily, undefined);
+  if (rec.best && rec.best.total > 0) {
+    const day = rec.at.slice(0, 10);
+    assert.ok((await getHall(day, "haunt")).entries.some((e) => e.id === rec.id), "on the Haunted board");
+    assert.ok(!(await getHall(day)).entries.some((e) => e.id === rec.id), "not in the season Hall");
+  }
+  // after the event closes it still verifies, without the kit
+  const late = await verifyAndStore({ seed: "HNT2-0001", edition: EDH.id, trail, mode: "haunt", name: "Late" }, Date.parse("2026-11-08T12:00:00Z"));
+  assert.equal(late.kit, undefined);
+});
+await test("a forged mode flag is refused: a season trail posted as Haunted, a Haunted trail posted as a season, a made-up mode", async () => {
+  const season = playOut(EDH, "HNT3-0001");
+  await assert.rejects(verifyAndStore({ seed: "HNT3-0001", edition: EDH.id, trail: season.trail, mode: "haunt", name: "Forger" }, NOWH), /mode/);
+  const haunt = encodeTrail(playHaunt(EDH, "HNT3-0002").trail, "haunt");
+  await assert.rejects(verifyAndStore({ seed: "HNT3-0002", edition: EDH.id, trail: haunt, mode: "season", name: "Forger" }, NOWH), /mode/);
+  await assert.rejects(verifyAndStore({ seed: "HNT3-0002", edition: EDH.id, trail: haunt, mode: "ghost", name: "Forger" }, NOWH), /mode/);
+  // the "H" token anywhere but the front is a bad trail
+  await assert.rejects(verifyAndStore({ seed: "HNT3-0002", edition: EDH.id, trail: "g_H", name: "Forger" }, NOWH));
+});
+await test("a Haunted trail replayed under season rules does not come out the same", () => {
+  const run = playHaunt(EDH, "HNT4-0001");
+  const acts = parseTrail(encodeTrail(run.trail, "haunt")).actions;
+  let same = false;
+  try {
+    const r2 = rerun(EDH, "HNT4-0001", acts, "season");
+    same = r2.s.phase === run.s.phase && r2.s.best?.total === run.s.best?.total && r2.s.cleared === run.s.cleared && r2.s.round === run.s.round;
+  } catch {
+    same = false;
+  }
+  assert.ok(!same, "the mode is part of what the trail means");
+});
+await test("Haunted kit on the profile: set once, kept, cosmetic", () => {
+  const at = "2026-11-03T10:00:00.000Z";
+  const base = { id: "a1", seed: "S", edition: 1, total: 100, style: "Tap-in", round: 1, won: false, at };
+  const p1 = mergeProfile(null, "0x" + "1".repeat(40), "Kit", { ...base, mode: "haunt", kit: true });
+  assert.equal(p1.kit?.haunt, "2026-11-03");
+  const p2 = mergeProfile(p1, "0x" + "1".repeat(40), "Kit", { ...base, id: "a2", at: "2026-11-04T10:00:00.000Z" });
+  assert.equal(p2.kit?.haunt, "2026-11-03");
+});
+
+console.info("2.1: the HUD");
+await test("the HUD model stepped event by event ends where the engine is: score, Goals, wins never disagree", () => {
+  for (const [mode, seed] of [
+    ["season", "HUD0-0001"],
+    ["haunt", "HUD0-0002"],
+  ] as const) {
+    const run = new Run(EDT, seed, mode);
+    let n = 0;
+    let goals = 0;
+    while (n++ < 20000) {
+      const before = hudOf(run);
+      if (!botStep(run)) break;
+      let h = before;
+      for (const ev of run.events) {
+        h = hudStep(h, ev);
+        // mid-playback the score and the Goals count move together
+        if (ev.e === "goal" && ev.side === 0) assert.equal(h.goals - before.goals, h.you - before.you);
+        if (ev.e === "goal") {
+          goals++;
+          assert.equal(h.mode, "goal");
+          assert.equal(h.touches, 0, "no touch pips during a goal");
+        }
+      }
+      const after = hudOf(run);
+      if (run.s.phase === "over" || run.s.phase === "won" || run.s.match) {
+        assert.equal(h.you, after.you, "score (you)");
+        assert.equal(h.them, after.them, "score (them)");
+      }
+      assert.equal(h.goals, after.goals, "Goals");
+      assert.equal(h.against, after.against);
+      assert.equal(h.wins, after.wins, "Wins");
+    }
+    assert.ok(goals > 0, "saw goals");
+  }
+});
+await test("after a goal the HUD reads one more for the scorer and in Goals, at the same moment", () => {
+  const h0 = { you: 0, them: 1, goals: 4, against: 2, wins: 1, mode: "attack" as const, touches: 2, blocks: 0, aiTouches: 0 };
+  const h1 = hudStep(h0, { e: "goal", side: 0, rating: 100, style: "Tap-in" });
+  assert.deepEqual([h1.you, h1.goals, h1.them, h1.touches, h1.mode], [1, 5, 1, 0, "goal"]);
+  const h2 = hudStep(h1, { e: "turnover", to: 1, why: "blocked" });
+  assert.equal(h2.mode, "defend");
+  const h3 = hudStep(h0, { e: "end", won: true, draw: false });
+  assert.deepEqual([h3.wins, h3.mode], [2, "idle"]);
+});
 
 if (process.argv.includes("--live")) {
   console.info("live read (Robinhood Chain testnet, eth_call only)");

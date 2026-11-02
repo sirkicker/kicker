@@ -27,8 +27,9 @@ Your eleven figures are launches from [vibe/vibe](https://testnet.vibevibe.fun),
 ## How a match plays
 
 - **The table.** Keeper (1 figure), defence (2), midfield (5) and attack (3), interleaved like a real table. Ten lanes across; the goal mouth is the middle two. A rod slides one lane at a time and its figures move together.
-- **Your ball.** Four touches a possession. A touch is a **slide** of one rod, or a **kick** with the figure on the ball: a pass to a figure further up, or a shot. The ball runs straight or one lane sideways per rod it crosses, and comes back off the side walls. Any of their figures in its lane blocks it and wins the ball.
+- **Your ball.** Four touches a possession. A touch is a **slide** of one rod (drag the rod, or press a button at its handle), or a **kick** with the figure on the ball: a pass to a figure further up, or a shot. The ball runs straight or one lane sideways per rod it crosses, and comes back off the side walls. Any of their figures in its lane blocks it and wins the ball.
 - **They react.** After every touch the rival slides to cover your most dangerous lane, and sets its defence before your first touch. It gets sharper by the round: it starts shutting passing lanes, slides twice a touch, reads your blocks, and finally shoots through a blocker.
+- **Club styles.** Every club keeps one way of playing: **Parks the bus** (an extra slide at the back once your ball reaches your attack, shoots only from midfield up), **Presses high** (shuts passing lanes from the first whistle, an extra setup slide), **Shoots from distance** (covers shots first; from round 3 its shots from deep go through one blocker).
 - **Their ball.** They show the lanes they can kick down (red for shots, amber for passes). You get two block slides a possession; slide into the lanes, then press **Ready**.
 - **Full time.** First to 2 goals (the final: 3), six possessions each. A friendly or a league match can end level and you go through without the win fans; a boss club has to be beaten.
 
@@ -38,6 +39,17 @@ Nothing is rolled at play time. The squad, the rival clubs and the shelf come fr
   <img src="docs/goal.png" alt="A goal" width="49%">
   <img src="docs/defend.png" alt="Their ball: the red line is where it can go" width="49%">
 </p>
+
+## Haunted table (through 6 Nov 2026)
+
+A three-match event mode for the spooky week on Robinhood Chain testnet. KICKER is an independent project; the mode is our own.
+
+- **Ghost clubs.** Two ghost clubs and The Haunted XI, built from the cut's quietest launches: the ones with no trades in the last 24h (each cut keeps up to 16 aside), then the quietest on the transfer list. Each ghost's tag gives its 24h trade count.
+- **Phasing.** One of their rods is a ghost: it blocks only on every other touch of yours. Its handle reads SOLID or FADED.
+- **Poltergeist.** After each kick of yours one of their rods drifts a lane on its own. The arrow at its handle shows which rod and which way, a touch before.
+- **Graveyard shift.** The lights are low and the ball carries a lantern. Kick lines and threat lines stay lit.
+- **Haunted board** in the Hall of goals, and a cosmetic **Haunted kit** mark for winning a Haunted match while the event runs.
+- After 6 Nov 23:59 UTC the title shows "Haunted table: closed" and the mode stays playable. `?haunt=preview` forces the event on.
 
 ## How a launch becomes a figure
 
@@ -49,7 +61,7 @@ Nothing is rolled at play time. The squad, the rival clubs and the shelf come fr
 | **Pair** | what the launch is quoted in: Ether, a stock, VIBEVIBE, or a private token or dollar | a stripe on the shoulders; some coaches read it |
 | **Head** | the token's own picture | |
 
-Your squad is drawn by the seed from today's cut and placed by its numbers: the three furthest along their curve up front, the most-held in goal and at the back. Swap anyone in the **Line-up** before a match.
+Your squad is drawn by the seed from today's cut and placed by its numbers: the three furthest along their curve up front, the most-held in goal and at the back. Swap anyone in the **Line-up** before a match. The other side of the table is made of launches too: the rival's eleven come from the same cut, with their own pictures.
 
 Hover a figure (or hold it on a phone) for its data tag: holders, 24h trades, age at the cut, price direction, curve progress, gift list, and which number or coach gives it each stat. Keep holding for its page on vibe/vibe.
 
@@ -91,7 +103,7 @@ Every goal is rated: more for each pass in the move, for an angle, off a wall, f
 
 A season is fixed by its **seed and cut number**. Share the seed and a friend plays the same squad against the same clubs. When a season ends, KICKER makes a **challenge link**: the server plays every touch again, checks it, and draws an image for X of the figures behind your best goal. A forged, reordered or unfinished trail is refused.
 
-Verified seasons with a name go into the **Hall of goals**: the day's top 50 best goals (UTC).
+Verified seasons with a name go into the **Hall of goals**: the day's top 50 best goals (UTC). Haunted table runs have their own board. A seed link opens the title with the seed and a Play button; nothing starts by itself, and a reload always lands on the title with Continue.
 
 <p align="center">
   <img src="docs/share.png" alt="A challenge image: the figures of the best goal" width="70%">
@@ -131,9 +143,10 @@ Hold any `$KICKER` on Robinhood Chain testnet and your side can change shirts: *
 npm install
 npm run dev     # local dev server
 npm run build   # type-check client and api, then build
-npm test        # engine, rival, boss clubs, replay guard, daily pin and board, team kits, sign-in, names (in memory)
+npm test        # engine, rival, boss clubs, Haunted table, replay guard with the mode, HUD model, daily pin and board, team kits, sign-in, names (in memory)
 npm test -- --anvil   # also checks a real ERC-1271 account on a local anvil (port 8520)
 npx tsx scripts/sim.ts 300   # the bot plays 300 seasons and reports how far it gets
+npx tsx scripts/sim.ts 300 --haunt   # 300 Haunted table runs
 ```
 
 Sign-in needs a Para API key at build time: `VITE_PARA_API_KEY`, and `VITE_PARA_ENV=PRODUCTION` for a production key (Para's test environment otherwise). Without a key the sign-in button says it is unavailable, and everything else plays the same.

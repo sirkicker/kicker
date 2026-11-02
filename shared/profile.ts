@@ -13,6 +13,10 @@ export interface ProfileRun {
   won: boolean;
   at: string;
   daily?: string;
+  /** A Haunted table run. */
+  mode?: "haunt";
+  /** Won a Haunted table match during the event: the Haunted kit (cosmetic only). */
+  kit?: boolean;
 }
 
 export interface Profile {
@@ -24,6 +28,8 @@ export interface Profile {
   /** The latest posted runs, newest first. */
   recent: ProfileRun[];
   updated: string;
+  /** Cosmetic marks: the UTC day the Haunted kit was won. */
+  kit?: { haunt?: string };
 }
 
 export const PROFILE_DAYS = 30;
@@ -47,5 +53,6 @@ export function mergeProfile(p: Profile | null, address: string, name: string, r
           .sort((a, b) => b.day.localeCompare(a.day))
           .slice(0, PROFILE_DAYS);
   const streak = run.daily ? bumpStreak(base.streak, run.daily) : base.streak;
-  return { address: base.address, name, streak, best, recent, updated: run.at };
+  const kit = run.kit && !own.kit?.haunt ? { ...(own.kit || {}), haunt: day } : own.kit;
+  return { address: base.address, name, streak, best, recent, updated: run.at, ...(kit ? { kit } : {}) };
 }

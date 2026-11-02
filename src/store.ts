@@ -1,6 +1,6 @@
 // A tiny store shared by the Pixi table and the Preact overlays.
 import type { Edition, Launch } from "../shared/data.js";
-import type { Run } from "../shared/engine.js";
+import type { Run, RunMode } from "../shared/engine.js";
 import type { Profile } from "../shared/profile.js";
 
 export type Overlay = null | "title" | "how" | "pool" | "squad" | "boss" | "over" | "seed" | "options" | "hall" | "house" | "news" | "table" | "more";
@@ -52,6 +52,10 @@ export interface UiState {
   profile: Profile | null;
   /** The boss intro was shown for this fixture; the next Kick off plays. */
   bossSeen: boolean;
+  /** A seed link opened on the title: shown with a Play button, never started by itself. */
+  pendingSeed: { seed: string; edition: number; mode: RunMode } | null;
+  /** The first-match walkthrough: the step on screen, or null. */
+  tut: number | null;
   version: number;
 }
 
@@ -70,6 +74,8 @@ export const ui: UiState = {
   signinBusy: false,
   profile: null,
   bossSeen: false,
+  pendingSeed: null,
+  tut: null,
   version: 0,
 };
 
