@@ -1,9 +1,8 @@
-// Shared runs ("showdowns"): re-run on the server from the action trail, then frozen.
-import { HAND } from "../shared/content.js";
-import { decodeTrail, rerun } from "../shared/engine.js";
+// Posted seasons: re-run on the server from the action trail, then frozen.
+import { decodeTrail, rerun, type FigInfo } from "../shared/engine.js";
 import { normSeed } from "../shared/rng.js";
 import { hash32 } from "../shared/rng.js";
-import { getEdition } from "./_deck.js";
+import { getEdition } from "./_cut.js";
 import { load, loadFresh, save, saveOver, Taken } from "./_store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
 import { utcDay } from "../shared/daily.js";
@@ -13,29 +12,25 @@ import { addToProfile, nameOwner, sessionOf } from "./_me.js";
 
 export { utcDay };
 
-export interface ShowCard {
-  t: string;
-  s: string;
-  c: string | null;
-  rank: number;
-  suit: number;
-}
-
-export interface Showdown {
+/** A verified season. `v: 2` marks the table-football game; records without it are from before 2.0. */
+export interface Result {
+  v: 2;
   id: string;
   seed: string;
   edition: number;
   trail: string;
   name: string | null;
-  ante: number;
-  blind: number;
+  round: number;
+  fixture: number;
   cleared: number;
+  draws: number;
   won: boolean;
   over: boolean;
-  best: { total: number; hand: string; handName: string; cards: ShowCard[] } | null;
-  hands: number;
+  best: { total: number; style: string; figs: FigInfo[] } | null;
+  goals: number;
+  against: number;
   at: string;
-  daily?: string; // the UTC day whose Daily Deal this was
+  daily?: string; // the UTC day whose Daily Match this was
   house?: boolean; // a $KICKER holder's house mark (cosmetic only)
   verified?: boolean; // posted by the address that owns the name
 }
@@ -56,21 +51,24 @@ function shortId(s: string): string {
 }
 
 export const ID_RE = /^[0-9a-z]{10}$/;
+/** Posted seasons live where the old game's posts did, so old challenge links still resolve. */
+export const resultPath = (id: string) => `showdowns/${id}.json`;
 
 export async function verifyAndStore(
   input: { seed?: unknown; edition?: unknown; trail?: unknown; name?: unknown; house?: unknown; session?: unknown },
   now = Date.now(),
-): Promise<Showdown> {
+): Promise<Result> {
   const seed = normSeed(String(input.seed || ""));
   const edition = Number(input.edition);
   const trail = String(input.trail || "");
   if (!seed) throw new Error("bad seed");
-  if (!Number.isInteger(edition)) throw new Error("bad deck");
-  if (trail.length > 30000) throw new Error("trail too long");
+  if (!Number.isInteger(edition)) throw new Error("bad cut");
+  if (trail.length > 60000) throw new Error("trail too long");
   const ed = await getEdition(edition);
-  if (!ed) throw new Error("deck not found");
-  const run = rerun(ed, seed, decodeTrail(trail)); // throws on any illegal step
+  if (!ed) throw new Error("squad cut not found");
+  const run = rerun(ed, seed, decodeTrail(trail)); // throws on any illegal touch
   const sum = run.summary();
+  if (!sum.over) throw new PostError("That season is not finished yet.");
   const rawName = typeof input.name === "string" ? cleanName(input.name) : "";
   if (rawName && nameProblem(rawName)) throw new Error(nameProblem(rawName)!);
   const name = rawName || null;
@@ -84,50 +82,46 @@ export async function verifyAndStore(
   // the house mark rides along only with a valid claim for this very name; it never touches the replay above
   const house = !!name && claimOk(input.house, name, now);
   const daily = await dailyDayOf(seed, edition, now);
-  const id = shortId(`${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}${verified ? "|verified" : ""}`);
-  const rec: Showdown = {
+  const id = shortId(`v2|${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}${verified ? "|verified" : ""}`);
+  const rec: Result = {
+    v: 2,
     id,
     seed,
     edition,
     trail,
     name,
-    ante: sum.ante,
-    blind: sum.blind,
+    round: sum.round,
+    fixture: sum.fixture,
     cleared: sum.cleared,
+    draws: sum.draws,
     won: sum.won,
     over: sum.over,
-    best: sum.best
-      ? {
-          total: sum.best.total,
-          hand: sum.best.hand,
-          handName: HAND[sum.best.hand].name,
-          cards: sum.best.cards,
-        }
-      : null,
-    hands: sum.hands,
+    best: sum.best ? { total: sum.best.total, style: sum.best.style, figs: sum.best.figs } : null,
+    goals: sum.goals,
+    against: sum.against,
     at: new Date(now).toISOString(),
     ...(daily ? { daily } : {}),
     ...(house ? { house } : {}),
     ...(verified ? { verified } : {}),
   };
   try {
-    await save(`showdowns/${id}.json`, rec);
+    await save(resultPath(id), rec);
   } catch (e) {
     if (!(e instanceof Taken)) throw e;
   }
-  if (rec.name && rec.over && rec.best && rec.best.total > 0) {
+  if (rec.name && rec.best && rec.best.total > 0) {
     await addToHall(rec);
     if (rec.daily) await addToBoard(rec.daily, rec.edition, hallEntry(rec));
   }
-  // the signed-in player's record follows them: one put, only for a verified, finished run
-  if (verified && sess && rec.over && rec.best) {
+  // the signed-in player's record follows them: one put, only for a verified season
+  if (verified && sess && rec.best) {
     await addToProfile(sess.a, rec.name!, {
       id: rec.id,
       seed: rec.seed,
       edition: rec.edition,
       total: rec.best.total,
-      handName: rec.best.handName,
-      ante: rec.ante,
+      style: rec.best.style,
+      round: rec.round,
       won: rec.won,
       at: rec.at,
       ...(rec.daily ? { daily: rec.daily } : {}),
@@ -136,18 +130,18 @@ export async function verifyAndStore(
   return rec;
 }
 
-// ------------------------------------------------------------ Hall of hands: best hands of the UTC day
+// ------------------------------------------------------------ Hall of goals: the best goals of the UTC day
 export interface HallEntry {
   id: string;
   name: string;
   total: number;
-  handName: string;
-  ante: number;
+  style: string;
+  round: number;
   cleared: number;
   won: boolean;
   seed: string;
   edition: number;
-  cards: ShowCard[];
+  figs: FigInfo[];
   at: string;
   house?: boolean;
   verified?: boolean;
@@ -157,27 +151,28 @@ export interface Hall {
   entries: HallEntry[];
 }
 export const HALL_SIZE = 50;
-export const hallPath = (day: string) => `hall/${day}.json`;
+/** New in 2.0: the old game's day files stay where they were and are not read for the Hall. */
+export const hallPath = (day: string) => `goals/${day}.json`;
 
-export function hallEntry(rec: Showdown): HallEntry {
+export function hallEntry(rec: Result): HallEntry {
   return {
     id: rec.id,
     name: rec.name!,
     total: rec.best!.total,
-    handName: rec.best!.handName,
-    ante: rec.ante,
+    style: rec.best!.style,
+    round: rec.round,
     cleared: rec.cleared,
     won: rec.won,
     seed: rec.seed,
     edition: rec.edition,
-    cards: rec.best!.cards.slice(0, 5).sort((a, b) => a.rank - b.rank),
+    figs: rec.best!.figs.slice(0, 5),
     at: rec.at,
     ...(rec.house ? { house: true } : {}),
     ...(rec.verified ? { verified: true } : {}),
   };
 }
 
-async function addToHall(rec: Showdown): Promise<void> {
+async function addToHall(rec: Result): Promise<void> {
   const day = utcDay(new Date(rec.at));
   const hall = (await loadFresh<Hall>(hallPath(day), 0)) || { day, entries: [] };
   if (hall.entries.some((e) => e.id === rec.id)) return;
@@ -196,7 +191,7 @@ export async function getHall(day: string): Promise<Hall> {
   return (await loadFresh<Hall>(hallPath(day))) || { day, entries: [] };
 }
 
-export async function getShowdown(id: string): Promise<Showdown | null> {
+export async function getResult(id: string): Promise<Result | null> {
   if (!ID_RE.test(id)) return null;
-  return load<Showdown>(`showdowns/${id}.json`);
+  return load<Result>(resultPath(id));
 }

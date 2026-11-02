@@ -67,7 +67,7 @@ export async function signText(make: (address: string) => string): Promise<{ add
   return r;
 }
 
-/** The last address this browser saw signed in. A hint for the chip until Para confirms it. */
+/** The last address this browser saw signed in. A hint for the pill until Para confirms it. */
 export const rememberedAddress = (): string | null => {
   const a = local.get<string | null>("kk.signin", null);
   return typeof a === "string" && /^0x[0-9a-f]{40}$/.test(a) ? a : null;

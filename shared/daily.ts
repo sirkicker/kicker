@@ -1,10 +1,10 @@
-// The Daily Deal: one seed per UTC day, the same for everybody, dealt from the day's pinned deck.
+// The Daily Match: one seed per UTC day, the same for everybody, played on the day's pinned squad cut.
 import { hash32 } from "./rng.js";
 
 export const utcDay = (d = new Date()) => d.toISOString().slice(0, 10);
 export const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Hour number (deck id) of 00:00 UTC on that day. */
+/** Hour number (cut id) of 00:00 UTC on that day. */
 export const dayStartHour = (day: string) => Math.floor(Date.parse(day + "T00:00:00Z") / 3_600_000);
 
 export const prevDay = (day: string) => utcDay(new Date(Date.parse(day + "T00:00:00Z") - 86_400_000));
@@ -14,7 +14,7 @@ const B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** The day's seed. Pure arithmetic on the date, so anyone can check it. */
 export function dailySeed(day: string): string {
   let a = hash32("kicker daily|" + day);
-  let b = hash32("house deal|" + day);
+  let b = hash32("house deal|" + day); // the salt is part of the seed formula: changing it would move every past day
   let s = "";
   for (let i = 0; i < 4; i++) {
     s += B32[a & 31];
@@ -31,7 +31,7 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 /** "2026-10-14" -> "Oct 14" */
 export const dayLabel = (day: string) => `${MON[Number(day.slice(5, 7)) - 1] || "?"} ${Number(day.slice(8, 10))}`;
 
-/** The pinned deal of a day, as the server stores and serves it. */
+/** The pinned match of a day, as the server stores and serves it. */
 export interface DailyPin {
   day: string;
   seed: string;
@@ -39,7 +39,7 @@ export interface DailyPin {
   at: string;
 }
 
-/** Device streak: consecutive UTC days with a finished Daily Deal. */
+/** Device streak: consecutive UTC days with a finished Daily Match. */
 export interface Streak {
   last: string;
   n: number;

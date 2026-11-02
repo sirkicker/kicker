@@ -1,6 +1,5 @@
-// Boot: fonts, Pixi, the deck snapshot, URL seeds/challenges, saved runs, the Daily Deal, and the tutorial coach.
+// Boot: fonts, Pixi, the squad cut, URL seeds and challenges, the saved season, the Daily Match, and the coach's tips.
 import { Application } from "pixi.js";
-import { HAND } from "../shared/content.js";
 import type { Edition } from "../shared/data.js";
 import { decodeTrail, encodeTrail, rerun, Run, type Action } from "../shared/engine.js";
 import { newSeed, normSeed } from "../shared/rng.js";
@@ -8,12 +7,13 @@ import { bumpStreak, type Streak } from "../shared/daily.js";
 import { cleanName } from "../shared/names.js";
 import { sfx, unlock } from "./audio.js";
 import { Game } from "./game.js";
-import { attach } from "./tween.js";
+import { attach, setSpeed } from "./tween.js";
+import { playSeason } from "../shared/bot.js";
 import { local, setUi, toast, ui, type Challenge, type Daily } from "./store.js";
 import { house } from "./house.js";
 import { rememberedAddress } from "./signin.js";
 import { me, receipts, refreshProfile } from "./me.js";
-import { mountUi, VERSION, type HallEntry } from "./ui.js";
+import { mountUi, VERSION, type LocalGoal } from "./ui.js";
 import "./style.css";
 
 interface Saved {
@@ -23,24 +23,26 @@ interface Saved {
   challenge: Challenge | null;
 }
 
+/** The saved season; the key is new in 2.0, so a saved run from the old game is simply not found. */
+const SAVE_KEY = "kk.season";
 const editions = new Map<number, Edition>();
 
 async function fetchEdition(id?: number): Promise<Edition> {
   if (id && editions.has(id)) return editions.get(id)!;
   const res = await fetch(id ? `/api/shuffle?e=${id}` : "/api/shuffle");
-  if (!res.ok) throw new Error(res.status === 404 ? "deck not found" : `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(res.status === 404 ? "that squad cut is gone" : `HTTP ${res.status}`);
   const ed = (await res.json()) as Edition;
   editions.set(ed.id, ed);
   return ed;
 }
 
 let game: Game;
-let coachStep = local.get<number>("kk.coach", 0);
+let coachStep = local.get<number>("kk.tips", 0);
 
 function save(run: Run) {
   const over = run.s.phase === "over" || run.s.phase === "won";
-  if (over) local.del("kk.run");
-  else local.set("kk.run", { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), challenge: ui.challenge } satisfies Saved);
+  if (over) local.del(SAVE_KEY);
+  else local.set(SAVE_KEY, { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), challenge: ui.challenge } satisfies Saved);
 }
 
 function setUrl(run: Run | null) {
@@ -56,14 +58,8 @@ function setUrl(run: Run | null) {
 function coach(step: number, text: string) {
   if (coachStep > step) return;
   coachStep = step + 1;
-  local.set("kk.coach", coachStep);
+  local.set("kk.tips", coachStep);
   setUi({ coach: { step, text } });
-}
-
-function coachLater(step: number, text: string) {
-  setTimeout(() => {
-    if (ui.run && ui.run.s.phase === "round") coach(step, text);
-  }, 3600);
 }
 
 async function startRun(seed: string, edition: Edition, trail: Action[] = []) {
@@ -74,12 +70,12 @@ async function startRun(seed: string, edition: Edition, trail: Action[] = []) {
   } catch {
     run = new Run(edition, seed);
   }
-  setUi({ run, overlay: null, coach: null });
+  setUi({ run, overlay: null, coach: null, bossSeen: false });
   game.start(run);
   setUrl(run);
   save(run);
-  if (run.s.phase === "blind" && run.trail.length === 0)
-    coach(0, "Every card here is a live vibe/vibe launch. Suit = the asset it's paired with, rank = how far along its bonding curve it is. Press Play to deal the first blind.");
+  if (run.s.phase === "fixture" && run.trail.length === 0)
+    coach(0, "Your eleven are live vibe/vibe launches. Curve progress gives a figure Power, trades give Pace, holders give Grip. Press Kick off.");
 }
 
 async function loadDaily(): Promise<Daily | null> {
@@ -94,16 +90,16 @@ async function loadDaily(): Promise<Daily | null> {
   }
 }
 
-/** The day, when this run is today's Daily Deal. */
+/** The day, when this season is today's Daily Match. */
 const dailyOf = (run: Run | null) => (run && ui.daily && ui.daily.seed === run.s.seed && ui.daily.edition === run.s.edition ? ui.daily.day : null);
 
-function hallAdd(run: Run) {
+function goalsAdd(run: Run) {
   const b = run.s.best;
   if (!b) return;
-  const list = local.get<HallEntry[]>("kk.hall", []);
-  list.push({ total: b.total, hand: HAND[b.hand].name, seed: run.s.seed, edition: run.s.edition, ante: run.s.ante, cleared: run.s.cleared, cards: b.cards, at: Date.now() });
+  const list = local.get<LocalGoal[]>("kk.goals", []);
+  list.push({ total: b.total, style: b.style, seed: run.s.seed, edition: run.s.edition, round: run.s.round, cleared: run.s.cleared, figs: b.figs, at: Date.now() });
   list.sort((a, c) => c.total - a.total);
-  local.set("kk.hall", list.slice(0, 12));
+  local.set("kk.goals", list.slice(0, 12));
 }
 
 async function boot() {
@@ -126,19 +122,15 @@ async function boot() {
     onAction(a, run) {
       save(run);
       setUi({});
-      if (a.t === "go" && run.s.round === 1)
-        coach(1, "Tap up to 5 cards. The panel names the hand you're holding and its Chips x Mult. Then press Play hand.");
-      if (a.t === "play" && run.s.handsTotal === 1 && run.s.phase === "round")
-        coachLater(2, "Score = Chips x Mult, added up over your hands. Reach the target before hands run out. Weak cards? Select them and Discard to draw new ones.");
-      if (a.t === "cash" && run.s.shopVisit === 1) coach(3, "The shop. Insiders are jokers that bend the scoring, many of them reading the launch behind a card. Buy one, then Next blind.");
-      if (a.t === "next" && run.s.blind === 2 && run.s.ante === 1) coach(4, "Boss blind ahead: it changes one rule for the round. Read it before you press Play.");
-    },
-    onSelect(run) {
-      if (ui.coach && ui.coach.step <= 1 && game.sel.length >= 1 && run.s.handsTotal === 0)
-        setUi({ coach: { step: 1, text: "Good. Chips x Mult on the left is what this hand is worth before card bonuses. Press Play hand when ready." } });
+      if (a.t === "go" && run.s.round === 1 && run.s.kind === 0)
+        coach(1, "The gold lines are your kicks: a disc in their goal is a shot, a ring on your figure is a pass. Slide a rod with the arrows under it. They react to every touch.");
+      if (run.s.phase === "defend" && run.s.round === 1)
+        coach(2, "Their ball. Red lines show where it can go. Slide your rods into those lanes, then press Ready.");
+      if (a.t === "collect" && run.s.visit === 1) coach(3, "The dressing room. Coaches read the launches on your rods; training lasts the season; a set piece is used once. Prices are fixed.");
+      if (a.t === "next" && run.s.kind === 2 && run.s.round === 1) coach(4, "A boss club next: it changes one rule for the match. Read it before you kick off.");
     },
     onOver(run) {
-      hallAdd(run);
+      goalsAdd(run);
       const day = dailyOf(run);
       if (day) local.set("kk.streak", bumpStreak(local.get<Streak | null>("kk.streak", null), day));
       save(run);
@@ -149,16 +141,28 @@ async function boot() {
     },
   });
 
-  // QA handle: lets the test bot drive the same code paths taps use
+  // QA hook: lets the test bot drive the same code paths taps use
   (window as unknown as { kicker: unknown }).kicker = {
     game,
     ui,
     setUi,
-    screenOf(id: number) {
-      const v = game.views.get(id);
-      if (!v) return null;
-      const p = v.getGlobalPosition();
-      return { x: p.x, y: p.y };
+    screenOfSlot(slot: number) {
+      return game.screenOfSlot(slot);
+    },
+    speed(x: number) {
+      setSpeed(x);
+    },
+    /** Plays the rest of the season with the coach's bot, at once, and shows the result. */
+    finish() {
+      const run = ui.run;
+      if (!run) return;
+      playSeason(run);
+      save(run);
+      game.refreshAll();
+      if (run.s.phase === "over" || run.s.phase === "won") {
+        goalsAdd(run);
+        setUi({ overlay: "over", coach: null });
+      }
     },
   };
 
@@ -169,23 +173,23 @@ async function boot() {
         setUi({ edition: ed, challenge: null });
         await startRun(newSeed(), ed);
       } catch (e) {
-        toast("Could not load the deck: " + (e as Error).message);
+        toast("Could not load the squad: " + (e as Error).message);
       }
     },
     async dailyRun() {
       const d = (await loadDaily()) || ui.daily;
       if (!d) {
-        toast("The Daily Deal is not dealt yet. Try again in a minute.");
+        toast("The Daily Match is not drawn yet. Try again in a minute.");
         return;
       }
       try {
         const ed = await fetchEdition(d.edition);
-        const sv = local.get<Saved | null>("kk.run", null);
+        const sv = local.get<Saved | null>(SAVE_KEY, null);
         setUi({ challenge: null });
         if (sv && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, decodeTrail(sv.trail));
         else await startRun(d.seed, ed);
       } catch (e) {
-        toast("Could not load the daily deck: " + (e as Error).message);
+        toast("Could not load the daily squad: " + (e as Error).message);
       }
     },
     isDaily() {
@@ -195,7 +199,7 @@ async function boot() {
       game.applyLook();
     },
     continueRun() {
-      const sv = local.get<Saved | null>("kk.run", null);
+      const sv = local.get<Saved | null>(SAVE_KEY, null);
       if (!sv) return;
       void (async () => {
         try {
@@ -203,8 +207,8 @@ async function boot() {
           setUi({ challenge: sv.challenge });
           await startRun(sv.seed, ed, decodeTrail(sv.trail));
         } catch {
-          toast("That run's deck is gone");
-          local.del("kk.run");
+          toast("That season's squad cut is gone");
+          local.del(SAVE_KEY);
           setUi({});
         }
       })();
@@ -257,7 +261,7 @@ async function boot() {
           const ed = await fetchEdition(sd.edition);
           await startRun(sd.seed, ed);
         } catch {
-          toast("The challenge deck is gone");
+          toast("The challenge's squad cut is gone");
         }
       })();
     },
@@ -271,13 +275,13 @@ async function boot() {
         const s = me.get();
         const session = s && mine(s.name) ? s.session : undefined;
         const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail), name, house: claim, session });
-        const j = await postJson("/api/showdown", body);
+        const j = await postJson("/api/result", body);
         if (j.receipt && name) receipts.add(name, j.receipt);
-        if (j.showdown?.verified) void refreshProfile();
+        if (j.result?.verified) void refreshProfile();
         sfx.coin();
-        return { id: j.id, url: j.url, daily: j.showdown?.daily || null, house: !!j.showdown?.house, verified: !!j.showdown?.verified };
+        return { id: j.id, url: j.url, daily: j.result?.daily || null, house: !!j.result?.house, verified: !!j.result?.verified };
       } catch (e) {
-        toast("Could not verify the run: " + (e as Error).message);
+        toast("Could not verify the season: " + (e as Error).message);
         return null;
       }
     },
@@ -286,58 +290,57 @@ async function boot() {
       if (!run) return location.origin;
       return `${location.origin}/?s=${run.s.seed}&e=${run.s.edition}`;
     },
-    hint() {
-      const ids = game.hint();
-      if (ids.length) {
-        game.selectIds(ids);
-        game.pulse(ids);
-        setUi({ coach: { step: 1, text: "That's the strongest hand you hold right now. Press Play hand." } });
-      }
+    swap(a, b) {
+      return game.swap(a, b);
+    },
+    kickOff() {
+      setUi({ overlay: null });
+      game.doGo();
     },
     playEntry(h) {
       void (async () => {
         try {
           const ed = await fetchEdition(h.edition);
-          setUi({ challenge: { id: h.id, name: h.name, ante: h.ante, blind: 0, cleared: h.cleared, won: h.won, best: h.total, handName: h.handName } });
+          setUi({ challenge: { id: h.id, name: h.name, round: h.round, cleared: h.cleared, won: h.won, best: h.total, style: h.style } });
           await startRun(h.seed, ed);
         } catch {
-          toast("That run's deck is gone");
+          toast("That season's squad cut is gone");
         }
       })();
     },
     hasSaved() {
-      return !!local.get<Saved | null>("kk.run", null);
+      return !!local.get<Saved | null>(SAVE_KEY, null);
     },
   });
 
-  // first gesture unlocks audio
   const first = () => {
     unlock();
     window.removeEventListener("pointerdown", first);
   };
   window.addEventListener("pointerdown", first);
 
-  // URL: ?c=<challenge> or ?s=<seed>&e=<deck>
+  // URL: ?c=<challenge> or ?s=<seed>&e=<cut>
   const q = new URLSearchParams(location.search);
   const cId = q.get("c");
   const sParam = normSeed(q.get("s") || "");
   const eParam = Number(q.get("e")) || undefined;
   try {
     if (cId && /^[0-9a-z]{10}$/.test(cId)) {
-      const r = await fetch(`/api/showdown?id=${cId}`);
+      const r = await fetch(`/api/result?id=${cId}`);
       if (r.ok) {
         const rec = await r.json();
-        pendingChallenge = { seed: rec.seed, edition: rec.edition };
-        setUi({
-          challenge: { id: rec.id, name: rec.name, ante: rec.ante, blind: rec.blind, cleared: rec.cleared, won: rec.won, best: rec.best?.total || 0, handName: rec.best?.handName || "" },
-        });
-        const ed = await fetchEdition(rec.edition);
-        setUi({ edition: ed });
-        return;
+        if (rec.v === 2) {
+          pendingChallenge = { seed: rec.seed, edition: rec.edition };
+          setUi({ challenge: { id: rec.id, name: rec.name, round: rec.round, cleared: rec.cleared, won: rec.won, best: rec.best?.total || 0, style: rec.best?.style || "" } });
+          const ed = await fetchEdition(rec.edition);
+          setUi({ edition: ed });
+          return;
+        }
+        toast("That link is from an older season of KICKER. Its run can't be replayed on today's table.");
       }
     }
     if (sParam) {
-      const sv = local.get<Saved | null>("kk.run", null);
+      const sv = local.get<Saved | null>(SAVE_KEY, null);
       const ed = await fetchEdition(eParam);
       setUi({ edition: ed });
       if (sv && sv.seed === sParam && sv.edition === ed.id) {
@@ -348,7 +351,6 @@ async function boot() {
     }
     const ed = await fetchEdition();
     setUi({ edition: ed });
-    // what's new: once per device, on the title screen only
     if (ui.overlay === "title" && local.get<string>("kk.news", "") !== VERSION) setUi({ overlay: "news" });
   } catch (e) {
     setUi({ editionError: (e as Error).message });
@@ -358,7 +360,7 @@ async function boot() {
 interface Posted {
   id: string;
   url: string;
-  showdown?: { daily?: string; house?: boolean; verified?: boolean };
+  result?: { daily?: string; house?: boolean; verified?: boolean };
   receipt?: string;
 }
 
@@ -384,7 +386,7 @@ function postJson(url: string, body: string): Promise<Posted> {
 
 let pendingChallenge: { seed: string; edition: number } | null = null;
 
-// the chip shows the last address this browser signed in with; Para itself loads only when sign-in is touched
+// the pill shows the last address this browser signed in with; Para itself loads only when sign-in is touched
 setUi({ signedIn: rememberedAddress() });
 void loadDaily();
 void boot();

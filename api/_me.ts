@@ -1,7 +1,7 @@
-// Signed-in players: one signed message per device per day ties a Hall of hands name to an address,
-// hands back a short-lived session claim (an HMAC, like the house claim), and opens the player's record.
+// Signed-in players: one signed message per device per day ties a Hall of goals name to an address,
+// gives back a short-lived session claim (an HMAC, like the house claim), and opens the player's record.
 // Blob budget: a sign-in costs no put, except the first time a name is claimed (one write-once put).
-// A verified run post adds at most one put (the player's record). Reads go through the public URL, never list() or head().
+// A verified season post adds at most one put (the player's record). Reads go through the public URL, never list() or head().
 import { utcDay, prevDay } from "../shared/daily.js";
 import { signinMessage, ADDRESS_RE } from "../shared/house.js";
 import { cleanName, nameProblem } from "../shared/names.js";
@@ -48,7 +48,7 @@ export function sessionOf(claim: unknown, now = Date.now()): Session | null {
 }
 
 // ------------------------------------------------------------ post receipts
-/** Handed to a device that posts under a name without signing in; lets that device claim the name later. */
+/** Given to a device that posts under a name without signing in; lets that device claim the name later. */
 export const receiptFor = (name: string) => b64(macIn("receipt", nameKey(name)));
 export const receiptOk = (name: string, r: unknown) => typeof r === "string" && r.length < 100 && macOk("receipt", nameKey(name), r);
 
@@ -58,17 +58,22 @@ export async function nameOwner(name: string): Promise<NameClaim | null> {
   return key ? load<NameClaim>(namePath(key)) : null;
 }
 
-/** True when someone posted this name in the last 7 UTC days (Hall of hands or a Daily board). Reads only. */
+/** True when someone posted this name in the last 7 UTC days (Hall of goals or a Daily board, old or new). Reads only. */
 export async function recentlyPosted(name: string, now = Date.now()): Promise<boolean> {
   const key = nameKey(name);
   let day = utcDay(new Date(now));
   for (let i = 0; i < 7; i++, day = prevDay(day)) {
-    const [hall, board] = await Promise.all([
+    // the 2.0 files, and the old game's files of the same days: a name someone used last week stays theirs
+    const files = await Promise.all([
+      loadFresh<{ entries: { name: string }[] }>(`goals/${day}.json`),
+      loadFresh<{ names?: string[]; entries: { name: string }[] }>(`daily/${day}/goals.json`),
       loadFresh<{ entries: { name: string }[] }>(`hall/${day}.json`),
       loadFresh<{ names?: string[]; entries: { name: string }[] }>(`daily/${day}/board.json`),
     ]);
-    if (hall?.entries.some((e) => e.name.toLowerCase() === key)) return true;
-    if (board?.names?.includes(key) || board?.entries.some((e) => e.name.toLowerCase() === key)) return true;
+    for (const f of files) {
+      if (!f) continue;
+      if ((f as { names?: string[] }).names?.includes(key) || f.entries?.some((e) => e.name.toLowerCase() === key)) return true;
+    }
   }
   return false;
 }
@@ -104,7 +109,7 @@ export async function getProfile(address: string): Promise<Profile | null> {
   return loadFresh<Profile>(profilePath(address));
 }
 
-/** One put: folds a verified run into the player's record. */
+/** One put: folds a verified season into the player's record. */
 export async function addToProfile(address: string, name: string, run: ProfileRun): Promise<Profile> {
   const before = await loadFresh<Profile>(profilePath(address), 0);
   const next = mergeProfile(before, address, name, run);

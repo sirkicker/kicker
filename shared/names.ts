@@ -1,4 +1,4 @@
-// Player names for the Hall of hands: 3-12 characters, no slurs or obvious obscenities.
+// Player names for the Hall of goals: 3-12 characters, no slurs or obvious obscenities.
 const BAD = [
   "fuck", "shit", "cunt", "nigg", "nigr", "fag", "bitch", "whore", "slut", "rape", "nazi", "hitler", "porn", "dick", "cock",
   "pussy", "retard", "kys", "penis", "vagina", "jizz", "twat", "wank", "bastard", "kike", "chink", "tranny",

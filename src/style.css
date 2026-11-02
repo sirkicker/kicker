@@ -1,13 +1,13 @@
 :root {
-  --ink: #1a0816;
-  --ink2: #2a0f24;
-  --panel: #22091c;
+  --night: #1a0816;
+  --night2: #2a0f24;
+  --tile: #22091c;
   --edge: #5a2048;
-  --cream: #fff1dc;
-  --cream2: #f1dcc0;
+  --paper: #fff1dc;
+  --paper2: #f1dcc0;
   --dim: #c9a9bd;
-  --chips: #27c4e8;
-  --mult: #ff3d7f;
+  --cyan: #27c4e8;
+  --hot: #ff3d7f;
   --money: #ffc23d;
   --teal: #1aa7c9;
   --pink: #d8336d;
@@ -25,7 +25,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
-  color: var(--cream);
+  color: var(--paper);
   font-family: var(--font);
   font-synthesis: none;
   letter-spacing: 0.02em;
@@ -56,7 +56,6 @@ body {
   pointer-events: none;
   z-index: 5;
   background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.12) 2px 3px);
-  mix-blend-mode: multiply;
 }
 .crt-lines::after {
   content: "";
@@ -70,7 +69,7 @@ body {
   font-family: var(--font);
   font-weight: 700;
   font-size: 22px;
-  color: var(--cream);
+  color: var(--paper);
   background: #6b3a5e;
   border: 0;
   border-radius: 10px;
@@ -104,7 +103,7 @@ body {
 }
 .btn.gold {
   background: var(--money);
-  color: var(--ink);
+  color: var(--night);
 }
 .btn.big {
   font-size: 32px;
@@ -121,21 +120,21 @@ body {
   right: 16px;
   bottom: 16px;
 }
-.chip {
+.pill {
   font-family: var(--font);
   font-size: 19px;
   font-weight: 600;
-  background: var(--ink);
+  background: var(--night);
   color: var(--dim);
   border: 2px solid var(--edge);
   border-radius: 8px;
   padding: 7px 12px;
   cursor: pointer;
 }
-.chip.on {
+.pill.on {
   border-color: currentColor;
-  color: var(--cream);
-  background: var(--ink2);
+  color: var(--paper);
+  background: var(--night2);
 }
 .row {
   display: flex;
@@ -168,10 +167,10 @@ body {
   font-size: clamp(88px, 17vw, 210px);
   line-height: 0.9;
   letter-spacing: 0.04em;
-  color: var(--cream);
+  color: var(--paper);
   text-shadow:
-    6px 6px 0 var(--mult),
-    12px 12px 0 var(--ink);
+    6px 6px 0 var(--hot),
+    12px 12px 0 var(--night);
   display: flex;
 }
 .logo span {
@@ -189,10 +188,10 @@ body {
 }
 .tag {
   font-size: clamp(16px, 2.4vw, 22px);
-  color: var(--cream2);
+  color: var(--paper2);
   margin: 18px 0 22px;
   max-width: 640px;
-  text-shadow: 2px 2px 0 var(--ink);
+  text-shadow: 2px 2px 0 var(--night);
 }
 .menu {
   display: flex;
@@ -210,7 +209,7 @@ body {
   color: var(--dim);
   max-width: 620px;
   line-height: 1.4;
-  text-shadow: 1px 1px 0 var(--ink);
+  text-shadow: 1px 1px 0 var(--night);
 }
 .challenge p {
   margin: 0;
@@ -220,7 +219,7 @@ body {
   color: var(--money);
 }
 .challenge {
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--money);
   border-radius: 12px;
   padding: 14px 16px;
@@ -244,7 +243,7 @@ body {
   z-index: 3;
 }
 .ov-panel {
-  background: var(--ink2);
+  background: var(--night2);
   border: 4px solid var(--edge);
   border-radius: 16px;
   box-shadow: 0 10px 0 rgba(0, 0, 0, 0.5);
@@ -286,8 +285,8 @@ body {
   height: 44px;
   border-radius: 10px;
   border: 0;
-  background: var(--ink);
-  color: var(--cream);
+  background: var(--night);
+  color: var(--paper);
   cursor: pointer;
 }
 .ov-body {
@@ -301,7 +300,7 @@ body {
   font-weight: 400;
   font-size: 30px;
   margin: 14px 0 4px;
-  color: var(--chips);
+  color: var(--cyan);
 }
 .ov-body p {
   margin: 6px 0;
@@ -311,11 +310,11 @@ body {
 }
 b.c,
 span.c {
-  color: var(--chips);
+  color: var(--cyan);
 }
 b.m,
 span.m {
-  color: var(--mult);
+  color: var(--hot);
 }
 .suit {
   margin-right: 10px;
@@ -352,14 +351,14 @@ table.map td:first-child {
   font-size: 18px;
 }
 .err {
-  color: var(--mult);
+  color: var(--hot);
 }
 .field {
   font-family: var(--font);
   font-size: 22px;
   width: 100%;
-  background: var(--ink);
-  color: var(--cream);
+  background: var(--night);
+  color: var(--paper);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 10px 12px;
@@ -367,7 +366,7 @@ table.map td:first-child {
 }
 .field:focus {
   outline: none;
-  border-color: var(--chips);
+  border-color: var(--cyan);
 }
 form {
   display: flex;
@@ -375,22 +374,22 @@ form {
   gap: 4px;
 }
 
-/* ---------------------------------------------------------- deck grid */
+/* ---------------------------------------------------------- transfer list grid */
 .tabs {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
-.dgrid {
+.pgrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
   margin-top: 10px;
 }
-.dcard {
-  background: var(--cream);
-  color: var(--ink);
-  border: 4px solid var(--ink);
+.pfig {
+  background: var(--paper);
+  color: var(--night);
+  border: 4px solid var(--night);
   border-radius: 10px;
   padding: 8px;
   display: flex;
@@ -401,34 +400,34 @@ form {
   font-size: 16px;
   text-align: center;
 }
-.dcard.dim {
+.pfig.dim {
   opacity: 0.45;
 }
-.dtop {
+.ptop {
   width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-weight: 700;
 }
-.dtop .rk {
+.ptop .rk {
   font-family: var(--num);
   font-size: 28px;
   line-height: 1;
 }
-.dcard img {
+.pfig img {
   width: 64px;
   height: 64px;
   image-rendering: pixelated;
-  border: 3px solid var(--ink);
-  background: var(--ink);
+  border: 3px solid var(--night);
+  background: var(--night);
   border-radius: 4px;
 }
-.dsym {
+.psym {
   font-weight: 700;
   font-size: 19px;
 }
-.dname {
+.pname {
   font-size: 15px;
   opacity: 0.8;
   max-width: 100%;
@@ -436,12 +435,12 @@ form {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dstats {
+.pstats {
   font-size: 14px;
   opacity: 0.75;
   line-height: 1.35;
 }
-.dcard a {
+.pfig a {
   color: #8a1550;
   font-weight: 700;
   font-size: 15px;
@@ -451,18 +450,18 @@ form {
   font-size: 12px;
   padding: 1px 5px;
   border-radius: 4px;
-  color: var(--ink);
+  color: var(--night);
 }
-.badge.grad {
+.badge.pw {
   background: #ffd43b;
 }
-.badge.hot {
+.badge.pc {
   background: #ff7a3d;
 }
-.badge.pump {
+.badge.gr {
   background: #3ddc97;
 }
-.badge.dip {
+.badge.down {
   background: #ff5a4f;
 }
 
@@ -478,7 +477,7 @@ form {
   gap: 8px;
 }
 .ostats div {
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 8px;
@@ -496,10 +495,10 @@ form {
   line-height: 1;
 }
 .vs {
-  background: var(--ink);
+  background: var(--night);
   border-radius: 10px;
   padding: 8px 12px;
-  border: 3px solid var(--mult);
+  border: 3px solid var(--hot);
 }
 .vs.win {
   border-color: var(--good);
@@ -509,8 +508,8 @@ form {
   width: 100%;
   height: auto;
   border-radius: 10px;
-  border: 3px solid var(--ink);
-  background: var(--ink);
+  border: 3px solid var(--night);
+  background: var(--night);
   aspect-ratio: 1200 / 630;
 }
 .over .row .btn {
@@ -527,22 +526,22 @@ form {
   display: flex;
   gap: 12px;
   align-items: center;
-  background: var(--ink);
+  background: var(--night);
   border-radius: 10px;
   padding: 8px 12px;
 }
 .hscore {
   font-family: var(--num);
   font-size: 36px;
-  color: var(--mult);
+  color: var(--hot);
   min-width: 96px;
 }
-.hcards {
+.hfigs {
   display: flex;
   gap: 6px;
   margin-top: 4px;
 }
-.hcards a {
+.hfigs a {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -550,7 +549,7 @@ form {
   font-family: var(--num);
   font-size: 18px;
 }
-.hcards img {
+.hfigs img {
   image-rendering: pixelated;
   border-radius: 3px;
 }
@@ -562,7 +561,7 @@ form {
   transform: translateX(-50%);
   top: 16px;
   width: min(520px, calc(100% - 32px));
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--money);
   border-radius: 12px;
   padding: 12px 14px;
@@ -599,9 +598,9 @@ form {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  background: var(--ink);
-  border: 3px solid var(--mult);
-  color: var(--cream);
+  background: var(--night);
+  border: 3px solid var(--hot);
+  color: var(--paper);
   padding: 10px 16px;
   border-radius: 10px;
   font-size: 20px;
@@ -618,7 +617,7 @@ form {
   .ov-head h2 {
     font-size: 42px;
   }
-  .dgrid {
+  .pgrid {
     grid-template-columns: repeat(2, 1fr);
   }
   table {
@@ -640,12 +639,12 @@ form {
   font-family: var(--num);
   font-size: 24px;
   line-height: 1.25;
-  color: var(--cream);
-  background: var(--ink);
-  border: 3px solid var(--chips);
+  color: var(--paper);
+  background: var(--night);
+  border: 3px solid var(--cyan);
   border-radius: 12px;
   padding: 10px 18px;
-  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 3px var(--ink2);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 3px var(--night2);
   max-width: min(780px, 100%);
   letter-spacing: 0.03em;
 }
@@ -719,7 +718,7 @@ form {
   }
 }
 
-/* ---------------------------------------------------------- v2: hall + card detail */
+/* ---------------------------------------------------------- v2: hall + launch detail */
 ol.hall {
   list-style: none;
   padding: 0;
@@ -739,7 +738,7 @@ ol.hall {
   color: var(--money);
   font-weight: 400;
 }
-.hcards span {
+.hfigs span {
   font-size: 16px;
 }
 .hint {
@@ -756,7 +755,7 @@ ol.hall {
 .ov-panel.detail {
   width: min(480px, 100%);
 }
-.dcard {
+.pfig {
   cursor: pointer;
 }
 .dhead {
@@ -767,9 +766,9 @@ ol.hall {
 .dhead img {
   width: 140px;
   height: 140px;
-  border: 4px solid var(--ink);
+  border: 4px solid var(--night);
   border-radius: 8px;
-  background: var(--ink);
+  background: var(--night);
   flex: none;
 }
 .dn {
@@ -792,14 +791,14 @@ ol.hall {
   font-size: 14px;
   padding: 2px 7px;
 }
-.badge.gifts {
-  background: var(--chips);
+.badge.gift {
+  background: var(--cyan);
 }
 .meter {
   position: relative;
   height: 34px;
   margin: 16px 0 10px;
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--edge);
   border-radius: 8px;
   overflow: hidden;
@@ -815,7 +814,7 @@ ol.hall {
   text-align: center;
   line-height: 28px;
   font-size: 20px;
-  text-shadow: 2px 2px 0 var(--ink);
+  text-shadow: 2px 2px 0 var(--night);
 }
 .dfacts {
   display: grid;
@@ -823,7 +822,7 @@ ol.hall {
   gap: 8px;
 }
 .dfacts div {
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--edge);
   border-radius: 8px;
   padding: 6px 4px;
@@ -843,7 +842,7 @@ ol.hall {
   color: var(--good);
 }
 .dfacts b.down {
-  color: var(--mult);
+  color: var(--hot);
 }
 @media (max-width: 520px) {
   .dfacts {
@@ -881,7 +880,7 @@ ol.hall {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 6px 10px;
@@ -916,8 +915,8 @@ ol.hall {
   }
 }
 
-/* ---------------------------------------------------------- game token chip */
-.token-chip {
+/* ---------------------------------------------------------- game token pill */
+.token-pill {
   margin-top: 14px;
   display: inline-flex;
   align-items: center;
@@ -926,22 +925,22 @@ ol.hall {
   font-size: 22px;
   color: var(--money);
   text-decoration: none;
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--money);
   border-radius: 999px;
   padding: 4px 16px 4px 6px;
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
 }
-.token-chip:hover {
+.token-pill:hover {
   filter: brightness(1.15);
 }
 .tc-dot {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--mult);
-  color: var(--cream);
-  border: 3px dashed var(--cream);
+  background: var(--hot);
+  color: var(--paper);
+  border: 3px dashed var(--paper);
   display: inline-grid;
   place-items: center;
   font-size: 17px;
@@ -949,23 +948,23 @@ ol.hall {
 .ov-body section a {
   color: var(--money);
 }
-.chips-row {
+.pills-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   margin-top: 14px;
 }
-.chips-row .token-chip {
+.pills-row .token-pill {
   margin-top: 0;
 }
-.token-chip.src {
-  color: var(--cream);
-  border-color: var(--chips);
+.token-pill.src {
+  color: var(--paper);
+  border-color: var(--cyan);
   padding: 4px 16px 4px 10px;
 }
-.token-chip .gh {
-  color: var(--chips);
+.token-pill .gh {
+  color: var(--cyan);
 }
 /* the parade walks behind everything clickable on the title */
 .title-screen .parade {
@@ -975,18 +974,18 @@ ol.hall {
   position: relative;
   z-index: 2;
 }
-.token-chip,
-.title-screen .chip,
+.token-pill,
+.title-screen .pill,
 .fresh {
-  background-color: var(--ink);
+  background-color: var(--night);
   isolation: isolate;
 }
 
-/* ---------------------------------------------------------- 1.1: daily deal + house colours */
-.row.deal {
+/* ---------------------------------------------------------- 1.1: daily match + team kits */
+.row.play {
   flex-wrap: wrap;
 }
-.row.deal .btn {
+.row.play .btn {
   flex: 1 1 180px;
 }
 .btn.daily-btn {
@@ -1001,7 +1000,7 @@ ol.hall {
   opacity: 0.82;
   letter-spacing: 0.02em;
 }
-.chip.on.gold {
+.pill.on.gold {
   color: var(--money);
 }
 .hmark {
@@ -1012,7 +1011,7 @@ ol.hall {
   margin-right: 6px;
   border: 2px solid var(--money);
   border-radius: 4px;
-  background: var(--ink);
+  background: var(--night);
   color: var(--money);
   font-family: var(--num);
   font-size: 15px;
@@ -1020,11 +1019,11 @@ ol.hall {
   vertical-align: 2px;
 }
 .plain {
-  background: var(--ink);
+  background: var(--night);
   border-left: 4px solid var(--money);
   padding: 8px 12px;
   border-radius: 6px;
-  color: var(--cream);
+  color: var(--paper);
 }
 .swatches {
   display: grid;
@@ -1038,8 +1037,8 @@ ol.hall {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  background: var(--ink);
-  color: var(--cream);
+  background: var(--night);
+  color: var(--paper);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 10px 6px 8px;
@@ -1051,18 +1050,18 @@ ol.hall {
   opacity: 0.55;
 }
 .swatch.on {
-  background: var(--ink2);
+  background: var(--night2);
 }
-.sw-back {
+.sw-kit {
   width: 52px;
   height: 72px;
-  border: 3px solid var(--ink);
+  border: 3px solid var(--night);
   border-radius: 6px;
   display: grid;
   place-items: center;
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
 }
-.sw-back b {
+.sw-kit b {
   font-family: var(--num);
   font-weight: 400;
   font-size: 24px;
@@ -1070,7 +1069,7 @@ ol.hall {
   height: 30px;
   display: grid;
   place-items: center;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid;
   border-radius: 4px;
 }
@@ -1115,7 +1114,7 @@ ol.hall {
   padding: 8px 12px;
 }
 .safety b {
-  color: var(--cream);
+  color: var(--paper);
   font-weight: 400;
 }
 .daily-tag {
@@ -1123,7 +1122,7 @@ ol.hall {
   align-self: center;
   font-family: var(--num);
   font-size: 22px;
-  color: var(--ink);
+  color: var(--night);
   background: var(--money);
   border-radius: 8px;
   padding: 2px 12px;
@@ -1133,7 +1132,7 @@ ol.hall {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-/* narrow screens: score and button on top, the hand underneath */
+/* narrow screens: score and button on top, the figures underneath */
 @media (max-width: 520px) {
   .hrow {
     flex-wrap: wrap;
@@ -1149,38 +1148,38 @@ ol.hall {
 }
 
 /* ---------------------------------------------------------- 1.2: sign-in, your table, footer */
-.chip.signin {
+.pill.signin {
   color: var(--money);
   border-color: var(--money);
 }
-.chip.signin.off,
+.pill.signin.off,
 .btn.signin.off {
   color: var(--dim);
   border-color: var(--edge);
   opacity: 0.85;
 }
-.chip.signin.busy {
+.pill.signin.busy {
   opacity: 0.7;
 }
 .signin-on {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--ink);
-  border: 2px solid var(--chips);
+  background: var(--night);
+  border: 2px solid var(--cyan);
   border-radius: 8px;
   padding: 2px 2px 2px 10px;
 }
 .signin-on .addr {
   font-family: var(--num);
   font-size: 20px;
-  color: var(--chips);
+  color: var(--cyan);
   letter-spacing: 0.03em;
 }
-.signin-on .chip {
+.signin-on .pill {
   padding: 4px 10px;
   border-width: 0;
-  background: var(--ink2);
+  background: var(--night2);
 }
 .signin-on.big {
   padding-left: 14px;
@@ -1195,8 +1194,8 @@ ol.hall {
   height: 18px;
   margin-left: 5px;
   border-radius: 50%;
-  background: var(--chips);
-  color: var(--ink);
+  background: var(--cyan);
+  color: var(--night);
   font-size: 13px;
   line-height: 1;
   vertical-align: 2px;
@@ -1206,30 +1205,30 @@ ol.hall {
   font-size: 16px;
   line-height: 1.35;
   color: var(--dim);
-  border-left: 3px solid var(--chips);
+  border-left: 3px solid var(--cyan);
   padding: 4px 10px;
 }
 .privacy b {
-  color: var(--cream);
+  color: var(--paper);
   font-weight: 400;
 }
 .via {
   margin: 0;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .note.off {
   margin: 0;
 }
-.token-chip {
+.token-pill {
   white-space: nowrap;
   flex: none;
 }
-.token-chip.xlink {
-  color: var(--cream);
-  border-color: var(--cream2);
+.token-pill.xlink {
+  color: var(--paper);
+  border-color: var(--paper2);
   padding: 4px 16px 4px 12px;
 }
-.token-chip .xl {
+.token-pill .xl {
   flex: none;
   width: 18px;
   height: 18px;
@@ -1239,8 +1238,8 @@ ol.hall {
   max-width: min(600px, 100%);
   font-size: 15px;
   line-height: 1.3;
-  color: var(--cream2);
-  background: var(--ink);
+  color: var(--paper2);
+  background: var(--night);
   border-radius: 8px;
   padding: 4px 12px;
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
@@ -1250,7 +1249,7 @@ ol.hall {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  background: var(--ink);
+  background: var(--night);
   border: 3px solid var(--edge);
   border-radius: 10px;
   padding: 10px 14px;
@@ -1292,7 +1291,7 @@ ol.hall {
 .signin-row {
   align-items: center;
 }
-/* phones: the tutorial note sits on the top bar, never over the blind's Play button */
+/* phones: the tutorial note sits on the top bar, never over the Kick off button */
 @media (max-aspect-ratio: 105/100) {
   .coach.in-menu {
     top: 12px;
@@ -1359,7 +1358,7 @@ ol.hall {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   color: var(--dim);
   display: grid;
@@ -1369,8 +1368,8 @@ ol.hall {
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
 }
 .icon-toggle.on {
-  color: var(--cream);
-  border-color: var(--chips);
+  color: var(--paper);
+  border-color: var(--cyan);
 }
 .acct {
   min-height: 44px;
@@ -1381,8 +1380,8 @@ ol.hall {
   font-size: 24px;
   line-height: 1;
   background: var(--money);
-  color: var(--ink);
-  border: 3px solid var(--ink);
+  color: var(--night);
+  border: 3px solid var(--night);
   border-radius: 999px;
   padding: 4px 18px 4px 6px;
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.5);
@@ -1396,9 +1395,9 @@ ol.hall {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--mult);
-  color: var(--cream);
-  border: 2px dashed var(--cream);
+  background: var(--hot);
+  color: var(--paper);
+  border: 2px dashed var(--paper);
   display: grid;
   place-items: center;
   font-size: 17px;
@@ -1407,9 +1406,9 @@ ol.hall {
   opacity: 0.75;
 }
 .acct.in {
-  background: var(--ink);
-  color: var(--cream);
-  border-color: var(--chips);
+  background: var(--night);
+  color: var(--paper);
+  border-color: var(--cyan);
   padding: 4px 14px;
 }
 .acct.in .hmark {
@@ -1419,7 +1418,7 @@ ol.hall {
   margin: 0;
 }
 .acct.off {
-  background: var(--ink);
+  background: var(--night);
   color: var(--dim);
   border-color: var(--edge);
   font-size: 18px;
@@ -1437,109 +1436,14 @@ ol.hall {
   margin: 0;
   font-family: var(--num);
   font-size: clamp(16px, 2.4vh, 23px);
-  color: var(--chips);
+  color: var(--cyan);
   letter-spacing: 0.03em;
-  text-shadow: 2px 2px 0 var(--ink);
+  text-shadow: 2px 2px 0 var(--night);
 }
 .title-main .challenge {
   margin: 0;
 }
-/* the hero: five real cards, fanned */
-.fan {
-  position: relative;
-  flex: none;
-  width: calc(var(--cw) * 4.4);
-  height: calc(var(--cw) * 1.62);
-  max-width: 100%;
-}
-.fan.empty {
-  visibility: hidden;
-}
-.fcard {
-  position: absolute;
-  left: 50%;
-  bottom: calc(var(--cw) * 0.06);
-  width: var(--cw);
-  height: calc(var(--cw) * 1.393);
-  margin-left: calc(var(--cw) / -2);
-  transform-origin: 50% 130%;
-  transform: translateX(calc(var(--i) * var(--cw) * 0.7)) rotate(calc(var(--i) * 8deg));
-  animation: fanbob 3.2s ease-in-out infinite;
-  animation-delay: calc(var(--i) * 0.35s);
-}
-@keyframes fanbob {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-  50% {
-    translate: 0 calc(var(--cw) * -0.06);
-  }
-}
-.fface {
-  position: absolute;
-  inset: 0;
-  background: var(--cream);
-  border: calc(var(--cw) * 0.04) solid var(--ink);
-  border-radius: calc(var(--cw) * 0.09);
-  box-shadow: 4px 6px 0 rgba(0, 0, 0, 0.4);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.fidx {
-  position: absolute;
-  left: 6%;
-  top: 2%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 0.95;
-  font-family: var(--num);
-  font-size: calc(var(--cw) * 0.3);
-  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.25);
-}
-.fidx b {
-  font-weight: 400;
-}
-.fidx i {
-  font-style: normal;
-  font-size: 0.55em;
-}
-.fface img {
-  width: 58%;
-  height: auto;
-  aspect-ratio: 1;
-  object-fit: cover;
-  image-rendering: pixelated;
-  border: calc(var(--cw) * 0.03) solid var(--ink);
-  background: var(--ink);
-  margin-top: 10%;
-}
-.ftab {
-  font-family: var(--font);
-  font-weight: 700;
-  font-size: calc(var(--cw) * 0.1);
-  line-height: 1.35;
-  color: var(--ink);
-  margin-top: -6%;
-  padding: 0 7%;
-  border-radius: 4px;
-  border: 2px solid var(--ink);
-  position: relative;
-}
-.ftick {
-  font-family: var(--font);
-  font-weight: 700;
-  color: var(--ink);
-  font-size: calc(var(--cw) * 0.12);
-  margin-top: 4%;
-  max-width: 92%;
-  overflow: hidden;
-  white-space: nowrap;
-}
+/* (the old hero rules, replaced by the line-up below) */
 .title-buttons {
   display: flex;
   flex-direction: column;
@@ -1550,7 +1454,7 @@ ol.hall {
   flex-wrap: nowrap;
   gap: 10px;
 }
-.title-buttons .row.deal .btn {
+.title-buttons .row.play .btn {
   flex: 1 1 0;
   min-width: 0;
 }
@@ -1576,7 +1480,7 @@ ol.hall {
 .textlink {
   background: none;
   border: 0;
-  color: var(--cream2);
+  color: var(--paper2);
   font-family: var(--font);
   font-size: 18px;
   text-decoration: underline;
@@ -1584,7 +1488,7 @@ ol.hall {
   cursor: pointer;
   min-height: 40px;
   padding: 0 8px;
-  text-shadow: 1px 1px 0 var(--ink);
+  text-shadow: 1px 1px 0 var(--night);
 }
 .title-foot {
   display: flex;
@@ -1599,11 +1503,11 @@ ol.hall {
   justify-content: center;
 }
 .foot-links a {
-  color: var(--cream2);
+  color: var(--paper2);
   font-family: var(--num);
   font-size: 19px;
   text-decoration: none;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   border-radius: 999px;
   padding: 4px 14px;
@@ -1613,8 +1517,8 @@ ol.hall {
   white-space: nowrap;
 }
 .foot-links a:hover {
-  border-color: var(--chips);
-  color: var(--cream);
+  border-color: var(--cyan);
+  color: var(--paper);
 }
 .title-main .quiet {
   margin: 0;
@@ -1628,7 +1532,7 @@ ol.hall {
 .menu.more .btn {
   width: 100%;
 }
-/* heights: the parade shrinks first, then the fan; the logo and buttons always stay */
+/* heights: the parade shrinks first, then the line-up; the logo and buttons always stay */
 @media (max-height: 860px) {
   .title-screen {
     --ph: 72px;
@@ -1644,7 +1548,7 @@ ol.hall {
   }
 }
 @media (max-height: 560px) {
-  .fan {
+  .lineup {
     display: none;
   }
 }
@@ -1680,7 +1584,7 @@ ol.hall {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fcard {
+  .lfig {
     animation: none;
   }
 }
@@ -1724,7 +1628,7 @@ ol.hall {
   }
 }
 
-/* desktop side panels: today's Daily board and the deck, in the game's panel style */
+/* desktop side panels: today's Daily board and the transfer list, in the game's panel style */
 .side {
   display: none;
 }
@@ -1779,10 +1683,10 @@ ol.hall {
   line-height: 1;
   letter-spacing: 0.03em;
   color: var(--money);
-  text-shadow: 3px 3px 0 var(--ink);
+  text-shadow: 3px 3px 0 var(--night);
 }
 .side-r h3 {
-  color: var(--chips);
+  color: var(--cyan);
 }
 .side-sub {
   margin: -4px 0 0;
@@ -1792,7 +1696,7 @@ ol.hall {
 .side-note {
   margin: 0;
   font-size: 17px;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .side-board {
   list-style: none;
@@ -1806,7 +1710,7 @@ ol.hall {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   border-radius: 8px;
   padding: 4px 10px;
@@ -1829,7 +1733,7 @@ ol.hall {
   font-family: var(--num);
   font-weight: 400;
   font-size: 22px;
-  color: var(--mult);
+  color: var(--hot);
 }
 .side-link {
   align-self: flex-start;
@@ -1853,7 +1757,7 @@ ol.hall {
 }
 .side-bars .bar {
   height: 12px;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   border-radius: 4px;
   overflow: hidden;
@@ -1880,7 +1784,7 @@ ol.hall {
   display: flex;
   gap: 10px;
   align-items: center;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   border-radius: 10px;
   padding: 8px;
@@ -1889,9 +1793,9 @@ ol.hall {
   width: 56px;
   height: 56px;
   image-rendering: pixelated;
-  border: 3px solid var(--cream);
+  border: 3px solid var(--paper);
   border-radius: 6px;
-  background: var(--ink2);
+  background: var(--night2);
   flex: none;
 }
 .side-hot div {
@@ -1914,7 +1818,7 @@ ol.hall {
 }
 .side-hot span {
   font-size: 14px;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .side-facts {
   margin: 0;
@@ -1922,7 +1826,7 @@ ol.hall {
   justify-content: space-between;
   gap: 8px;
   font-size: 15px;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .side-facts .gold {
   font-family: var(--num);
@@ -1937,7 +1841,7 @@ ol.hall {
   }
 }
 
-/* ---------------------------------------------------------- 1.2: the data tag (deck view, pool) */
+/* ---------------------------------------------------------- 1.2: the data tag (transfer list, line-up) */
 .inspect {
   position: fixed;
   z-index: 40;
@@ -1967,7 +1871,7 @@ ol.hall {
 }
 .inspect dd {
   margin: 0;
-  color: var(--cream);
+  color: var(--paper);
 }
 
 /* ---------------------------------------------------------- 1.2: side panels, v2 (bigger, richer) */
@@ -2024,7 +1928,7 @@ ol.hall {
     linear-gradient(to bottom, rgba(255, 194, 61, 0.16), transparent);
   font-size: clamp(24px, 1.8vw, 34px);
   text-shadow:
-    3px 3px 0 var(--ink),
+    3px 3px 0 var(--night),
     0 0 14px rgba(255, 194, 61, 0.45);
 }
 .side-r h3 {
@@ -2032,7 +1936,7 @@ ol.hall {
     repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 0 2px, transparent 2px 4px),
     linear-gradient(to bottom, rgba(39, 196, 232, 0.16), transparent);
   text-shadow:
-    3px 3px 0 var(--ink),
+    3px 3px 0 var(--night),
     0 0 14px rgba(39, 196, 232, 0.45);
 }
 .side-meta {
@@ -2040,13 +1944,13 @@ ol.hall {
   flex-wrap: wrap;
   gap: 4px 14px;
   font-size: 15px;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .side-meta b {
   font-family: var(--num);
   font-weight: 400;
   font-size: 19px;
-  color: var(--cream);
+  color: var(--paper);
 }
 .ic {
   font-style: normal;
@@ -2054,7 +1958,7 @@ ol.hall {
   place-items: center;
   width: 20px;
   margin-right: 5px;
-  color: var(--chips);
+  color: var(--cyan);
 }
 .side-l .ic {
   color: var(--money);
@@ -2101,7 +2005,7 @@ hr.pix {
   color: var(--dim);
 }
 .side-hint b {
-  color: var(--cream2);
+  color: var(--paper2);
   font-weight: 400;
 }
 .side-rows {
@@ -2113,13 +2017,13 @@ hr.pix {
   margin: 0;
   font-size: 15px;
   line-height: 1.3;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 .row-fact b {
   font-family: var(--num);
   font-weight: 400;
   font-size: 19px;
-  color: var(--cream);
+  color: var(--paper);
 }
 .row-fact small {
   display: block;
@@ -2186,7 +2090,7 @@ hr.pix {
   display: flex;
   gap: 10px;
   align-items: center;
-  background: var(--ink);
+  background: var(--night);
   border: 2px solid var(--edge);
   border-radius: 9px;
   padding: 5px 8px;
@@ -2195,9 +2099,9 @@ hr.pix {
   width: 44px;
   height: 44px;
   image-rendering: pixelated;
-  border: 3px solid var(--cream);
+  border: 3px solid var(--paper);
   border-radius: 5px;
-  background: var(--ink2);
+  background: var(--night2);
   flex: none;
 }
 .side-hots .mini div {
@@ -2216,7 +2120,7 @@ hr.pix {
 }
 .side-hots span {
   font-size: 13px;
-  color: var(--cream2);
+  color: var(--paper2);
 }
 /* lower-priority rows step out first on shorter screens */
 @media (max-height: 960px) {
@@ -2235,7 +2139,7 @@ hr.pix {
     font-size: 12px;
   }
 }
-/* the three hottest sit side by side; the Insider hints run inline after each fact */
+/* the three busiest sit side by side; the coach hints run inline after each fact */
 .side-hots {
   flex-direction: row;
 }
@@ -2298,4 +2202,220 @@ hr.pix {
     font-size: 18px;
     padding: 5px 12px;
   }
+}
+
+/* ---------------------------------------------------------- 2.0: table football */
+/* the hero: five launches on a brass rod over a strip of felt */
+.lineup {
+  position: relative;
+  flex: none;
+  width: calc(var(--cw) * 4.6);
+  height: calc(var(--cw) * 1.5);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--cw) * 0.12);
+  background: var(--felt, #0c3438);
+  border: calc(var(--cw) * 0.07) solid #4a1a3a;
+  border-radius: calc(var(--cw) * 0.22);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.4), inset 0 0 calc(var(--cw) * 0.4) rgba(0, 0, 0, 0.35);
+}
+.lineup.empty {
+  visibility: hidden;
+}
+.lrod {
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  top: 50%;
+  height: calc(var(--cw) * 0.07);
+  margin-top: calc(var(--cw) * -0.035);
+  background: linear-gradient(#f2d98c, #c9a24a 45%, #7a5a1c);
+  border-radius: 99px;
+}
+.lfig {
+  --s: calc(var(--cw) * 0.78);
+  position: relative;
+  width: var(--s);
+  height: calc(var(--s) * 1.5);
+  display: grid;
+  place-items: center;
+  animation: figbob 3s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.3s);
+}
+.lfig.sm {
+  --s: 30px;
+  animation: none;
+}
+.lbody {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 35%;
+  height: 30%;
+  background: linear-gradient(var(--kithi) 0 30%, var(--kit) 30%);
+  border: calc(var(--s) * 0.06) solid var(--night);
+  border-radius: calc(var(--s) * 0.2);
+}
+.lbody::after {
+  content: "";
+  position: absolute;
+  left: 34%;
+  width: 32%;
+  bottom: -55%;
+  height: 45%;
+  background: var(--trim);
+  border: calc(var(--s) * 0.05) solid var(--night);
+  border-radius: calc(var(--s) * 0.1);
+}
+.lfig img {
+  position: relative;
+  width: 74%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  image-rendering: pixelated;
+  border-radius: 50%;
+  border: calc(var(--s) * 0.07) solid var(--trim);
+  outline: calc(var(--s) * 0.04) solid var(--night);
+  background: var(--night);
+}
+.lpair {
+  position: absolute;
+  top: 2%;
+  right: 0;
+  font-size: calc(var(--s) * 0.24);
+  text-shadow: 1px 1px 0 var(--night);
+}
+.ltick {
+  position: absolute;
+  bottom: -4%;
+  font-family: var(--font);
+  font-size: max(12px, calc(var(--s) * 0.2));
+  color: var(--paper);
+  background: var(--night);
+  padding: 0 0.35em;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+@keyframes figbob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 calc(var(--cw) * -0.05);
+  }
+}
+/* stats on a transfer-list figure: P(ower), S(peed: Pace), G(rip) */
+.ptop .stats {
+  display: flex;
+  gap: 3px;
+}
+.ptop .stats i {
+  font-style: normal;
+  font-family: var(--num);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 2px solid var(--night);
+  color: var(--night);
+}
+.s-pw {
+  background: var(--hot);
+  color: var(--paper) !important;
+}
+.s-pc {
+  background: var(--cyan);
+}
+.s-gr {
+  background: var(--money);
+}
+.pfig.sel {
+  outline: 4px solid var(--money);
+  outline-offset: 2px;
+  transform: translateY(-3px);
+}
+.rodrow {
+  margin-top: 6px;
+}
+.rodrow h3 small {
+  color: var(--dim);
+  font-size: 0.7em;
+}
+.badge.pw {
+  background: var(--hot);
+  color: var(--paper);
+}
+.badge.pc {
+  background: var(--cyan);
+}
+.badge.gr {
+  background: var(--money);
+}
+.badge.gift {
+  background: #3ddc97;
+}
+/* the boss club intro */
+.boss-bg {
+  background: radial-gradient(circle at 50% 40%, rgba(179, 18, 63, 0.45), rgba(10, 0, 8, 0.85) 70%);
+}
+.ov-panel.boss {
+  text-align: center;
+  border-color: var(--hot);
+  max-width: 520px;
+  padding: 18px 22px 22px;
+}
+.boss-kicker {
+  margin: 0;
+  color: var(--dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-panel.boss h2 {
+  font-family: var(--num);
+  font-weight: 400;
+  font-size: clamp(44px, 9vw, 72px);
+  line-height: 1;
+  margin: 6px 0 4px;
+  color: var(--hot);
+  text-shadow: 4px 4px 0 var(--night);
+}
+.boss-rule {
+  font-size: 22px;
+  margin: 6px 0 4px;
+  color: var(--paper);
+}
+.crest {
+  width: 96px;
+  height: 108px;
+  margin: 10px auto 0;
+  background: var(--hot);
+  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(4px 5px 0 var(--night));
+}
+.crest span {
+  font-family: var(--num);
+  font-size: 56px;
+  color: var(--paper);
+  text-shadow: 3px 3px 0 var(--night);
+  margin-top: -14px;
+}
+.ov-panel.boss .row {
+  justify-content: center;
+  margin-top: 14px;
+}
+.foot-note {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+  text-align: center;
+  opacity: 0.85;
+}
+.hfigs span {
+  font-size: 12px;
 }

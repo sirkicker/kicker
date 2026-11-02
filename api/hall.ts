@@ -1,5 +1,5 @@
-// GET /api/hall[?day=YYYY-MM-DD]             -> best verified hands of a UTC day (CDN-cached for a minute)
-// GET /api/hall?board=daily[&day=YYYY-MM-DD] -> the Daily Deal board of that day: one line per name, their best
+// GET /api/hall[?day=YYYY-MM-DD]             -> the best verified goals of a UTC day (CDN-cached for a minute)
+// GET /api/hall?board=daily[&day=YYYY-MM-DD] -> the Daily Match board of that day: one line per name, their best
 import { DAY_RE } from "../shared/daily.js";
 import { publicBoard } from "./_daily.js";
 import { getHall, utcDay } from "./_runs.js";

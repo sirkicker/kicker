@@ -1,4 +1,4 @@
-// GET /api/daily -> today's Daily Deal: the seed, the pinned deck and how many players have posted a run
+// GET /api/daily -> today's Daily Match: the seed, the pinned squad cut and how many players have posted a season
 import { dayLabel, utcDay } from "../shared/daily.js";
 import { dailyPin, getBoard } from "./_daily.js";
 

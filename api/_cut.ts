@@ -1,13 +1,13 @@
-// Cutting a deck snapshot ("edition") from the live vibe/vibe v6 index.
-// The browser cannot read the index (foreign Origin gets 403), so this runs on the server,
-// at most once per hour, and the result is frozen in Blob so every re-run of a seed sees the same cards.
-import { editionNow, farmReason, toPoolCard, type Edition, type PoolCard, type RawLaunch } from "../shared/data.js";
+// Cutting a squad snapshot ("edition", today's transfer list) from the live vibe/vibe v6 index.
+// The browser cannot read the index (foreign Origin gets 403), so this runs on the server, at most once every few
+// hours, and the result is frozen in Blob so every replay of a seed sees the same launches.
+import { editionNow, farmReason, toLaunch, type Edition, type Launch, type RawLaunch } from "../shared/data.js";
 import { load, save, Taken } from "./_store.js";
 
 const INDEX = "https://testnet.vibevibe.fun/api/v1/chains/46630/v6/launches";
 const PAGE = 50;
 const MAX_PAGES = 26;
-const PER_SUIT = 30;
+const PER_KIND = 30;
 const PER_CREATOR = 2;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -35,12 +35,12 @@ async function page(cursor: string | null, deadline: number): Promise<{ items: R
   return null;
 }
 
-/** Liveliness used to choose which launches make the cut for a suit. */
-const lively = (c: PoolCard) => c.k * 2 + c.h + (c.g ? 40 : 0) + c.p / 500;
+/** How lively a launch is: it decides which launches make the cut for a pair kind. */
+const lively = (c: Launch) => c.k * 2 + c.h + (c.g ? 40 : 0) + c.p / 500;
 
 /** Cuts from the index until the deadline; a slow index gives a shallower cut, never a timeout. */
 export async function cutEdition(id: number, deadline = Date.now() + 20000): Promise<Edition> {
-  const suits: PoolCard[][] = [[], [], [], []];
+  const kinds: Launch[][] = [[], [], [], []];
   const perCreator = new Map<string, number>();
   let cursor: string | null = null;
   let scanned = 0;
@@ -62,35 +62,35 @@ export async function cutEdition(id: number, deadline = Date.now() + 20000): Pro
         dropped++;
         continue;
       }
-      const c = toPoolCard(raw);
+      const c = toLaunch(raw);
       if (!c) {
         dropped++;
         continue;
       }
       perCreator.set(creator, n + 1);
-      suits[c.u].push(c);
+      kinds[c.u].push(c);
     }
     cursor = p.next;
     if (!cursor) break;
     // enough depth everywhere: stop early
-    if (i >= 12 && suits.every((s) => s.length >= PER_SUIT * 1.5)) break;
+    if (i >= 12 && kinds.every((s) => s.length >= PER_KIND * 1.5)) break;
   }
-  // per suit: the 10 liveliest launches (at most 5 graduated), then the newest ones
-  const pool = suits.map((list) => {
-    const out: PoolCard[] = [];
+  // per pair kind: the 10 liveliest launches (at most 5 that flew the whole curve), then the newest ones
+  const pool = kinds.map((list) => {
+    const out: Launch[] = [];
     const seen = new Set<string>();
-    let grads = 0;
+    let flown = 0;
     for (const c of list.slice().sort((a, b) => lively(b) - lively(a) || (a.t < b.t ? -1 : 1))) {
       if (out.length >= 10) break;
-      if (c.g && grads >= 5) continue;
-      if (c.g) grads++;
+      if (c.g && flown >= 5) continue;
+      if (c.g) flown++;
       out.push(c);
       seen.add(c.t);
     }
     for (const c of list) {
-      if (out.length >= PER_SUIT) break;
-      if (seen.has(c.t) || (c.g && grads >= 6)) continue;
-      if (c.g) grads++;
+      if (out.length >= PER_KIND) break;
+      if (seen.has(c.t) || (c.g && flown >= 6)) continue;
+      if (c.g) flown++;
       out.push(c);
       seen.add(c.t);
     }
@@ -117,12 +117,12 @@ export async function currentEdition(): Promise<Edition> {
     if (prev) return prev;
     throw new Error("index unavailable");
   }
-  // a shallow cut (slow index) leaves rare suits thin: top them up from the previous deck
+  // a shallow cut (slow index) leaves rare pair kinds thin: top them up from the previous cut
   if (prev) {
     ed.pool = ed.pool.map((list, u) => {
       if (list.length >= 13) return list;
       const have = new Set(list.map((c) => c.t));
-      return list.concat((prev.pool[u] || []).filter((c) => !have.has(c.t))).slice(0, PER_SUIT);
+      return list.concat((prev.pool[u] || []).filter((c) => !have.has(c.t))).slice(0, PER_KIND);
     });
   }
   try {

@@ -94,35 +94,51 @@ function noise(dur: number, freq: number, q: number, vol: number, when = 0) {
 const on = () => sfxOn && ctx;
 
 export const sfx = {
-  select(rank: number) {
-    if (on()) tone(330 + rank * 22, 0.07, "square", 0.05);
-  },
-  deselect() {
-    if (on()) tone(240, 0.06, "square", 0.04);
-  },
-  deal(i = 0) {
-    if (on()) noise(0.06, 2400 + i * 120, 1.2, 0.18, i * 0.0);
-  },
-  chip(step: number) {
+  /** A rod sliding through its bearing: a short wooden thock and a brass hiss. */
+  slide(mine: boolean) {
     if (!on()) return;
-    // a stack of clay chips: two clicks
-    noise(0.035, 3200 + step * 90, 4, 0.35);
-    noise(0.03, 4200 + step * 90, 5, 0.22, 0.028);
-    tone(900 + step * 40, 0.05, "triangle", 0.05);
+    noise(0.05, mine ? 1400 : 1100, 3, 0.28);
+    tone(mine ? 180 : 150, 0.06, "triangle", 0.08);
   },
-  mult(step: number) {
-    if (on()) tone(520 * Math.pow(1.06, step), 0.18, "triangle", 0.12);
+  /** The figure strikes the ball. */
+  kick(hard: boolean) {
+    if (!on()) return;
+    noise(0.04, 2600, 2, 0.4);
+    tone(hard ? 120 : 160, 0.09, "square", 0.07, 0, undefined, hard ? 70 : 110);
   },
-  xmult() {
+  /** The ball stops dead against a figure. */
+  block() {
+    if (!on()) return;
+    noise(0.07, 700, 1.5, 0.45);
+    tone(95, 0.12, "triangle", 0.12);
+  },
+  /** A clean pass, trapped. */
+  trap() {
+    if (!on()) return;
+    noise(0.03, 3200, 4, 0.25);
+    tone(660, 0.05, "triangle", 0.05);
+  },
+  goal() {
+    if (!on()) return;
+    noise(0.5, 500, 0.5, 0.25);
+    [0, 4, 7, 12, 16].forEach((s, i) => tone(262 * Math.pow(2, s / 12), 0.3, "square", 0.05, i * 0.06));
+  },
+  concede() {
+    if (!on()) return;
+    noise(0.3, 400, 0.7, 0.18);
+    [0, -5, -9].forEach((s, i) => tone(196 * Math.pow(2, s / 12), 0.3, "sawtooth", 0.04, i * 0.12));
+  },
+  /** The referee's two blasts. */
+  whistle() {
+    if (!on()) return;
+    tone(2350, 0.12, "sine", 0.05, 0, undefined, 2250);
+    tone(2350, 0.22, "sine", 0.05, 0.16, undefined, 2200);
+  },
+  boost() {
     if (!on()) return;
     tone(392, 0.32, "sawtooth", 0.06);
     tone(587, 0.32, "sawtooth", 0.05, 0.02);
     tone(784, 0.4, "square", 0.04, 0.05);
-  },
-  total(big: boolean) {
-    if (!on()) return;
-    noise(0.4, 600, 0.6, 0.2);
-    [0, 4, 7, big ? 12 : 9].forEach((s, i) => tone(262 * Math.pow(2, s / 12), 0.35, "square", 0.05, i * 0.05));
   },
   clear() {
     if (!on()) return;

@@ -1,11 +1,11 @@
-// A tiny shared store between the Pixi table and the Preact overlays.
-import type { Edition, PoolCard } from "../shared/data.js";
+// A tiny store shared by the Pixi table and the Preact overlays.
+import type { Edition, Launch } from "../shared/data.js";
 import type { Run } from "../shared/engine.js";
 import type { Profile } from "../shared/profile.js";
 
-export type Overlay = null | "title" | "how" | "deck" | "levels" | "over" | "seed" | "options" | "hall" | "house" | "news" | "table" | "more";
+export type Overlay = null | "title" | "how" | "pool" | "squad" | "boss" | "over" | "seed" | "options" | "hall" | "house" | "news" | "table" | "more";
 
-/** Today's Daily Deal as /api/daily serves it. */
+/** Today's Daily Match as /api/daily serves it. */
 export interface Daily {
   day: string;
   label: string;
@@ -17,12 +17,11 @@ export interface Daily {
 export interface Challenge {
   id: string;
   name: string | null;
-  ante: number;
-  blind: number;
+  round: number;
   cleared: number;
   won: boolean;
   best: number;
-  handName: string;
+  style: string;
 }
 
 export interface Coach {
@@ -31,12 +30,9 @@ export interface Coach {
 }
 
 export interface Detail {
-  l: PoolCard;
-  rank?: number;
-  suit?: number;
-  enh?: string | null;
-  q?: string;
-  bridged?: boolean;
+  l: Launch;
+  /** Its place in your squad, when it is one of your figures. */
+  slot?: number;
 }
 
 export interface UiState {
@@ -54,8 +50,8 @@ export interface UiState {
   signinBusy: boolean;
   /** "Your table" from the server, while signed in. */
   profile: Profile | null;
-  /** Cards selected in hand: the live preview on the felt. */
-  preview: { name: string; chips: string; mult: string } | null;
+  /** The boss intro was shown for this fixture; the next Kick off plays. */
+  bossSeen: boolean;
   version: number;
 }
 
@@ -73,7 +69,7 @@ export const ui: UiState = {
   signedIn: null,
   signinBusy: false,
   profile: null,
-  preview: null,
+  bossSeen: false,
   version: 0,
 };
 

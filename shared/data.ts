@@ -1,16 +1,17 @@
-// Launch data: how a vibe/vibe launch becomes a playing card.
+// Launch data: how a vibe/vibe launch becomes a figure on your rods.
 import { shuffle, stream } from "./rng.js";
 
-export type Suit = 0 | 1 | 2 | 3;
-export const SUITS: { key: string; name: string; short: string; pairs: string }[] = [
+/** What a launch is paired with. Four kinds, shown as a small kit stripe on the figure. */
+export type Pair = 0 | 1 | 2 | 3;
+export const PAIRS: { key: string; name: string; short: string; pairs: string }[] = [
   { key: "eth", name: "Ether", short: "ETH", pairs: "launches quoted in ETH" },
   { key: "stock", name: "Stocks", short: "STK", pairs: "launches quoted in a tokenized stock (NVDA, AAPL, SPCX, ...)" },
   { key: "vibe", name: "Vibe", short: "VBV", pairs: "launches quoted in VIBEVIBE" },
   { key: "private", name: "Private", short: "PRV", pairs: "launches quoted in a pre-IPO token or a dollar (OPENAI, ANTHROPIC, USDG)" },
 ];
 
-/** Quote asset contract -> [ticker, suit]. */
-export const QUOTES: Keyed<string, [string, Suit]> = {
+/** Quote asset contract -> [ticker, pair kind]. */
+export const QUOTES: Keyed<string, [string, Pair]> = {
   "0x0000000000000000000000000000000000000000": ["ETH", 0],
   "0x3ab049897b0697bda766d8730fe1f955c9c103f0": ["NVDA", 1],
   "0x438820dcfe62a21e306614a4b54383cd8a36acf2": ["AAPL", 1],
@@ -27,30 +28,34 @@ export const QUOTES: Keyed<string, [string, Suit]> = {
   "0x102154e70d8485ff466bab229be90a763bf33264": ["USDG", 3],
 };
 
-/** One launch as stored in a deck snapshot. Short keys keep the snapshot small. */
-export interface PoolCard {
+/**
+ * One launch as stored in a squad cut. Short keys keep the snapshot small, and they are the stored format:
+ * cuts already in storage use exactly these fields.
+ */
+export interface Launch {
   t: string; // token address (lowercase)
   s: string; // ticker
   n: string; // name
   c: string | null; // image CID
   q: string; // quote ticker
-  u: Suit;
-  p: number; // curve progress, basis points of the graduation target (10000 = graduated)
+  u: Pair;
+  p: number; // curve progress, basis points of the curve target (10000 = full curve)
   x: number | null; // latest price change in bps (24h, else 6h, else 1h)
   k: number; // trades in the last 24h
   h: number; // holders
   a: number; // created, unix seconds
-  g: boolean; // graduated
+  g: boolean; // flown the whole curve
   d: boolean; // runs a gift (airdrop) list
 }
 
+/** A squad cut ("edition"): the launches of one cut, grouped by pair kind. */
 export interface Edition {
   id: number; // hour number since the epoch
   at: string; // when the snapshot was taken
   block: string;
   scanned: number; // launches read from the index
   dropped: number; // filtered as farm bots / dead
-  pool: PoolCard[][]; // per suit
+  pool: Launch[][]; // per pair kind
 }
 
 export const editionNow = (ms = Date.now()) => Math.floor(ms / 3_600_000);
@@ -90,7 +95,7 @@ export interface RawLaunch {
   };
 }
 
-/** Why a launch is left out of the deck, or null if it plays. */
+/** Why a launch is left out of the cut, or null if it plays. */
 export function farmReason(i: RawLaunch): string | null {
   const d = (i.content?.description || "").trim();
   if (FARM_DESC.some((r) => r.test(d))) return "farm-template";
@@ -105,9 +110,9 @@ export function farmReason(i: RawLaunch): string | null {
 
 const clean = (s: string | undefined, n: number) => (s || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, n);
 
-export function toPoolCard(i: RawLaunch): PoolCard | null {
+export function toLaunch(i: RawLaunch): Launch | null {
   if (!/^0x[0-9a-fA-F]{40}$/.test(i.tokenAddress || "")) return null;
-  const quote = QUOTES[(i.pairCurrencyAddress || "").toLowerCase()] || (["OTHER", 3] as [string, Suit]);
+  const quote = QUOTES[(i.pairCurrencyAddress || "").toLowerCase()] || (["OTHER", 3] as [string, Pair]);
   const uri = i.content?.image?.uri || "";
   const m = uri.match(/^ipfs:\/\/(?:ipfs\/)?([A-Za-z0-9]{40,100})/);
   let p = 0;
@@ -118,6 +123,7 @@ export function toPoolCard(i: RawLaunch): PoolCard | null {
   } catch {
     p = 0;
   }
+  // the index's own word for a launch that finished its curve
   const g = i.graduated === true || i.lifecycle === "GRADUATED";
   if (g) p = 10000;
   const mk = i.market || {};
@@ -139,57 +145,34 @@ export function toPoolCard(i: RawLaunch): PoolCard | null {
   };
 }
 
-// ---------------------------------------------------------------- cards
-export type Enh = "grad" | "hot" | "pump" | "dip";
-export const ENH: Keyed<Enh, { name: string; text: string; why: string }> = {
-  grad: { name: "Graduated", text: "x1.5 Mult when scored", why: "the launch finished its bonding curve" },
-  hot: { name: "Hot", text: "Scores twice", why: "40+ trades in the last 24h" },
-  pump: { name: "Pump", text: "+4 Mult when scored", why: "price up 15%+ (latest window)" },
-  dip: { name: "Dip", text: "+30 Chips when scored", why: "price down 15%+ (latest window)" },
-};
+// ---------------------------------------------------------------- the squad
+/** The three stats, each read off one number of the launch. The thresholds are the whole rule. */
+export const STAT = {
+  power: { name: "Power", from: "curve progress", at: 1000, text: "its shots go through one blocker" },
+  pace: { name: "Pace", from: "24h trades", at: 10, text: "a free slide for its rod every possession" },
+  grip: { name: "Grip", from: "holders", at: 6, text: "keeps the ball once a possession when its pass is blocked" },
+} as const;
+export type StatId = keyof typeof STAT;
 
-export interface Card {
-  id: number;
-  l: PoolCard;
-  rank: number; // 2..14 (14 = Ace)
-  suit: Suit;
-  q: string; // quote ticker used for Stock Flush
-  enh: Enh | null;
-  bridged?: boolean;
-}
-
-export function enhOf(l: PoolCard): Enh | null {
-  if (l.g) return "grad";
-  if (l.k >= 40) return "hot";
-  if (l.x !== null && l.x >= 1500) return "pump";
-  if (l.x !== null && l.x <= -1500) return "dip";
-  return null;
-}
-
-export const RANK_LABEL = (r: number) => (r <= 10 ? String(r) : ["J", "Q", "K", "A"][r - 11]);
-export const RANK_CHIPS = (r: number) => (r <= 10 ? r : r === 14 ? 11 : 10);
-
-/** Launch strength used to rank a suit: curve progress, then 24h trades, then holders. */
-function strength(a: PoolCard, b: PoolCard): number {
-  return a.p - b.p || a.k - b.k || a.h - b.h || (a.t < b.t ? -1 : 1);
-}
+/** Slots 0..10: keeper, two defenders, five midfielders, three attackers. */
+export const SQUAD_SIZE = 11;
 
 /**
- * The deck for (edition, seed): 13 launches per suit drawn from the snapshot, then ranked inside
- * the suit by curve progress. The launch closest to graduation is the Ace, the least advanced is the 2.
+ * Today's squad for (cut, seed): 11 launches drawn from the cut, then put where their numbers fit best:
+ * the three furthest along their curve up front, the most-held in goal and at the back, the rest in midfield.
+ * The player can move them around before any match.
  */
-export function buildDeck(ed: Edition, seed: string): Card[] {
-  const out: Card[] = [];
-  for (let u = 0 as Suit; u < 4; u = (u + 1) as Suit) {
-    const pool = ed.pool[u] || [];
-    const picked = shuffle(pool, stream(seed, "deck", ed.id, u)).slice(0, 13).sort(strength);
-    const n = picked.length;
-    picked.forEach((l, i) => {
-      const rank = n >= 13 ? 2 + i : n <= 1 ? 14 : 2 + Math.round((i * 12) / (n - 1));
-      out.push({ id: out.length, l, rank, suit: u, q: l.q, enh: enhOf(l) });
-    });
-  }
-  return out;
+export function buildSquad(ed: Edition, seed: string): Launch[] {
+  const all = ed.pool.flat();
+  const picked = shuffle(all, stream(seed, "squad", ed.id)).slice(0, SQUAD_SIZE);
+  while (picked.length < SQUAD_SIZE && all.length) picked.push(all[picked.length % all.length]);
+  const byCurve = picked.slice().sort((a, b) => b.p - a.p || b.k - a.k || (a.t < b.t ? -1 : 1));
+  const att = byCurve.slice(0, 3);
+  const rest = byCurve.slice(3).sort((a, b) => b.h - a.h || b.k - a.k || (a.t < b.t ? -1 : 1));
+  const gk = rest[0];
+  const def = rest.slice(1, 3);
+  const mid = rest.slice(3, 8).sort((a, b) => b.k - a.k || (a.t < b.t ? -1 : 1));
+  return [gk, ...def, ...mid, ...att].filter(Boolean);
 }
 
 export const tokenUrl = (t: string) => `https://testnet.vibevibe.fun/token/${t}`;
@@ -203,5 +186,4 @@ export const GAME_TOKEN = {
 
 /** Where the game's source lives. */
 export const SOURCE_URL = "https://github.com/sirkicker/kicker";
-export const facePath = (cid: string | null, sym: string) =>
-  `/api/facecard?c=${encodeURIComponent(cid || "")}&s=${encodeURIComponent(sym.slice(0, 6))}`;
+export const facePath = (cid: string | null, sym: string) => `/api/face?c=${encodeURIComponent(cid || "")}&s=${encodeURIComponent(sym.slice(0, 6))}`;

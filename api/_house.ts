@@ -1,6 +1,6 @@
-// House colours: a $KICKER holder signs a plain message, the server checks the signature and the balance,
-// then hands back a short-lived claim tied to the player's name for the UTC day. Cosmetic only:
-// nothing here is read by the engine, the deal, the shop or the score.
+// Team kits ("house colours" before 2.0): a $KICKER holder signs a plain message, the server checks the signature and the balance,
+// then gives back a short-lived claim tied to the player's name for the UTC day. Cosmetic only:
+// nothing here is read by the engine, the squad, the dressing room or a result.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createPublicClient, http, verifyMessage } from "viem";
 import { robinhoodTestnet } from "../shared/chain.js";
@@ -15,6 +15,7 @@ function key(): Buffer {
   const own = process.env.HOUSE_SECRET;
   if (own) return Buffer.from("house|" + own);
   const blob = process.env.BLOB_READ_WRITE_TOKEN;
+  // the salt predates 2.0 and stays: changing it would sign everybody out
   if (blob) return createHmac("sha256", "kicker house colours").update(blob).digest();
   return (devKey ||= randomBytes(32));
 }
@@ -143,6 +144,6 @@ export async function checkHouse(
   } catch {
     throw new HouseError("Robinhood Chain testnet is not answering. Try again in a minute.", 503);
   }
-  if (bal <= 0n) throw new HouseError("No $KICKER on that address, so no house colours. Everything else plays the same.", 403);
+  if (bal <= 0n) throw new HouseError("No $KICKER on that address, so no team kits. Everything else plays the same.", 403);
   return { ...issueClaim(name, now), name };
 }

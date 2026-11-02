@@ -1,8 +1,9 @@
-// GET /api/shuffle          -> the newest deck snapshot (cut from the live index every few hours)
-// GET /api/shuffle?e=<id>   -> a frozen snapshot, for replaying a shared seed
+// GET /api/shuffle          -> today's transfer list: the newest squad cut (from the live index every few hours)
+// GET /api/shuffle?e=<id>   -> a frozen cut, for replaying a shared seed
+// (The path predates 2.0 and stays: cached links and older clients ask for it.)
 import { waitUntil } from "@vercel/functions";
 import { editionNow } from "../shared/data.js";
-import { currentEdition, getEdition, recentEdition, storedEdition } from "./_deck.js";
+import { currentEdition, getEdition, recentEdition, storedEdition } from "./_cut.js";
 
 const json = (body: unknown, status: number, cache: string) =>
   new Response(JSON.stringify(body), {
@@ -15,13 +16,13 @@ export async function GET(req: Request): Promise<Response> {
   try {
     if (e) {
       const id = Number(e);
-      if (!Number.isInteger(id) || id < 400000 || id > editionNow() + 1) return json({ error: "bad deck id" }, 400, "public, max-age=60");
+      if (!Number.isInteger(id) || id < 400000 || id > editionNow() + 1) return json({ error: "bad cut id" }, 400, "public, max-age=60");
       const ed = await getEdition(id);
-      if (!ed) return json({ error: "deck not found" }, 404, "public, max-age=30, s-maxage=30");
+      if (!ed) return json({ error: "cut not found" }, 404, "public, max-age=30, s-maxage=30");
       return json(ed, 200, "public, max-age=31536000, s-maxage=31536000, immutable");
     }
     const recent = (await recentEdition()) || (await storedEdition(editionNow() - 4, 20));
-    // a deck lasts three hours: fresh enough for the cards, and a third of the writes
+    // a cut lasts three hours: fresh enough for the numbers, and a third of the writes
     if (recent && recent.id >= editionNow() - 2) return json(recent, 200, "public, max-age=120, s-maxage=600, stale-while-revalidate=1800");
     if (recent) {
       waitUntil(currentEdition().catch(() => null));

@@ -1,11 +1,10 @@
-// The live side of a card, made visible: the data tag, the Insider highlights and the shop's deck line.
-// Everything here reads the same fields and thresholds the engine scores with (cardInsider in engine.ts),
-// so what the table shows is what the score does.
-import { ENH, RANK_LABEL, SUITS, type Card } from "./data.js";
-import { INSIDER } from "./content.js";
-import { CARD_INSIDER_MAX, cardInsider } from "./engine.js";
+// The live side of a figure, made visible: the data tag, the coach highlights and the dressing room's squad line.
+// Everything here reads the same fields and thresholds the engine plays by (Run.statSources in engine.ts),
+// so what the table shows is what the match does.
+import { PAIRS, STAT, type Launch } from "./data.js";
+import { COACH } from "./content.js";
 
-export interface CardFacts {
+export interface FigFacts {
   title: string;
   lines: [string, string][];
 }
@@ -19,90 +18,75 @@ export function ageLabel(hours: number): string {
   return `${Math.round(h / 24)} days`;
 }
 
-/** The tag: what the Insiders read off this card, in their words. `ageHours` is Run.ageHours(card). */
-export function cardFacts(c: Card, ageHours: number): CardFacts {
-  const l = c.l;
+type Sources = Keyed<"power" | "pace" | "grip", string[]>;
+
+const why = (src: string[], own: string) =>
+  src.length ? `yes (${src.map((s) => (s === "base" ? own : COACH[s]?.name || s)).join(", ")})` : "no";
+
+/** The tag: the launch's numbers, and which stat each one gives this figure. `sources` is Run.statSources(launch). */
+export function figureFacts(l: Launch, ageHours: number, sources?: Sources): FigFacts {
   const price = l.x === null ? "no trades to compare yet" : l.x < 0 ? `down ${pct(-l.x)} (latest window)` : l.x > 0 ? `up ${pct(l.x)} (latest window)` : "flat";
-  const badge = c.enh ? `${ENH[c.enh].name}: ${ENH[c.enh].text.toLowerCase()}` : "none";
-  return {
-    title: `${RANK_LABEL(c.rank)} · $${l.s}`,
-    lines: [
-      ["Launch", l.n],
-      ["Suit", `${SUITS[c.suit].name}, ${c.bridged ? "bridged by a move" : `paired with ${c.q}`}`],
-      ["Rank", `${RANK_LABEL(c.rank)}: curve progress ${pct(l.p)}`],
-      ["Holders", l.h.toLocaleString("en-US")],
-      ["Trades 24h", l.k.toLocaleString("en-US")],
-      ["Age", `launched ${ageLabel(ageHours)} before the deal`],
-      ["Price", price],
-      ["Graduated", l.g ? "yes" : "no"],
-      ["Gift list", l.d ? "yes" : "no"],
-      ["Badge", badge],
-    ],
-  };
+  const lines: [string, string][] = [
+    ["Launch", l.n],
+    ["Pair", `${PAIRS[l.u].name}, paired with ${l.q}`],
+    ["Curve", `${pct(l.p)}${l.g ? ", the whole curve flown" : ""}`],
+    ["Trades 24h", l.k.toLocaleString("en-US")],
+    ["Holders", l.h.toLocaleString("en-US")],
+    ["Age", `launched ${ageLabel(ageHours)} before the cut`],
+    ["Price", price],
+    ["Gift list", l.d ? "yes" : "no"],
+  ];
+  if (sources) {
+    lines.push(["Power", why(sources.power, `curve ${pct(STAT.power.at)}+`)]);
+    lines.push(["Pace", why(sources.pace, `${STAT.pace.at}+ trades`)]);
+    lines.push(["Grip", why(sources.grip, `${STAT.grip.at}+ holders`)]);
+  }
+  return { title: `$${l.s}`, lines };
 }
 
-export interface Highlight {
-  id: string; // insider id
-  slot: number; // index in the player's insiders
-  hue: number;
-  /** 0..1: how much of that Insider's top reward this card gets (1 for the yes/no ones). */
-  strength: number;
-}
-
-/** Which held Insiders would reward this card if it scored. True exactly when cardInsider gives a step. */
-export function highlights(insiders: { id: string }[], c: Card, ageHours: number): Highlight[] {
-  const out: Highlight[] = [];
-  insiders.forEach((j, slot) => {
-    const st = cardInsider(j.id, c, ageHours);
-    if (!st) return;
-    const cap = CARD_INSIDER_MAX[j.id];
-    const v = (st.chips || 0) + (st.mult || 0);
-    out.push({ id: j.id, slot, hue: INSIDER[j.id]?.hue ?? 0, strength: cap ? Math.min(1, v / cap) : 1 });
-  });
-  return out;
-}
-
-// ------------------------------------------------------------ the shop's line about this deck
+// ------------------------------------------------------------ the dressing room's line about your squad
 interface Fact {
-  insider: string;
+  coach: string;
   count: number;
   line: (n: number, total: number) => string;
 }
 
-/** True facts about the 52 cards of this run, each tied to the Insider it feeds. Zero counts never make a line. */
-export function deckFacts(deck: Card[], ageOf: (c: Card) => number): Fact[] {
-  const n = (f: (c: Card) => boolean) => deck.filter(f).length;
-  // a quarter of the deck earns the adjective; below that, just the count
-  const many = (k: number, t: number) => k * 4 >= t;
-  const cards = (k: number) => `${k} ${k === 1 ? "card" : "cards"}`;
+/** True facts about your squad, each tied to the coach it feeds. Zero counts never make a line. */
+export function squadFacts(squad: Launch[], ageOf: (l: Launch) => number): Fact[] {
+  const n = (f: (l: Launch) => boolean) => squad.filter(f).length;
+  const many = (k: number, t: number) => k * 3 >= t;
+  const figs = (k: number) => `${k} ${k === 1 ? "figure" : "figures"}`;
   const is = (k: number) => (k === 1 ? "is" : "are");
   const has = (k: number) => (k === 1 ? "has" : "have");
   const runs = (k: number) => (k === 1 ? "runs" : "run");
   const facts: Fact[] = [
-    { insider: "early", count: n((c) => ageOf(c) < 6), line: (k, t) => `${many(k, t) ? "This deck is young: " : ""}${k} of ${t} launched under 6 h before the deal.` },
-    { insider: "oldmoney", count: n((c) => ageOf(c) >= 24), line: (k, t) => `${many(k, t) ? "Old stock: " : ""}${k} of ${t} ${is(k)} more than a day old.` },
-    { insider: "dip", count: n((c) => c.l.x !== null && c.l.x < 0), line: (k, t) => `${many(k, t) ? "Lots of red: " : ""}${cards(k)} ${is(k)} down.` },
-    { insider: "volume", count: n((c) => c.l.k >= 30), line: (k, t) => `${many(k, t) ? "Heavy trading: " : ""}${cards(k)} did 30+ trades in 24h.` },
-    { insider: "whale", count: n((c) => c.l.h >= 17), line: (k, t) => `${many(k, t) ? "Crowded tables: " : ""}${cards(k)} ${has(k)} 17+ holders.` },
-    { insider: "snob", count: n((c) => c.l.s.length <= 3), line: (k) => `${cards(k)} ${has(k)} a ticker of 3 letters or fewer.` },
-    { insider: "airdrop", count: n((c) => c.l.d), line: (k) => `${cards(k)} ${runs(k)} a gift list.` },
-    { insider: "moonboy", count: n((c) => c.l.p >= 5000), line: (k) => `${cards(k)} ${is(k)} past half their curve.` },
-    { insider: "pumpchaser", count: n((c) => c.enh === "pump"), line: (k) => `${k} Pump ${k === 1 ? "card" : "cards"} in this deck.` },
-    { insider: "potato", count: n((c) => c.enh === "hot"), line: (k) => `${k} Hot ${k === 1 ? "card" : "cards"} in this deck.` },
+    { coach: "early", count: n((l) => ageOf(l) < 6), line: (k, t) => `${many(k, t) ? "A young squad: " : ""}${k} of ${t} launched under 6 h before the cut.` },
+    { coach: "oldmoney", count: n((l) => ageOf(l) >= 24), line: (k, t) => `${many(k, t) ? "Old heads: " : ""}${k} of ${t} ${is(k)} more than a day old.` },
+    { coach: "dip", count: n((l) => l.x !== null && l.x < 0), line: (k, t) => `${many(k, t) ? "Lots of red: " : ""}${figs(k)} ${is(k)} down.` },
+    { coach: "volume", count: n((l) => l.k >= 3 && l.k < STAT.pace.at), line: (k) => `${figs(k)} trade 3 to ${STAT.pace.at - 1} times a day: one short of Pace.` },
+    { coach: "whale", count: n((l) => l.h >= 2 && l.h < STAT.grip.at), line: (k) => `${figs(k)} ${has(k)} 2 to ${STAT.grip.at - 1} holders: just short of Grip.` },
+    { coach: "moonboy", count: n((l) => l.p >= 300 && l.p < STAT.power.at), line: (k) => `${figs(k)} ${is(k)} 3% to 10% along the curve: almost Power.` },
+    { coach: "snob", count: n((l) => l.s.length <= 3), line: (k) => `${figs(k)} ${has(k)} a ticker of 3 letters or fewer.` },
+    { coach: "airdrop", count: n((l) => l.d), line: (k) => `${figs(k)} ${runs(k)} a gift list.` },
+    { coach: "pumpchaser", count: n((l) => l.x !== null && l.x >= 1500), line: (k) => `${figs(k)} ${is(k)} up 15% or more.` },
+    { coach: "maxi0", count: n((l) => l.u === 0), line: (k) => `${figs(k)} ${is(k)} paired with Ether.` },
+    { coach: "maxi1", count: n((l) => l.u === 1), line: (k) => `${figs(k)} ${is(k)} paired with a stock.` },
+    { coach: "maxi2", count: n((l) => l.u === 2), line: (k) => `${figs(k)} ${is(k)} paired with VIBEVIBE.` },
+    { coach: "maxi3", count: n((l) => l.u === 3), line: (k) => `${figs(k)} ${is(k)} paired with a private token or a dollar.` },
   ];
   return facts.filter((f) => f.count > 0);
 }
 
 /**
- * One dry line for the shop. Prefers a fact about an Insider on offer (the one that touches the most cards);
+ * One dry line for the dressing room. Prefers a fact about a coach on offer (the one that touches the most figures);
  * with none on offer, the strongest fact, naming who would like it.
  */
-export function shopHint(deck: Card[], ageOf: (c: Card) => number, offerIds: string[]): { text: string; insider: string; count: number } | null {
-  const facts = deckFacts(deck, ageOf).sort((a, b) => b.count - a.count);
+export function roomHint(squad: Launch[], ageOf: (l: Launch) => number, offerIds: string[]): { text: string; coach: string; count: number } | null {
+  const facts = squadFacts(squad, ageOf).sort((a, b) => b.count - a.count);
   if (!facts.length) return null;
-  const onOffer = facts.find((f) => offerIds.includes(f.insider));
+  const onOffer = facts.find((f) => offerIds.includes(f.coach));
   const f = onOffer || facts[0];
-  const name = INSIDER[f.insider]?.name || f.insider;
-  const text = `${f.line(f.count, deck.length)} ${name} ${onOffer ? "likes that" : "would like that"}.`;
-  return { text, insider: f.insider, count: f.count };
+  const name = COACH[f.coach]?.name || f.coach;
+  const text = `${f.line(f.count, squad.length)} ${name} ${onOffer ? "likes that" : "would like that"}.`;
+  return { text, coach: f.coach, count: f.count };
 }

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/banner.png" alt="KICKER" width="100%">
+  <img src="docs/banner.png" alt="KICKER: five figures on a brass rod" width="100%">
 </p>
 
-<h3 align="center">A poker roguelike where every card is a live vibe/vibe launch.</h3>
+<h3 align="center">Turn-based table football where every figure on your rods is a live vibe/vibe launch.</h3>
 
 <p align="center">
   <a href="https://kickerhq.vercel.app"><b>Play now → kickerhq.vercel.app</b></a>
@@ -15,131 +15,134 @@
 
 ## What it is
 
-KICKER deals you a 52-card deck cut from the newest launches on [vibe/vibe](https://testnet.vibevibe.fun), the token launchpad on Robinhood Chain testnet. Every card is a real token: its picture, its ticker, and its stats come straight from the live index when the deck is cut.
+Kicker is what the Germans call table football. KICKER is a turn-based table football season played from above: four rods a side, a ball, touches instead of a clock, and a rival club that reacts to every one of them.
 
-You build poker-style hands out of those launches, beat the blind, spend your winnings in the shop, and try to survive eight antes and the Closing Bell.
-
-<p align="center">
-  <img src="docs/title.png" alt="Title screen" width="49%">
-  <img src="docs/hand.png" alt="Scoring a hand" width="49%">
-</p>
-
-## How a launch becomes a card
-
-| Card part | Comes from |
-|---|---|
-| **Suit** | what the launch is paired with: **Ether** (ETH), **Stocks** (NVDA, AAPL, SPCX), **Vibe** (VIBEVIBE), **Private** (OPENAI, ANTHROPIC, USDG) |
-| **Rank** | its place inside the suit by bonding-curve progress: the Ace is the launch closest to graduation, the 2 is the one furthest behind |
-| **Badges** | `GRAD` graduated · `HOT` 40+ trades in 24h · `PUMP` / `DIP` price moved ±15% |
-| **Picture** | the token's own image |
-
-A new deck is cut every few hours. Farm bots and dead tokens are filtered out before the cut, so the deck stays playable.
-
-Long-press a card in your hand, or open it from the deck view, to see the launch behind it: picture, pair, curve progress, price change, trades, holders and badges, with a link to its page on vibe/vibe.
-
-## The cards are live
-
-Every number on a card comes from its launch at the moment the deck was cut, and the Insiders read exactly those numbers. Hover a card (or hold it on a phone) for its data tag: holders, 24h trades, age at the deal, price direction, curve progress, graduated, gift list, badge, and what your Insiders would pay for it. Dots down a card's edge mark the Insiders that would score it, and hovering an Insider lights its cards. The check is the engine's own, so what lights up is what scores. The shop adds one true line about your deck, for the Insiders on offer.
+Your eleven figures are launches from [vibe/vibe](https://testnet.vibevibe.fun), the token launchpad on Robinhood Chain testnet. Each figure wears its token's picture as a head and its ticker underneath, and its numbers decide how it plays.
 
 <p align="center">
-  <img src="docs/live.png" alt="A card's data tag" width="70%">
+  <img src="docs/title.png" alt="The title screen: five figures on a rod, today's Daily board and transfer list" width="49%">
+  <img src="docs/match.png" alt="A match: brass rods, wine and turquoise figures, gold kick lines" width="49%">
 </p>
 
-## Hands
+## How a match plays
 
-Eleven hands of its own: **Solo Bag**, **Echo**, **Double Echo**, **Index**, **Pile-in**, **Curve Run**, **Quote Flush**, **Full Book**, **Ticker Flush**, **Stampede** and **Graduation Run**. Every hand scores **Chips × Mult**, and **Alpha leaks** level hands up during a run.
+- **The table.** Keeper (1 figure), defence (2), midfield (5) and attack (3), interleaved like a real table. Ten lanes across; the goal mouth is the middle two. A rod slides one lane at a time and its figures move together.
+- **Your ball.** Four touches a possession. A touch is a **slide** of one rod, or a **kick** with the figure on the ball: a pass to a figure further up, or a shot. The ball runs straight or one lane sideways per rod it crosses, and comes back off the side walls. Any of their figures in its lane blocks it and wins the ball.
+- **They react.** After every touch the rival slides to cover your most dangerous lane, and sets its defence before your first touch. It gets sharper by the round: it starts shutting passing lanes, slides twice a touch, reads your blocks, and finally shoots through a blocker.
+- **Their ball.** They show the lanes they can kick down (red for shots, amber for passes). You get two block slides a possession; slide into the lanes, then press **Ready**.
+- **Full time.** First to 2 goals (the final: 3), six possessions each. A friendly or a league match can end level and you go through without the win fans; a boss club has to be beaten.
 
-## Blinds and bosses
-
-Each ante is a Small Blind, a Big Blind and a boss. Ten bosses bend the rules: **The Rug**, **Trading Halt**, **Vibe Check**, **The Depeg**, **Gas Spike**, **Mempool Jam**, **Max Slippage**, **Lockup**, **Wash Trade**, and the final **Closing Bell**.
+Nothing is rolled at play time. The squad, the rival clubs and the shelf come from the seed; every move the rival makes comes from the position on the table.
 
 <p align="center">
-  <img src="docs/blinds.png" alt="Blind select" width="49%">
-  <img src="docs/shop.png" alt="Shop" width="49%">
+  <img src="docs/goal.png" alt="A goal" width="49%">
+  <img src="docs/defend.png" alt="Their ball: the red line is where it can go" width="49%">
 </p>
 
-## The shop
+## How a launch becomes a figure
 
-- **Insiders** (31). Jokers that read the launches you hold: holders, trades, curve progress, age, even ticker length. Diamond Hands, Paper Hands, Dip Buyer, Whale Watcher, Sniper Bot, Ticker Snob, Valedictorian and more.
-- **Alpha leaks**. Level up a hand.
-- **Moves**. One-shot plays like Burn, Clone, Bridge to Stocks or Treasury Sweep.
+| Stat | Comes from | What it does |
+|---|---|---|
+| **Power** | curve progress, 10% or more | an attacker's shot goes through one blocker |
+| **Pace** | 10+ trades in the last 24h | a free slide for that figure's rod, every possession |
+| **Grip** | 6+ holders | when its pass is blocked, it keeps the ball, once a possession |
+| **Pair** | what the launch is quoted in: Ether, a stock, VIBEVIBE, or a private token or dollar | a stripe on the shoulders; some coaches read it |
+| **Head** | the token's own picture | |
 
-## Challenge a friend
+Your squad is drawn by the seed from today's cut and placed by its numbers: the three furthest along their curve up front, the most-held in goal and at the back. Swap anyone in the **Line-up** before a match.
 
-A run is fully defined by its **seed and deck number**. Share the seed and your friend plays the exact same deal.
-
-When a run ends, KICKER makes a **challenge link**. The server replays every move of the run, checks the score, and renders a card for X showing the five cards of your best hand. A forged move list is rejected.
-
-## Hall of hands
-
-Verified runs with a name go into the **Hall of hands**, the day's top 50 best hands across all players (UTC). Only runs the server has replayed move by move can get in.
-
-## Daily Deal
-
-One deal a day, the same for everybody. The seed comes from the date alone, and the deck is pinned once: the first deck cut after 00:00 UTC. Newer decks keep rolling, the day's deal doesn't move.
-
-Finish it, make a challenge link with a name, and it lands on the **Daily board** in the Hall of hands: the top 50 of the UTC day, one line per name, your best run counts. The check is the same as for any challenge, every move replayed on the server. The share card reads like a ticker: `Daily Deal · Oct 14 · 41,250`. Finish it on consecutive days and your device keeps a streak.
+Hover a figure (or hold it on a phone) for its data tag: holders, 24h trades, age at the cut, price direction, curve progress, gift list, and which number or coach gives it each stat. Keep holding for its page on vibe/vibe.
 
 <p align="center">
-  <img src="docs/daily.png" alt="Daily Deal share card" width="49%">
-  <img src="docs/house.png" alt="House colours" width="49%">
+  <img src="docs/live.png" alt="A figure's data tag" width="70%">
 </p>
+
+## The season
+
+Eight rounds. Each round is a **friendly**, a **league match** and a **boss club**. Ten boss clubs change one rule each:
+
+- **The Rug**: your defence rod is pulled off the table.
+- **Trading Halt**: your defence or midfield is frozen.
+- **Vibe Check**: only figures with Power, Pace or Grip may shoot.
+- **The Depeg**: your shots drift one lane as they travel.
+- **Gas Spike**: each slide costs two touches.
+- **Mempool Jam**: passes land a turn late; they react before the ball arrives.
+- **Max Slippage**: one touch fewer every possession.
+- **Lockup**: your keeper is locked.
+- **Wash Trade**: the rod facing yours copies every slide you make.
+- **Closing Bell**, the final: first to 3, the rival at full strength, and their keeper takes three Power to beat.
+
+<p align="center">
+  <img src="docs/boss.png" alt="A boss club's intro" width="49%">
+  <img src="docs/room.png" alt="The dressing room" width="49%">
+</p>
+
+## The dressing room
+
+Wins and goals bring **fans**: 2, 3 or 4 for a friendly, a league match or a boss club, plus one a goal. Fans are only good for the dressing room, and every price is printed. The shelf is fixed by your seed.
+
+- **Coaches** (31, five seats). Passive tactics, most of them reading the launches on your rods: ETH Maxi gives your Ether-paired figures Power, Dip Buyer gives Grip to figures whose price is down, Early Bird gives Pace to launches under six hours old, Moonboy lowers the Power bar, Valedictorian makes your launch furthest along its curve shoot through two blockers. Hover one to light the figures it works on.
+- **Training**. Finishing, Passing, Footwork and Marking, levelled for the season.
+- **Set pieces**. One use each: Free Kick, One-Two, Dummy Run, Long Ball, Park the Bus, Season Tickets.
+
+## Goals, the Hall and challenges
+
+Every goal is rated: more for each pass in the move, for an angle, off a wall, for each blocker beaten with Power, from distance and with touches to spare, and more in later rounds and against a boss. A season's best goal is its score.
+
+A season is fixed by its **seed and cut number**. Share the seed and a friend plays the same squad against the same clubs. When a season ends, KICKER makes a **challenge link**: the server plays every touch again, checks it, and draws an image for X of the figures behind your best goal. A forged, reordered or unfinished trail is refused.
+
+Verified seasons with a name go into the **Hall of goals**: the day's top 50 best goals (UTC).
+
+<p align="center">
+  <img src="docs/share.png" alt="A challenge image: the figures of the best goal" width="70%">
+</p>
+
+## Daily Match
+
+One seed a day, the same for everybody, on the first cut after 00:00 UTC. Post it with a name and it lands on the **Daily board**: one line per name, your best of the day counts. Finish it on consecutive days and your device keeps a streak.
 
 ## Sign in
 
-Optional. Sign in with email, Google, X, Discord or a wallet, through [Para](https://getpara.com). Browser wallets (MetaMask, Coinbase Wallet and others) are offered inside Para's modal; KICKER's own code never calls a wallet, so there is no `window.ethereum` and no EIP-6963 on the page. If you have no wallet, Para makes one for you. It starts with no `$KICKER`.
-
-<p align="center">
-  <img src="docs/signin.png" alt="Sign in through Para" width="49%">
-  <img src="docs/table.png" alt="The felt: corner indexes, the woven mark and the live hand read" width="49%">
-</p>
+Optional. Sign in with email, Google, X, Discord or a wallet, through [Para](https://getpara.com). Browser wallets are offered inside Para's modal; KICKER's own code never calls a wallet, so there is no `window.ethereum` and no EIP-6963 on the page. If you have no wallet, Para makes one for you. It starts with no `$KICKER`.
 
 Para is a lazily loaded React island: it is fetched only when you open sign-in, or hover, focus or touch the button. The rest of the page is Preact and doesn't carry it.
 
-Once a day you sign one plain text message (no gas, no transaction, nothing moves). It does three things:
+Once a day you sign one plain text message (no gas, no transaction, nothing moves). It claims your Hall of goals name (a ✓ next to it, and nobody else posts under it), keeps **Your table** (Daily streak, best goal of each day, last 30 seasons) on any device, and checks `$KICKER` for team kits.
 
-- **Your name is yours.** It ties your Hall of hands name to your address, case-insensitive. After that nobody else can post a run under it, and your lines get a small ✓. A name someone else posted in the last 7 days can't be grabbed; the device that posted it can still claim it.
-- **Your table.** Your Daily streak, your best hand of each day and your last 30 posted runs follow you to any device. Signed out, Your table shows this device's record.
-- **House colours** for `$KICKER` holders (below).
+**Privacy.** Para runs the sign-in and holds your login, plus the wallet it creates for you. KICKER stores no emails or passwords. If you never sign in, your seasons and settings stay in this browser, and the one thing sent anywhere is a season you choose to post, under the name you give it. Signed in, KICKER also keeps the name you claimed, your address and the seasons you post. KICKER has no use for your seed phrase, a private key or funds, and will not ask.
 
-The server checks the signature with viem: a plain key is recovered locally, a smart account (ERC-1271) is asked with one read call. Then it hands back short-lived claims for the UTC day.
+## Team kits
 
-**Privacy.** Sign-in runs through Para, which keeps your login and the wallet it makes for you. KICKER keeps no emails and no passwords. Signed out, your runs and settings stay in your browser and only the name you post with a hand goes to the Hall of hands. Signed in, KICKER also keeps your claimed name, your address and the runs you post, so they follow you. KICKER never asks for a seed phrase, a private key or funds.
-
-## House colours
-
-Hold any `$KICKER` on Robinhood Chain testnet and you can dress the table: three card backs and felts (**Closing Bell**, **Ticker Tape**, **Pink Sheets**) and a small house mark next to your name in the Hall of hands and on share cards.
-
-It comes with the day's sign-in: the server reads your `balanceOf` on the token and, if it isn't zero, adds a house claim tied to your name for the UTC day.
-
-Without signing in nothing is missing. Every hand plays the same.
+Hold any `$KICKER` on Robinhood Chain testnet and your side can change shirts: **Closing Bell**, **Ticker Tape** and **Pink Sheets**, each with its own felt, and a small house mark next to your name in the Hall of goals and on share images. The server reads your `balanceOf` once with the day's sign-in. Without it nothing is missing: every match plays the same.
 
 ## The token
 
-[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, on Robinhood Chain testnet: a test token with no real value. It is **cosmetic only**. The token can't touch whether you win: the cards come from the deck, the deck comes from the index, and the score comes from the cards. Holding it changes how the table looks, never the cards, the score or the odds. The engine doesn't know the token exists.
+[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, on Robinhood Chain testnet: a test token with no real value. It is **cosmetic only**. It never changes a figure, a rival or a result. The engine doesn't know the token exists.
 
 ## Under the hood
 
-- **Client:** PixiJS v8 (WebGL), TypeScript, Vite, Preact overlays, custom shaders for the swirling background and the CRT pass, WebAudio-synthesised sound, touch and portrait layout, `prefers-reduced-motion` respected.
+- **Client:** PixiJS v8 (WebGL), TypeScript, Vite, Preact overlays, custom shaders for the swirling background and the CRT pass, WebAudio-synthesised sound, a table that stands upright on phones, `prefers-reduced-motion` respected.
+- **Engine:** one pure state machine in `shared/`, run by the page and by the server. The rival is a deterministic evaluator: it scores your threats lane by lane and slides to cover the worst. `shared/bot.ts` is a two-touch-deep player used for balance runs, tests and the "Show me a touch" button.
 - **Sign-in:** Para (`@getpara/react-sdk`) in a lazily loaded React island, with its own wagmi connectors for browser wallets. The chain is Robinhood Chain testnet (46630), defined with viem `defineChain`.
-- **Server:** Vercel Functions for the deck cut every few hours, the daily pin and board, token pictures, run verification, sign-in (viem signature checks, ERC-1271 for smart accounts, name claims, Your table) and house colours (one `balanceOf` read), and challenge cards (satori + resvg). Responses sit behind the CDN, and nothing polls.
+- **Server:** Vercel Functions for the squad cut every few hours (farm bots and dead tokens filtered), the daily pin and board, token pictures, season verification, sign-in (viem signature checks, ERC-1271 for smart accounts, name claims, Your table), team kits (one `balanceOf` read), and challenge images (satori + resvg). Responses sit behind the CDN, and nothing polls.
 - **Data:** the public vibe/vibe v6 index on Robinhood Chain testnet (chain id 46630).
 
 ```bash
 npm install
 npm run dev     # local dev server
 npm run build   # type-check client and api, then build
-npm test        # daily seed, deck pin, Daily board, house and sign-in checks, name claims (in memory, no network)
+npm test        # engine, rival, boss clubs, replay guard, daily pin and board, team kits, sign-in, names (in memory)
 npm test -- --anvil   # also checks a real ERC-1271 account on a local anvil (port 8520)
+npx tsx scripts/sim.ts 300   # the bot plays 300 seasons and reports how far it gets
 ```
 
-Sign-in needs a Para API key at build time: `VITE_PARA_API_KEY`, and `VITE_PARA_ENV=PRODUCTION` for a production key (BETA by default). Without a key the sign-in button says it is unavailable, and everything else plays the same.
+Sign-in needs a Para API key at build time: `VITE_PARA_API_KEY`, and `VITE_PARA_ENV=PRODUCTION` for a production key (Para's test environment otherwise). Without a key the sign-in button says it is unavailable, and everything else plays the same.
 
 ## Notes
 
 News and updates: [@kyriektnrv on X](https://x.com/kyriektnrv).
 
-Testnet only. Cards, chips and scores are a game: they are not money and don't stand for anything you own. KICKER is an independent project built on public vibe/vibe data, and it is not made by the vibe/vibe team.
+Testnet only. Fans, goals and ratings are a game: they are not money and don't stand for anything you own. KICKER is an independent project built on public vibe/vibe data, and it is not made by the vibe/vibe team.
 
 ## License
 

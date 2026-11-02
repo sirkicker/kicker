@@ -1,9 +1,8 @@
-// Pixi UI pieces: chunky buttons, panels, stat boxes and the hover tooltip.
+// Pixi UI pieces: chunky buttons, panels and the hover tooltip.
 import { Container, Graphics, Text } from "pixi.js";
-import { txt } from "./cards.js";
-import { COL, NUM } from "./theme.js";
+import { txt } from "./figures.js";
+import { COL } from "./theme.js";
 import { sfx } from "./audio.js";
-import { ease, tween } from "./tween.js";
 
 export function darken(c: number, k = 0.62): number {
   return (Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k);
@@ -89,48 +88,10 @@ export function panel(w: number, h: number, fill = COL.panel, edge = COL.edge, r
   return g;
 }
 
-/** A coloured number box (Chips / Mult) that can pop when the value changes. */
-export class NumBox extends Container {
-  bg = new Graphics();
-  value: Text;
-  private cur = "";
-  constructor(
-    public w: number,
-    public h: number,
-    public color: number,
-    align: "left" | "right" | "center" = "center",
-  ) {
-    super();
-    this.bg.roundRect(-w / 2, -h / 2, w, h, 10).fill(color);
-    this.bg.roundRect(-w / 2, h / 2 - 8, w, 8, 4).fill({ color: 0x000000, alpha: 0.18 });
-    this.value = txt("0", { fontFamily: NUM, fontSize: h * 0.82, fill: COL.cream, stroke: { color: darken(color, 0.4), width: 4 } });
-    this.value.anchor.set(align === "left" ? 0 : align === "right" ? 1 : 0.5, 0.5);
-    this.value.x = align === "left" ? -w / 2 + 12 : align === "right" ? w / 2 - 12 : 0;
-    this.value.y = -2;
-    this.addChild(this.bg, this.value);
-  }
-  set(v: string, pop = false) {
-    if (v === this.cur) return;
-    this.cur = v;
-    this.value.text = v;
-    const maxW = this.w - 16;
-    const s = this.value.width > maxW ? maxW / (this.value.width / this.value.scale.x) : 1;
-    this.value.scale.set(s);
-    if (pop) {
-      this.scale.set(1.18);
-      void tween(this.scale, { x: 1, y: 1 }, 220, ease.outBack);
-    }
-  }
-}
-
 export function fmt(n: number): string {
   if (!Number.isFinite(n)) return "0";
   if (Math.abs(n) >= 1e11) return n.toExponential(2).replace("+", "");
   return Math.floor(n).toLocaleString("en-US");
-}
-export function fmtMult(m: number): string {
-  const r = Math.round(m * 100) / 100;
-  return Number.isInteger(r) ? String(r) : r.toFixed(r * 10 === Math.round(r * 10) ? 1 : 2);
 }
 
 /** Hover / tap info panel. */

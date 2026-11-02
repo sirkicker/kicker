@@ -1,26 +1,30 @@
-// GET /api/felt?id=<id>            -> 1200x630 PNG challenge card for X (CDN-cached for good)
-// GET /api/felt?id=<id>&view=page  -> /c/<id>: tiny page whose og:image is that card, then into the game
+// GET /api/felt?id=<id>            -> 1200x630 PNG challenge image for X (CDN-cached for good)
+// GET /api/felt?id=<id>&view=page  -> /c/<id>: tiny page whose og:image is that image, then into the game
 import { readFile } from "node:fs/promises";
 import { Resvg } from "@resvg/resvg-js";
 import satori from "satori";
 import sharp from "sharp";
-import { BLIND_NAME } from "../shared/content.js";
-import { RANK_LABEL } from "../shared/data.js";
+import { FIXTURE_NAME, ROUNDS } from "../shared/content.js";
 import { dayLabel } from "../shared/daily.js";
-import { getShowdown, type Showdown } from "./_runs.js";
+import type { FigInfo } from "../shared/engine.js";
+import { getResult, type Result } from "./_runs.js";
 
 const SITE = "https://kickerhq.vercel.app";
 const C = {
   ink: "#1a0816",
   wine: "#3a0b2b",
   teal: "#0c3b40",
+  felt: "#0c3438",
   cream: "#fff1dc",
-  chips: "#27c4e8",
-  mult: "#ff3d7f",
-  money: "#ffc23d",
+  cyan: "#27c4e8",
+  pink: "#ff3d7f",
+  gold: "#ffc23d",
   dim: "#c9a9bd",
+  kit: "#a3245f",
+  kitHi: "#e0538f",
+  brass: "#c9a24a",
 };
-const SUIT_FACE = ["#1f8fc9", "#e0521b", "#d42a8f", "#b98a00"];
+const PAIR = ["#5ad7ff", "#ff7a3d", "#ff4fb4", "#ffd43b"];
 
 type Node = { type: string; props: Keyed<string, unknown> };
 const h = (type: string, style: Keyed<string, unknown>, ...children: (Node | string | null | false)[]): Node => ({
@@ -54,65 +58,44 @@ async function art(cid: string | null): Promise<string | null> {
   }
 }
 
-function suitGlyph(u: number, size: number, color: string): Node {
-  const paths = [
-    `<path d="M8 0 16 8 8 16 0 8Z"/>`,
-    `<path d="M8 1 16 15H0Z"/>`,
-    `<circle cx="8" cy="8" r="7.5"/>`,
-    `<path d="M1 1h14v14H1Z"/>`,
-  ];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="${size}" height="${size}"><g fill="${color}">${paths[u] || paths[0]}</g></svg>`;
-  return img(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, { width: size, height: size });
-}
-
-function miniCard(c: { s: string; rank: number; suit: number }, pic: string | null, i: number, n: number): Node {
-  const tilt = (i - (n - 1) / 2) * 5;
-  const col = SUIT_FACE[c.suit] || C.ink;
+/** One figure from above: kit shoulders along the rod, the boot towards the goal, the launch's picture as the head. */
+function figure(f: FigInfo, pic: string | null): Node {
   return h(
     "div",
-    {
-      width: 150,
-      height: 214,
-      background: C.cream,
-      borderRadius: 10,
-      border: `5px solid ${C.ink}`,
-      boxShadow: "0 10px 0 rgba(0,0,0,0.45)",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: 8,
-      marginLeft: i === 0 ? 0 : -26,
-      transform: `rotate(${tilt}deg) translateY(${Math.abs(tilt) * 2}px)`,
-    },
+    { flexDirection: "column", alignItems: "center", width: 116, position: "relative" },
     h(
       "div",
-      { width: "100%", justifyContent: "space-between", alignItems: "center" },
-      h("div", { fontFamily: "Jersey", fontSize: 38, color: col, lineHeight: 1 }, RANK_LABEL(c.rank)),
-      suitGlyph(c.suit, 22, col),
+      { width: 116, height: 132, alignItems: "center", justifyContent: "center", position: "relative" },
+      h("div", { position: "absolute", left: 44, top: 0, width: 28, height: 30, background: C.gold, border: `4px solid ${C.ink}`, borderRadius: 8 }),
+      h("div", { position: "absolute", left: 0, top: 46, width: 116, height: 40, background: C.ink, borderRadius: 16 }),
+      h("div", { position: "absolute", left: 5, top: 51, width: 106, height: 30, background: C.kit, borderRadius: 12 }),
+      h("div", { position: "absolute", left: 5, top: 51, width: 106, height: 10, background: C.kitHi, borderRadius: 8, opacity: 0.6 }),
+      h(
+        "div",
+        { width: 92, height: 92, borderRadius: 46, background: C.ink, alignItems: "center", justifyContent: "center", border: `5px solid ${C.gold}` },
+        pic ? img(pic, { width: 76, height: 76, borderRadius: 38 }) : h("div", { width: 76, height: 76, borderRadius: 38, background: C.kitHi }),
+      ),
     ),
-    pic
-      ? img(pic, { width: 104, height: 104, borderRadius: 4, border: `3px solid ${C.ink}`, marginTop: 4 })
-      : h("div", { width: 104, height: 104, background: C.wine, borderRadius: 4, marginTop: 4 }),
-    h("div", { fontFamily: "Jersey", fontSize: 20, color: C.ink, marginTop: 8 }, "$" + c.s.slice(0, 8)),
+    h("div", { marginTop: 4, fontSize: 24, color: PAIR[f.u] || C.cream, background: C.ink, padding: "2px 10px", borderRadius: 6 }, "$" + f.s.slice(0, 8)),
   );
 }
 
-/** The small house mark a $KICKER holder gets next to their name. Cosmetic only. */
+/** The small mark a $KICKER holder gets next to their name. Cosmetic only. */
 function houseMark(size: number): Node {
   return h(
     "div",
-    { width: size, height: size, background: C.ink, border: `3px solid ${C.money}`, borderRadius: 6, alignItems: "center", justifyContent: "center", marginRight: 12, fontSize: size * 0.72, color: C.money, lineHeight: 1 },
+    { width: size, height: size, background: C.ink, border: `3px solid ${C.gold}`, borderRadius: 6, alignItems: "center", justifyContent: "center", marginRight: 12, fontSize: size * 0.72, color: C.gold, lineHeight: 1 },
     "K",
   );
 }
 
-/** "Daily Deal · Oct 14 · 41,250" */
-export const dailyLine = (rec: Showdown) => `Daily Deal · ${dayLabel(rec.daily || "")}${rec.best ? ` · ${rec.best.total.toLocaleString("en-US")}` : ""}`;
+const isNew = (rec: unknown): rec is Result => !!rec && (rec as { v?: number }).v === 2;
 
-async function cardPng(rec: Showdown): Promise<Buffer> {
-  const cards = (rec.best?.cards.slice(0, 5) || []).sort((a, b) => a.rank - b.rank);
-  const pics = await Promise.all(cards.map((c) => art(c.c)));
-  const reached = rec.won ? "Cleared all 8 antes" : `Reached ante ${rec.ante} · ${BLIND_NAME[rec.blind]}`;
-  const tree = h(
+/** "Daily Match · Nov 1 · 2,140" */
+export const dailyLine = (rec: Result) => `Daily Match · ${dayLabel(rec.daily || "")}${rec.best ? ` · ${rec.best.total.toLocaleString("en-US")}` : ""}`;
+
+function frame(...children: (Node | null)[]): Node {
+  return h(
     "div",
     {
       width: 1200,
@@ -123,74 +106,103 @@ async function cardPng(rec: Showdown): Promise<Buffer> {
       position: "relative",
       overflow: "hidden",
     },
-    h("div", { position: "absolute", left: -200, top: 380, width: 1700, height: 120, background: C.teal, transform: "rotate(-12deg)", opacity: 0.85 }),
-    h("div", { position: "absolute", left: -200, top: 520, width: 1700, height: 40, background: C.mult, transform: "rotate(-12deg)", opacity: 0.5 }),
-    h(
-      "div",
-      { position: "absolute", left: 64, top: 52, flexDirection: "column", width: 560 },
-      h("div", { fontFamily: "Jersey", fontSize: 120, lineHeight: 1, color: C.cream, letterSpacing: 4 }, "KICKER"),
-      h("div", { fontSize: 28, color: C.dim, marginTop: 4, width: 420 }, "poker roguelike dealt from live vibe/vibe launches"),
+    h("div", { position: "absolute", left: -200, top: 400, width: 1700, height: 110, background: C.teal, transform: "rotate(-10deg)", opacity: 0.85 }),
+    h("div", { position: "absolute", left: -200, top: 530, width: 1700, height: 36, background: C.pink, transform: "rotate(-10deg)", opacity: 0.45 }),
+    ...children.filter((c): c is Node => !!c),
+    h("div", { position: "absolute", right: 64, bottom: 36, fontSize: 26, color: C.cream }, "kickerhq.vercel.app"),
+  );
+}
+
+async function imagePng(rec: Result | null): Promise<Buffer> {
+  let tree: Node;
+  if (!rec) {
+    tree = frame(
       h(
         "div",
-        { marginTop: 34, background: C.ink, border: `4px solid ${C.money}`, borderRadius: 10, padding: "10px 18px", alignSelf: "flex-start", fontSize: 30, color: C.money, alignItems: "center" },
-        rec.house && rec.name ? houseMark(30) : null,
-        rec.daily ? (rec.name ? `${rec.name} dares you` : "Beat this deal") : rec.name ? `${rec.name} dares you: beat my seed` : "Beat my seed",
+        { position: "absolute", left: 64, top: 70, flexDirection: "column", width: 900 },
+        h("div", { fontSize: 140, lineHeight: 1, letterSpacing: 4 }, "KICKER"),
+        h("div", { fontSize: 34, color: C.dim, marginTop: 12 }, "Turn-based table football. Live vibe/vibe launches on the rods."),
+        h("div", { fontSize: 30, color: C.gold, marginTop: 40 }, "A season from an older version of KICKER."),
       ),
-      rec.daily
-        ? h("div", { marginTop: 22, fontFamily: "Jersey", fontSize: 58, color: C.cream, lineHeight: 1 }, `Daily Deal · ${dayLabel(rec.daily)}`)
-        : h("div", { marginTop: 22, fontFamily: "Jersey", fontSize: 64, color: C.cream, lineHeight: 1 }, rec.seed),
-      h("div", { marginTop: 10, fontSize: 24, color: C.dim }, rec.daily ? `seed ${rec.seed} · ${rec.won ? "cleared all 8 antes" : `ante ${rec.ante}`}` : `deck #${rec.edition} · ${reached}`),
-      rec.best
-        ? h(
-            "div",
-            { marginTop: 26, alignItems: "center" },
-            h("div", { background: C.chips, color: C.ink, borderRadius: 8, padding: "6px 14px", fontSize: 28 }, rec.best.handName),
-            h("div", { marginLeft: 16, fontFamily: "Jersey", fontSize: 58, color: C.mult, lineHeight: 1 }, rec.best.total.toLocaleString("en-US")),
-            h("div", { marginLeft: 10, fontSize: 22, color: C.dim }, "best hand"),
-          )
-        : null,
-    ),
-    h(
-      "div",
-      { position: "absolute", right: 56, top: 190, alignItems: "flex-start" },
-      ...cards.map((c, i) => miniCard(c, pics[i], i, cards.length)),
-    ),
-    h("div", { position: "absolute", right: 64, bottom: 40, fontSize: 26, color: C.cream }, "kickerhq.vercel.app"),
-  );
+    );
+  } else {
+    const figs = (rec.best?.figs || []).slice(0, 5);
+    const pics = await Promise.all(figs.map((f) => art(f.c)));
+    const reached = rec.won ? `Won all ${ROUNDS} rounds` : `Out in round ${rec.round} · ${FIXTURE_NAME[rec.fixture] || ""}`;
+    tree = frame(
+      h(
+        "div",
+        { position: "absolute", left: 64, top: 46, flexDirection: "column", width: 560 },
+        h("div", { fontSize: 120, lineHeight: 1, color: C.cream, letterSpacing: 4 }, "KICKER"),
+        h("div", { fontSize: 27, color: C.dim, marginTop: 4, width: 460 }, "turn-based table football with live vibe/vibe launches on the rods"),
+        h(
+          "div",
+          { marginTop: 28, background: C.ink, border: `4px solid ${C.gold}`, borderRadius: 10, padding: "10px 18px", alignSelf: "flex-start", fontSize: 30, color: C.gold, alignItems: "center" },
+          rec.house && rec.name ? houseMark(30) : null,
+          rec.daily ? (rec.name ? `${rec.name} dares you` : "Beat this match") : rec.name ? `${rec.name} dares you: beat my seed` : "Beat my seed",
+        ),
+        rec.daily
+          ? h("div", { marginTop: 20, fontSize: 56, color: C.cream, lineHeight: 1 }, `Daily Match · ${dayLabel(rec.daily)}`)
+          : h("div", { marginTop: 20, fontSize: 62, color: C.cream, lineHeight: 1 }, rec.seed),
+        h("div", { marginTop: 10, fontSize: 24, color: C.dim }, rec.daily ? `seed ${rec.seed} · ${reached.toLowerCase()}` : `cut #${rec.edition} · ${reached}`),
+        rec.best
+          ? h(
+              "div",
+              { marginTop: 24, alignItems: "center" },
+              h("div", { background: C.cyan, color: C.ink, borderRadius: 8, padding: "6px 14px", fontSize: 28 }, rec.best.style),
+              h("div", { marginLeft: 16, fontSize: 58, color: C.pink, lineHeight: 1 }, rec.best.total.toLocaleString("en-US")),
+              h("div", { marginLeft: 10, fontSize: 22, color: C.dim }, "best goal"),
+            )
+          : null,
+      ),
+      // the five figures of the best goal on a brass rod, over a strip of felt
+      h("div", { position: "absolute", right: 30, top: 160, width: 620, height: 280, background: C.felt, borderRadius: 26, border: `10px solid #4a1a3a` }),
+      h("div", { position: "absolute", right: 0, top: 260, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
+      h("div", { position: "absolute", right: 40, top: 201, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
+    );
+  }
   const svg = await satori(tree as unknown as Parameters<typeof satori>[0], { width: 1200, height: 630, fonts: await loadFonts() });
   return new Resvg(svg, { fitTo: { mode: "width", value: 1200 } }).render().asPng();
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-function page(rec: Showdown): string {
-  const title = rec.daily ? `${esc(dailyLine(rec))} on KICKER` : `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} seed ${rec.seed} on KICKER`;
-  const desc = rec.best
-    ? `${rec.won ? "Cleared all 8 antes" : `Ante ${rec.ante}`} with a best hand of ${rec.best.total.toLocaleString("en-US")} (${rec.best.handName}). Same deck, same deal: your turn.`
-    : `Same deck, same deal: your turn.`;
-  const imgUrl = `${SITE}/api/felt?id=${rec.id}`;
-  const to = `/?c=${rec.id}`;
+function page(rec: Result | null, id: string): string {
+  const title = !rec
+    ? "A season on KICKER"
+    : rec.daily
+      ? `${esc(dailyLine(rec))} on KICKER`
+      : `Beat ${rec.name ? esc(rec.name) + "'s" : "this"} seed ${rec.seed} on KICKER`;
+  const desc = !rec
+    ? "Turn-based table football with live vibe/vibe launches on the rods."
+    : rec.best
+      ? `${rec.won ? `Won all ${ROUNDS} rounds` : `Round ${rec.round}`} with a best goal of ${rec.best.total.toLocaleString("en-US")} (${rec.best.style}). Same squad, same rivals: your turn.`
+      : "Same squad, same rivals: your turn.";
+  const imgUrl = `${SITE}/api/felt?id=${id}`;
+  const to = `/?c=${id}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><meta name="description" content="${esc(desc)}">
-<meta property="og:type" content="website"><meta property="og:url" content="${SITE}/c/${rec.id}"><meta property="og:title" content="${title}"><meta property="og:description" content="${esc(desc)}">
+<meta property="og:type" content="website"><meta property="og:url" content="${SITE}/c/${id}"><meta property="og:title" content="${title}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${imgUrl}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:site" content="@kyriektnrv"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${imgUrl}">
 <meta http-equiv="refresh" content="0;url=${to}"><style>body{background:#160611;color:#fff1dc;font-family:monospace;display:grid;place-items:center;height:100vh;margin:0}a{color:#ffc23d}</style>
-</head><body><a href="${to}">Deal me in</a><script>location.replace(${JSON.stringify(to)})</script></body></html>`;
+</head><body><a href="${to}">Take the challenge</a><script>location.replace(${JSON.stringify(to)})</script></body></html>`;
 }
 
 export async function GET(req: Request): Promise<Response> {
   const q = new URL(req.url).searchParams;
-  const rec = await getShowdown(q.get("id") || "");
-  if (!rec) {
+  const id = q.get("id") || "";
+  const raw = await getResult(id);
+  if (!raw) {
     if (q.get("view") === "page") return Response.redirect(`${SITE}/`, 302);
     return new Response("not found", { status: 404, headers: { "cache-control": "public, max-age=30" } });
   }
+  const rec = isNew(raw) ? raw : null;
   if (q.get("view") === "page") {
-    return new Response(page(rec), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300, s-maxage=31536000" } });
+    return new Response(page(rec, id), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300, s-maxage=31536000" } });
   }
   try {
-    const png = await cardPng(rec);
+    const png = await imagePng(rec);
     return new Response(new Uint8Array(png), {
       headers: { "content-type": "image/png", "cache-control": "public, max-age=86400, s-maxage=31536000, immutable" },
     });

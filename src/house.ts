@@ -1,5 +1,5 @@
-// House colours: alternate card backs and felt for $KICKER holders. Cosmetic only: nothing in here is
-// read by the engine, so it never changes the cards, the score or the odds. Without a sign-in, the house look stays.
+// House colours: team kits and felts for $KICKER holders. Cosmetic only: nothing in here is read by the engine,
+// so it never changes a figure, a goal or a result. Without a sign-in, the house kit stays.
 import { HOUSE_CHAIN } from "../shared/house.js";
 import { local } from "./store.js";
 
@@ -7,20 +7,20 @@ export interface Look {
   id: string;
   name: string;
   blurb: string;
-  back: number; // card back field
-  dots: number; // card back checks
-  dotsAlpha: number;
-  frame: number; // centre plaque edge + K
+  kit: number; // your figures' shirts
+  kitHi: number;
+  trim: number; // boots, collar, pair mark
   felt: number;
   feltHi: number;
   swirl: [number, number, number];
 }
 
+/** Team kits. The house kit is everybody's; the other three come with $KICKER, for the look only. */
 export const LOOKS: Look[] = [
-  { id: "house", name: "House", blurb: "Wine and teal. Everybody's table.", back: 0x5b1243, dots: 0x0c3438, dotsAlpha: 0.9, frame: 0xffc23d, felt: 0x0c3438, feltHi: 0x14494e, swirl: [0x3a0a2c, 0x0e5257, 0xb01a66] },
-  { id: "bell", name: "Closing Bell", blurb: "Black and gold, for after the last trade.", back: 0x1a0816, dots: 0xffc23d, dotsAlpha: 0.32, frame: 0xffc23d, felt: 0x2b1d08, feltHi: 0x6b4a10, swirl: [0x22100a, 0x3d2a0c, 0x9a6a12] },
-  { id: "tape", name: "Ticker Tape", blurb: "Chip cyan on deep water.", back: 0x0c3b40, dots: 0x27c4e8, dotsAlpha: 0.45, frame: 0x27c4e8, felt: 0x0a2638, feltHi: 0x1a6a86, swirl: [0x0a1428, 0x0b4a5c, 0x1aa7c9] },
-  { id: "sheets", name: "Pink Sheets", blurb: "Hot pink, unlisted, unbothered.", back: 0x3a0b2b, dots: 0xff3d7f, dotsAlpha: 0.5, frame: 0xff3d7f, felt: 0x3a0b2b, feltHi: 0x8a2058, swirl: [0x2a0620, 0x5b1243, 0xd42a6f] },
+  { id: "house", name: "House", blurb: "Wine shirts on teal felt. Everybody's kit.", kit: 0xa3245f, kitHi: 0xe0538f, trim: 0xffc23d, felt: 0x0c3438, feltHi: 0x14494e, swirl: [0x3a0a2c, 0x0e5257, 0xb01a66] },
+  { id: "bell", name: "Closing Bell", blurb: "Black and gold, for after the last trade.", kit: 0x241018, kitHi: 0x5b3a1a, trim: 0xffc23d, felt: 0x2b1d08, feltHi: 0x6b4a10, swirl: [0x22100a, 0x3d2a0c, 0x9a6a12] },
+  { id: "tape", name: "Ticker Tape", blurb: "Navy with a cyan collar, on deep water.", kit: 0x1d2f6e, kitHi: 0x3f5bb5, trim: 0x27c4e8, felt: 0x0a2638, feltHi: 0x1a6a86, swirl: [0x0a1428, 0x0b4a5c, 0x1aa7c9] },
+  { id: "sheets", name: "Pink Sheets", blurb: "Hot pink, unlisted, unbothered.", kit: 0xd42a6f, kitHi: 0xff7aa8, trim: 0x1a0816, felt: 0x3a0b2b, feltHi: 0x8a2058, swirl: [0x2a0620, 0x5b1243, 0xd42a6f] },
 ];
 
 export interface HouseState {

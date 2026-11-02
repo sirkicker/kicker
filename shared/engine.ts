@@ -1,79 +1,148 @@
-// The whole game as a pure state machine. The browser and the server run the same code:
-// the server re-runs a shared run from its action list to check the score.
-import { buildDeck, RANK_CHIPS, type Card, type Edition, type Enh, type Suit } from "./data.js";
+// The whole game as a pure state machine. The browser and the server run the same code: the server re-runs a
+// shared season from its action list to check the result. Nothing in here is random at play time: every choice
+// the rival makes comes from the position on the table and the seed.
+import { buildSquad, STAT, type Edition, type Launch } from "./data.js";
 import {
-  ANTE_BASE,
-  BLIND_MULT,
-  BLIND_REWARD,
-  BOSS,
   BOSSES,
+  CLUBS,
+  COACHES,
+  DRILLS,
   FINAL_BOSS,
-  HAND,
-  HANDS,
-  INSIDERS,
-  MAX_ANTE,
-  MAX_INSIDERS,
-  MAX_MOVES,
-  MOVE,
-  MOVES,
+  GOAL_X,
+  LANES,
+  MAX_COACHES,
+  MAX_PLAYS,
+  MOUTH,
+  PLAY,
+  PLAYS,
   RARITY_WEIGHT,
-  type HandId,
+  RODS,
+  ROUNDS,
+  START_FANS,
+  START_OFF,
+  WIN_FANS,
+  drillCost,
+  type DrillId,
 } from "./content.js";
 import { pickWeighted, shuffle, stream } from "./rng.js";
 
-export type Phase = "blind" | "round" | "cashout" | "shop" | "over" | "won";
+export type Side = 0 | 1;
+export type Dir = -1 | 0 | 1;
+export type Phase = "fixture" | "attack" | "defend" | "fulltime" | "room" | "over" | "won";
 
-export interface Owned {
-  id: string;
-  v: number; // counter for scaling insiders
-  paid: number;
+/** A kick: to rod `r` (a pass, further up the table) or r = 4 (a shot), drifting `d` lanes per rod crossed. */
+export interface Kick {
+  r: number;
+  d: Dir;
 }
-
-export interface Offer {
-  kind: "insider" | "alpha" | "move";
-  id: string; // insider id, hand id or move id
-  cost: number;
-  sold: boolean;
+export interface Ball {
+  side: Side;
+  rod: number;
+  fig: number;
 }
 
 export type Action =
   | { t: "go" }
-  | { t: "play"; c: number[] }
-  | { t: "disc"; c: number[] }
-  | { t: "use"; i: number; c: number[] }
+  | { t: "slide"; r: number; d: Dir }
+  | { t: "kick"; r: number; d: Dir }
+  | { t: "hold" }
+  | { t: "use"; i: number }
+  | { t: "swap"; a: number; b: number }
   | { t: "sell"; i: number }
-  | { t: "cash" }
+  | { t: "collect" }
   | { t: "buy"; i: number }
-  | { t: "roll" }
   | { t: "next" };
 
+export interface Owned {
+  id: string;
+  v: number; // a counter some coaches keep
+  paid: number;
+}
+
+export interface Offer {
+  kind: "coach" | "drill" | "play";
+  id: string;
+  cost: number;
+  sold: boolean;
+}
+
 export interface Step {
-  kind: "card" | "insider" | "base" | "debuff";
-  card?: number; // card id
-  ins?: number; // insider index
-  chips?: number;
-  mult?: number;
-  xmult?: number;
-  label?: string;
+  x: number;
+  lane: number;
 }
-
-export interface Scored {
-  hand: HandId;
-  level: number;
-  played: number[];
-  scoring: number[];
+export interface Trace {
   steps: Step[];
-  chips: number;
-  mult: number;
-  total: number;
-  zeroed?: string; // reason the hand scored nothing
+  land: number;
+  bounces: number;
+  /** A pass that lands on one of your figures, or a shot that lands in the goal mouth. */
+  legal: boolean;
+  /** The receiving figure of a pass. */
+  to: number;
+  blockers: { rod: number; fig: number; x: number; lane: number }[];
 }
 
-export interface Cashout {
-  reward: number;
-  handsLeft: number;
-  interest: number;
-  extra: number;
+/** What happened, in order, so the table can play it back. */
+export type Ev =
+  | { e: "slide"; side: Side; r: number; d: number; why: "you" | "react" | "mirror" | "ai" | "block" }
+  | { e: "kick"; side: Side; rod: number; fig: number; kick: Kick; steps: Step[]; result: "goal" | "pass" | "blocked" | "kept"; at: { rod: number; fig: number } | null; beaten: number; to: number; drift: number }
+  | { e: "goal"; side: Side; rating: number; style: string }
+  | { e: "turnover"; to: Side; why: "touches" | "blocked" | "dead" }
+  | { e: "kickoff"; side: Side }
+  | { e: "play"; id: string }
+  | { e: "end"; won: boolean; draw: boolean };
+
+export interface FigInfo {
+  t: string;
+  s: string;
+  c: string | null;
+  u: number;
+}
+export interface Best {
+  total: number;
+  style: string;
+  figs: FigInfo[];
+}
+
+export interface Match {
+  kind: number; // 0 friendly, 1 league match, 2 boss club
+  club: string;
+  boss: string | null;
+  level: number;
+  target: number; // goals to win
+  limit: number; // possessions each
+  score: [number, number];
+  poss: [number, number];
+  off: number[][]; // rod offsets, [side][rod]
+  ball: Ball;
+  // your possession
+  touches: number;
+  free: number[]; // free slides per rod (Pace)
+  freeAny: number;
+  passes: number;
+  chain: number[]; // squad slots that touched the ball this possession
+  afterPass: boolean;
+  gripUsed: number[];
+  echoUsed: boolean;
+  freekick: number;
+  longball: boolean;
+  dummy: number;
+  // per match
+  shots: number;
+  saves: number;
+  // their possession
+  aiTouches: number;
+  blockSlides: number;
+  intent: { kind: "kick"; kick: Kick } | { kind: "slide"; r: number; d: Dir } | null;
+  // the boss club's rule
+  pulled: number;
+  frozen: number;
+  drift: number;
+  pref: number[];
+  fans: number;
+}
+
+export interface Fulltime {
+  rows: [string, number][];
   total: number;
 }
 
@@ -81,361 +150,631 @@ export interface RunState {
   seed: string;
   edition: number;
   editionAt: number; // unix seconds
-  deck: Card[];
-  nextCardId: number;
-  ante: number;
-  blind: number; // 0 small, 1 big, 2 boss
-  bosses: string[]; // boss id per ante
+  squad: Launch[];
+  round: number; // 1..8
+  kind: number; // 0..2, the fixture inside the round
+  bosses: string[]; // boss club per round
+  clubs: string[]; // two rival names per round
   phase: Phase;
-  money: number;
-  round: number; // blinds started so far
-  hands: number;
-  discards: number;
-  target: number;
-  score: number;
-  draw: number[];
-  hand: number[];
-  used: number[];
-  handsPlayedRound: number;
-  discardedRound: number;
-  typesRound: HandId[];
-  insiders: Owned[];
-  moves: string[];
-  levels: Keyed<HandId, number>;
+  fans: number;
+  match: Match | null;
+  coaches: Owned[];
+  plays: string[];
+  drills: Keyed<DrillId, number>;
   offers: Offer[];
-  rerolls: number;
-  shopVisit: number;
-  cashout: Cashout | null;
-  best: { total: number; hand: HandId; cards: { t: string; s: string; c: string | null; rank: number; suit: number }[] } | null;
-  cleared: number;
-  handsTotal: number;
+  visit: number;
+  fulltime: Fulltime | null;
+  best: Best | null;
+  cleared: number; // matches won
+  draws: number; // level at the whistle, through without the win fans
+  goalsFor: number;
+  goalsAgainst: number;
+  touchesTotal: number;
 }
 
-export const HAND_SIZE = 8;
-export const HANDS_PER_ROUND = 4;
-export const DISCARDS_PER_ROUND = 3;
+// ---------------------------------------------------------------- the table, as pure functions
+export const colOf = (side: Side, rod: number) => (side === 0 ? RODS[rod].x : 9 - RODS[rod].x);
+const AT: ({ side: Side; rod: number } | null)[] = Array.from({ length: 10 }, () => null);
+for (const side of [0, 1] as Side[]) RODS.forEach((_, r) => (AT[colOf(side, r)] = { side, rod: r }));
 
-export function targetFor(ante: number, blind: number, boss: string): number {
-  const base = ANTE_BASE[Math.min(ante, MAX_ANTE) - 1] * BLIND_MULT[blind];
-  return Math.round(boss === "bell" && blind === 2 ? base * 2 : base);
+/** The figure of rod `rod` standing in `lane`, or -1. */
+export function figAt(rod: number, off: number, lane: number): number {
+  const d = RODS[rod];
+  const k = lane - off;
+  if (k < 0) return -1;
+  if (d.gap === 0) return k === 0 ? 0 : -1;
+  return k % d.gap === 0 && k / d.gap < d.n ? k / d.gap : -1;
 }
+export const laneOf = (rod: number, off: number, fig: number) => off + fig * RODS[rod].gap;
+export const lanesOf = (rod: number, off: number) => Array.from({ length: RODS[rod].n }, (_, i) => off + i * RODS[rod].gap);
+export const slotOf = (rod: number, fig: number) => RODS[rod].slot + fig;
+export const rodOfSlot = (slot: number) => (slot === 0 ? 0 : slot <= 2 ? 1 : slot <= 7 ? 2 : 3);
 
-const has = (s: RunState, id: string) => s.insiders.some((j) => j.id === id);
-
-/** What a scored card is worth to one held Insider, or null when that Insider ignores it. The single source for
- * the score and for the table's highlights, so what lights up is exactly what scores. */
-export function cardInsider(id: string, c: Card, ageHours: number): Omit<Step, "kind" | "ins"> | null {
-  const e: Enh | null = c.enh;
-  switch (id) {
-    case "maxi0":
-    case "maxi1":
-    case "maxi2":
-    case "maxi3":
-      return c.suit === Number(id[4]) ? { mult: 3 } : null;
-    case "pumpchaser":
-      return e === "pump" ? { xmult: 1.5 } : null;
-    case "dip":
-      return c.l.x !== null && c.l.x < 0 ? { chips: 25 } : null;
-    case "early":
-      return ageHours < 6 ? { chips: 40 } : null;
-    case "oldmoney":
-      return ageHours >= 24 ? { mult: 4 } : null;
-    case "whale": {
-      const v = Math.min(50, 3 * c.l.h);
-      return v > 0 ? { chips: v } : null;
-    }
-    case "volume": {
-      const v = Math.min(60, 2 * c.l.k);
-      return v > 0 ? { chips: v } : null;
-    }
-    case "moonboy": {
-      const v = Math.floor(c.l.p / 1000);
-      return v > 0 ? { mult: v } : null;
-    }
-    case "snob":
-      return c.l.s.length <= 3 ? { mult: 5 } : null;
-    case "airdrop":
-      return c.l.d ? { chips: 25 } : null;
-    case "valedictorian":
-      return c.rank === 14 ? { xmult: 1.5 } : null;
+/** A lane off the table comes back off the side wall. Returns the lane and how many walls it met. */
+export function reflect(raw: number): [number, number] {
+  let b = 0;
+  while (raw < 0 || raw >= LANES) {
+    raw = raw < 0 ? -1 - raw : 2 * LANES - 1 - raw;
+    b++;
   }
-  return null;
+  return [raw, b];
 }
 
-/** The per-card Insiders, and the cap of each one's reward, for the strength of a highlight. */
-export const CARD_INSIDER_MAX: Keyed<string, number> = { whale: 50, volume: 60, moonboy: 10 };
+/** The path of a kick, its landing, and every opposing figure standing in its way. */
+export function trace(off: number[][], pulled: number[], side: Side, rod: number, lane: number, k: Kick, drift = 0): Trace {
+  const x0 = colOf(side, rod);
+  const dir = side === 0 ? 1 : -1;
+  const goal = k.r === 4;
+  const x1 = goal ? GOAL_X[1 - side] : colOf(side, k.r);
+  const n = Math.abs(x1 - x0);
+  const steps: Step[] = [];
+  const blockers: Trace["blockers"] = [];
+  let bounces = 0;
+  for (let i = 1; i <= n; i++) {
+    const [ln, b] = reflect(lane + drift + k.d * i);
+    bounces = b;
+    const x = x0 + dir * i;
+    steps.push({ x, lane: ln });
+    if (i < n) {
+      const o = AT[x];
+      if (o && o.side !== side && pulled[o.side] !== o.rod) {
+        const f = figAt(o.rod, off[o.side][o.rod], ln);
+        if (f >= 0) blockers.push({ rod: o.rod, fig: f, x, lane: ln });
+      }
+    }
+  }
+  const land = steps.length ? steps[steps.length - 1].lane : lane;
+  let legal = false;
+  let to = -1;
+  if (goal) legal = land >= MOUTH[0] && land <= MOUTH[1];
+  else if (k.r > rod && k.r <= 3 && pulled[side] !== k.r) {
+    to = figAt(k.r, off[side][k.r], land);
+    legal = to >= 0;
+  }
+  return { steps, land, bounces, legal, to, blockers };
+}
+
+/**
+ * Power beats blockers in order, one point each. A keeper with Diamond Gloves is never beaten; a keeper in the final
+ * (`keeperCost` 2) takes two points.
+ */
+export function resolveBlock(blockers: Trace["blockers"], power: number, keeperHolds: boolean, keeperCost = 1): { at: Trace["blockers"][number] | null; beaten: number } {
+  let p = power;
+  let beaten = 0;
+  for (const b of blockers) {
+    const cost = b.rod === 0 ? keeperCost : 1;
+    if (p >= cost && !(keeperHolds && b.rod === 0)) {
+      p -= cost;
+      beaten++;
+      continue;
+    }
+    return { at: b, beaten };
+  }
+  return { at: null, beaten };
+}
+
+export const KICKS: Kick[] = [];
+for (const r of [1, 2, 3, 4]) for (const d of [0, -1, 1] as Dir[]) KICKS.push({ r, d });
+
+/** How sharp the rival club plays, by its level (round, fixture and the final). */
+export function aiParams(level: number) {
+  return {
+    react: level >= 10 ? 3 : level >= 3 ? 2 : 1, // slides after each of your touches
+    passes: level >= 2, // also shuts passing lanes, not only shots
+    look: level >= 4, // also covers the lanes you are one slide from
+    read: level >= 4, // picks its kick after your block slides, instead of committing first
+    power: level >= 8 ? 1 : 0, // their shots go through one blocker
+    touches: 4 + (level >= 3 ? 1 : 0) + (level >= 6 ? 1 : 0),
+  };
+}
+
+export const GOALS_TO_WIN = 2;
+export const POSSESSIONS = 6;
+export const BASE_TOUCHES = 4;
+export const BASE_BLOCKS = 2;
+/** The final: how sharp the Closing Bell plays, and how much Power their keeper takes. */
+export const FINAL_LEVEL = 10;
+export const FINAL_KEEPER = 3;
+/** Slides the rival makes to set its defence when you win the ball, before your first touch. */
+export const SETUP_SLIDES = 3;
+
+const has = (s: RunState, id: string) => s.coaches.some((j) => j.id === id);
 
 export class Run {
   s: RunState;
   trail: Action[] = [];
-  lastScored: Scored | null = null;
-  lastDrawn: number[] = [];
+  events: Ev[] = [];
 
-  constructor(public ed: Edition, seed: string) {
-    const deck = buildDeck(ed, seed);
-    const bossRnd = stream(seed, "boss");
-    const bag = shuffle(BOSSES.map((b) => b.id), bossRnd);
+  constructor(
+    public ed: Edition,
+    seed: string,
+  ) {
+    const squad = buildSquad(ed, seed);
+    const bag = shuffle(
+      BOSSES.map((b) => b.id),
+      stream(seed, "boss"),
+    );
     const bosses: string[] = [];
-    for (let a = 1; a <= MAX_ANTE; a++) bosses.push(a === MAX_ANTE ? FINAL_BOSS.id : bag[(a - 1) % bag.length]);
-    const levels = Object.fromEntries(HANDS.map((h) => [h.id, 1])) as Keyed<HandId, number>;
+    for (let r = 1; r <= ROUNDS; r++) bosses.push(r === ROUNDS ? FINAL_BOSS.id : bag[(r - 1) % bag.length]);
+    const names = shuffle(CLUBS, stream(seed, "clubs"));
+    const clubs: string[] = [];
+    for (let i = 0; i < ROUNDS * 2; i++) clubs.push(names[i % names.length]);
     this.s = {
       seed,
       edition: ed.id,
       editionAt: Math.floor(Date.parse(ed.at) / 1000) || ed.id * 3600,
-      deck,
-      nextCardId: deck.length,
-      ante: 1,
-      blind: 0,
+      squad,
+      round: 1,
+      kind: 0,
       bosses,
-      phase: "blind",
-      money: 4,
-      round: 0,
-      hands: 0,
-      discards: 0,
-      target: targetFor(1, 0, bosses[0]),
-      score: 0,
-      draw: [],
-      hand: [],
-      used: [],
-      handsPlayedRound: 0,
-      discardedRound: 0,
-      typesRound: [],
-      insiders: [],
-      moves: [],
-      levels,
+      clubs,
+      phase: "fixture",
+      fans: START_FANS,
+      match: null,
+      coaches: [],
+      plays: [],
+      drills: { shoot: 0, pass: 0, feet: 0, block: 0 },
       offers: [],
-      rerolls: 0,
-      shopVisit: 0,
-      cashout: null,
+      visit: 0,
+      fulltime: null,
       best: null,
       cleared: 0,
-      handsTotal: 0,
+      draws: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      touchesTotal: 0,
     };
   }
 
-  // ------------------------------------------------------------ helpers
-  card(id: number): Card {
-    const c = this.s.deck.find((d) => d.id === id);
-    if (!c) throw new Error("no card " + id);
-    return c;
-  }
-  bossNow(): string | null {
-    return this.s.blind === 2 ? this.s.bosses[this.s.ante - 1] : null;
-  }
-  bossDef() {
-    const b = this.bossNow();
-    return b ? BOSS[b] : null;
-  }
-  handSize(): number {
-    let n = HAND_SIZE + (has(this.s, "pockets") ? 1 : 0);
-    if (this.s.phase === "round" && this.bossNow() === "jam") n -= 1;
-    return n;
-  }
-  debuffed(c: Card): boolean {
-    const b = this.bossDef();
-    return !!b && b.debuff !== undefined && b.debuff === c.suit;
-  }
-  ageHours(c: Card): number {
-    return (this.s.editionAt - c.l.a) / 3600;
-  }
-  minPlay(): number {
-    return this.bossNow() === "lockup" ? Math.min(5, this.s.hand.length) : 1;
+  get m(): Match {
+    if (!this.s.match) throw new Error("no match on");
+    return this.s.match;
   }
 
-  private drawUp(): number[] {
-    const s = this.s;
-    const got: number[] = [];
-    while (s.hand.length < this.handSize() && s.draw.length) {
-      const id = s.draw.shift()!;
-      s.hand.push(id);
-      got.push(id);
-    }
-    return got;
+  // ------------------------------------------------------------ the fixture
+  /** Who you meet in a fixture of this round. */
+  clubName(kind = this.s.kind, round = this.s.round): string {
+    if (kind === 2) return BOSSES.find((b) => b.id === this.s.bosses[round - 1])?.name || FINAL_BOSS.name;
+    return this.s.clubs[(round - 1) * 2 + kind];
+  }
+  bossOf(kind = this.s.kind, round = this.s.round): string | null {
+    return kind === 2 ? this.s.bosses[round - 1] : null;
+  }
+  levelOf(kind = this.s.kind, round = this.s.round): number {
+    // a boss club plays like the league side of its round; its rule is the difference. The final is the sharpest.
+    if (this.bossOf(kind, round) === "bell") return FINAL_LEVEL;
+    return round - 1 + Math.min(kind, 1);
+  }
+  isFinal(kind = this.s.kind, round = this.s.round) {
+    return round === ROUNDS && kind === 2;
+  }
+  ai() {
+    return aiParams(this.s.match ? this.s.match.level : this.levelOf());
   }
 
-  // ------------------------------------------------------------ hand evaluation
-  evaluate(ids: number[]): { hand: HandId; scoring: number[] } {
-    const cards = ids.map((i) => this.card(i));
-    const byRank = new Map<number, Card[]>();
-    for (const c of cards) byRank.set(c.rank, [...(byRank.get(c.rank) || []), c]);
-    const groups = [...byRank.values()].sort((a, b) => b.length - a.length || b[0].rank - a[0].rank);
-    const five = cards.length === 5;
-    const flush = five && cards.every((c) => c.suit === cards[0].suit);
-    const ranks = [...new Set(cards.map((c) => c.rank))].sort((a, b) => a - b);
-    let straight = false;
-    if (five && ranks.length === 5) {
-      straight = ranks[4] - ranks[0] === 4 || ranks.join(",") === "2,3,4,5,14";
-    }
-    const tickerFlush = flush && (cards[0].suit === 1 || cards[0].suit === 3) && cards.every((c) => !c.bridged && c.q === cards[0].q);
-    const all = cards.map((c) => c.id);
-    const g0 = groups[0]?.length || 0;
-    const g1 = groups[1]?.length || 0;
-    if (straight && flush) return { hand: "gradrun", scoring: all };
-    if (g0 >= 4) return { hand: "stampede", scoring: groups[0].slice(0, 4).map((c) => c.id) };
-    if (tickerFlush) return { hand: "stockflush", scoring: all };
-    if (g0 === 3 && g1 >= 2) return { hand: "book", scoring: all };
-    if (flush) return { hand: "flush", scoring: all };
-    if (straight) return { hand: "run", scoring: all };
-    if (g0 === 3) return { hand: "pile", scoring: groups[0].map((c) => c.id) };
-    if (g0 === 2 && g1 === 2) return { hand: "double", scoring: [...groups[0], ...groups[1]].map((c) => c.id) };
-    const suits = new Set(cards.map((c) => c.suit));
-    if (suits.size === 4) {
-      const pick: number[] = [];
-      for (const u of [0, 1, 2, 3] as Suit[]) {
-        const best = cards.filter((c) => c.suit === u).sort((a, b) => b.rank - a.rank)[0];
-        pick.push(best.id);
-      }
-      return { hand: "index", scoring: ids.filter((i) => pick.includes(i)) };
-    }
-    if (g0 === 2) return { hand: "echo", scoring: groups[0].map((c) => c.id) };
-    const hi = cards.slice().sort((a, b) => b.rank - a.rank)[0];
-    return { hand: "solo", scoring: hi ? [hi.id] : [] };
+  // ------------------------------------------------------------ figures and their numbers
+  ageHours(l: Launch): number {
+    return (this.s.editionAt - l.a) / 3600;
   }
-
-  handValue(h: HandId): { chips: number; mult: number } {
-    const d = HAND[h];
-    const lv = this.s.levels[h] - 1;
-    return { chips: d.chips + d.upChips * lv, mult: d.mult + d.upMult * lv };
-  }
-
-  /** Scores a hand without changing state (used for the preview and by play). */
-  score(ids: number[], firstHand: boolean, lastHand: boolean): Scored {
-    const s = this.s;
-    const { hand, scoring } = this.evaluate(ids);
-    const base = this.handValue(hand);
-    let chips = base.chips;
-    let mult = base.mult;
-    if (this.bossNow() === "slip") {
-      chips = Math.floor(chips / 2);
-      mult = Math.max(1, Math.floor(mult / 2));
-    }
-    const steps: Step[] = [{ kind: "base", chips, mult, label: HAND[hand].name }];
-    const played = ids.map((i) => this.card(i));
-    const scored = scoring.map((i) => this.card(i));
-    const ins = s.insiders;
-
-    for (const c of scored) {
-      if (this.debuffed(c)) {
-        steps.push({ kind: "debuff", card: c.id, label: "Debuffed" });
-        continue;
-      }
-      let times = 1;
-      if (c.enh === "hot") times += 1 + (has(s, "potato") ? 1 : 0);
-      for (let t = 0; t < times; t++) {
-        const rc = RANK_CHIPS(c.rank);
-        chips += rc;
-        steps.push({ kind: "card", card: c.id, chips: rc, label: t > 0 ? "Again!" : undefined });
-        const e: Enh | null = c.enh;
-        if (e === "pump") {
-          mult += 4;
-          steps.push({ kind: "card", card: c.id, mult: 4, label: "Pump" });
-        } else if (e === "dip") {
-          chips += 30;
-          steps.push({ kind: "card", card: c.id, chips: 30, label: "Dip" });
-        } else if (e === "grad") {
-          mult *= 1.5;
-          steps.push({ kind: "card", card: c.id, xmult: 1.5, label: "Graduated" });
-        }
-        ins.forEach((j, ji) => {
-          const add = (st: Omit<Step, "kind" | "ins">) => {
-            if (st.chips) chips += st.chips;
-            if (st.mult) mult += st.mult;
-            if (st.xmult) mult *= st.xmult;
-            steps.push({ kind: "insider", ins: ji, card: c.id, ...st });
-          };
-          const st = cardInsider(j.id, c, this.ageHours(c));
-          if (st) add(st);
-        });
-      }
-    }
-
-    const ranks = new Map<number, number>();
-    for (const c of played) ranks.set(c.rank, (ranks.get(c.rank) || 0) + 1);
-    const maxSame = Math.max(0, ...ranks.values());
-    const allSuit = played.length === 5 && played.every((c) => c.suit === played[0].suit);
-    ins.forEach((j, ji) => {
-      const add = (st: Omit<Step, "kind" | "ins">) => {
-        if (st.chips) chips += st.chips;
-        if (st.mult) mult += st.mult;
-        if (st.xmult) mult *= st.xmult;
-        steps.push({ kind: "insider", ins: ji, ...st });
-      };
-      switch (j.id) {
-        case "ape":
-          add({ mult: 4 });
-          break;
-        case "echo":
-          if (maxSame >= 2) add({ mult: 8 });
-          break;
-        case "pile":
-          if (maxSame >= 3) add({ mult: 12 });
-          break;
-        case "climber":
-          if (hand === "run" || hand === "gradrun") add({ mult: 12 });
-          break;
-        case "purist":
-          if (allSuit) add({ mult: 10 });
-          break;
-        case "paper":
-          if (s.discardedRound > 0) add({ chips: 20 * s.discardedRound });
-          break;
-        case "copium":
-          if (lastHand) add({ mult: 15 });
-          break;
-        case "diamond":
-          if (s.discards > 0) add({ mult: 4 * s.discards });
-          break;
-        case "bag":
-          if (j.v > 0) add({ mult: j.v });
-          break;
-        case "sniper":
-          if (played.length <= 3) add({ xmult: 2 });
-          break;
-        case "index": {
-          const su = new Set(scored.map((c) => c.suit));
-          if (su.size === 4) add({ xmult: 2 });
-          break;
-        }
-        case "front":
-          if (firstHand) add({ xmult: 3 });
-          break;
-        case "bonding":
-          if (j.v > 0) add({ xmult: 1 + 0.25 * j.v });
-          break;
-      }
+  /** The top-curve launch on your rods (Valedictorian's pick). */
+  topSlot(): number {
+    let best = 0;
+    this.s.squad.forEach((l, i) => {
+      const b = this.s.squad[best];
+      if (l.p > b.p || (l.p === b.p && l.t < b.t)) best = i;
     });
-
-    mult = Math.round(mult * 100) / 100;
-    let total = Math.floor(chips * mult);
-    let zeroed: string | undefined;
-    if (this.bossNow() === "wash" && s.typesRound.includes(hand)) {
-      total = 0;
-      zeroed = "Wash Trade: hand type already played";
-    }
-    return { hand, level: s.levels[hand], played: ids, scoring, steps, chips, mult, total, zeroed };
+    return best;
+  }
+  /** Which coaches give a figure each stat ("base" when its own number does). Same rule the engine plays by. */
+  statSources(l: Launch): Keyed<"power" | "pace" | "grip", string[]> {
+    const s = this.s;
+    const age = this.ageHours(l);
+    const up = l.x !== null && l.x >= 1500;
+    const out = { power: [] as string[], pace: [] as string[], grip: [] as string[] };
+    if (l.p >= STAT.power.at) out.power.push("base");
+    else if (has(s, "moonboy") && l.p >= 300) out.power.push("moonboy");
+    if (has(s, "maxi0") && l.u === 0) out.power.push("maxi0");
+    if (has(s, "maxi1") && l.u === 1) out.power.push("maxi1");
+    if (has(s, "snob") && l.s.length <= 3) out.power.push("snob");
+    if (has(s, "pumpchaser") && up) out.power.push("pumpchaser");
+    if (l.k >= STAT.pace.at) out.pace.push("base");
+    else if (has(s, "volume") && l.k >= 3) out.pace.push("volume");
+    if (has(s, "maxi3") && l.u === 3) out.pace.push("maxi3");
+    if (has(s, "early") && age < 6) out.pace.push("early");
+    if (has(s, "pumpchaser") && up) out.pace.push("pumpchaser");
+    if (l.h >= STAT.grip.at) out.grip.push("base");
+    else if (has(s, "whale") && l.h >= 2) out.grip.push("whale");
+    if (has(s, "maxi2") && l.u === 2) out.grip.push("maxi2");
+    if (has(s, "dip") && l.x !== null && l.x < 0) out.grip.push("dip");
+    if (has(s, "oldmoney") && age >= 24) out.grip.push("oldmoney");
+    return out;
+  }
+  stats(slot: number): { power: boolean; pace: boolean; grip: boolean } {
+    const src = this.statSources(this.s.squad[slot]);
+    return { power: src.power.length > 0, pace: src.pace.length > 0, grip: src.grip.length > 0 };
   }
 
-  // ------------------------------------------------------------ shop
+  /** The squad slots a coach works on right now: what lights up when you hover it. Same checks the match uses. */
+  coachSlots(id: string): number[] {
+    const s = this.s;
+    const all = s.squad.map((_, i) => i);
+    const q = s.squad;
+    switch (id) {
+      case "airdrop":
+        return all.filter((i) => q[i].d);
+      case "valedictorian":
+        return [this.topSlot()];
+      case "pile":
+        return [3, 4, 5, 6, 7];
+      case "purist":
+        return q[8].u === q[9].u && q[9].u === q[10].u ? [8, 9, 10] : [];
+      case "index":
+        return new Set([q[1], q[2], q[8], q[9], q[10]].map((l) => l.u)).size === 4 ? [1, 2, 8, 9, 10] : [];
+      case "potato":
+        return all.filter((i) => this.stats(i).pace);
+      case "diamond":
+        return [0];
+    }
+    return all.filter((i) => {
+      const src = this.statSources(q[i]);
+      return src.power.includes(id) || src.pace.includes(id) || src.grip.includes(id);
+    });
+  }
+
+  baseTouches(first: boolean): number {
+    const s = this.s;
+    const q = s.squad;
+    let n = BASE_TOUCHES;
+    if (has(s, "pockets")) n++;
+    if (has(s, "purist") && q[8].u === q[9].u && q[9].u === q[10].u) n++;
+    if (has(s, "index") && new Set([q[1], q[2], q[8], q[9], q[10]].map((l) => l.u)).size === 4) n++;
+    if (has(s, "bonding")) n += Math.min(2, Math.floor(s.cleared / 4));
+    if (has(s, "front") && first) n += 2;
+    if (s.match?.boss === "slip") n--;
+    return Math.max(1, n);
+  }
+  blockBase(): number {
+    return BASE_BLOCKS + this.s.drills.block;
+  }
+
+  /** Can your rod move that way right now (boss rules included)? */
+  canMove(side: Side, r: number, d: number, off = this.m.off): boolean {
+    if (d !== -1 && d !== 1) return false;
+    const m = this.m;
+    if (side === 0) {
+      if (m.pulled === r || m.frozen === r) return false;
+      if (r === 0 && m.boss === "lockup") return false;
+    }
+    const o = off[side][r] + d;
+    return o >= RODS[r].min && o <= RODS[r].max;
+  }
+  /** What a slide of your rod costs in touches now: 0 when a free slide pays for it. */
+  slideCost(r: number): number {
+    const m = this.m;
+    if (m.free[r] > 0 || m.freeAny > 0) return 0;
+    return m.boss === "gasspike" ? 2 : 1;
+  }
+
+  pulledArr(): number[] {
+    return [this.m.pulled, -1];
+  }
+  ballLane(off = this.m.off, ball = this.m.ball): number {
+    return laneOf(ball.rod, off[ball.side][ball.rod], ball.fig);
+  }
+
+  /** Power on a shot of yours, from every source, before it is taken. */
+  shotPower(slot: number, rod: number, tr: Trace, touchesLeft: number, afterPass: boolean): number {
+    const s = this.s;
+    const m = this.m;
+    // power is an attacker's thing; Pile-in Party lends it to the midfield. From further back, find a clean lane.
+    if (rod < 2 || (rod === 2 && !has(s, "pile"))) return 0;
+    let p = this.stats(slot).power ? 1 : 0;
+    if (m.shots < s.drills.shoot) p++;
+    if (m.freekick > 0) p++;
+    if (has(s, "pile") && rod === 2) p++;
+    if (has(s, "climber") && tr.bounces > 0) p++;
+    if (has(s, "copium") && touchesLeft === 1) p++;
+    if (has(s, "sniper") && afterPass) p++;
+    if (has(s, "valedictorian") && slot === this.topSlot()) p = Math.max(p, 2);
+    return p;
+  }
+  /** Vibe Check: a figure needs a stat to shoot. */
+  mayShoot(slot: number): boolean {
+    if (this.m.boss !== "vcheck") return true;
+    const st = this.stats(slot);
+    return st.power || st.pace || st.grip;
+  }
+
+  /** Every kick you can make from the ball now, with its path and how it would end. */
+  myKicks(off = this.m.off, ball = this.m.ball, touches = this.m.touches, afterPass = this.m.afterPass) {
+    const m = this.m;
+    const lane = laneOf(ball.rod, off[0][ball.rod], ball.fig);
+    const slot = slotOf(ball.rod, ball.fig);
+    const out: { kick: Kick; tr: Trace; power: number; open: boolean; beaten: number; at: Trace["blockers"][number] | null }[] = [];
+    for (const kick of KICKS) {
+      if (kick.r !== 4 && kick.r <= ball.rod) continue;
+      const tr = trace(off, this.pulledArr(), 0, ball.rod, lane, kick, kick.r === 4 ? m.drift : 0);
+      if (!tr.legal) continue;
+      if (kick.r === 4 && !this.mayShoot(slot)) continue;
+      const power = kick.r === 4 ? this.shotPower(slot, ball.rod, tr, touches, afterPass) : 0;
+      const ghost = kick.r !== 4 && m.longball;
+      const res = ghost ? { at: null, beaten: 0 } : resolveBlock(tr.blockers, power, false, m.boss === "bell" ? FINAL_KEEPER : 1);
+      out.push({ kick, tr, power, open: !res.at, beaten: res.beaten, at: res.at });
+    }
+    return out;
+  }
+
+  /** How dangerous your ball is, as the rival reads it. Higher is worse for them. */
+  danger(off: number[][], ball = this.m.ball, deep = true): number {
+    const m = this.m;
+    let shots = 0;
+    let pass = 0;
+    const passes = this.ai().passes;
+    for (const o of this.myKicks(off, ball, Math.max(2, m.touches), m.afterPass)) {
+      if (!o.open) continue;
+      if (o.kick.r === 4) shots++;
+      else if (passes) {
+        let v = 8 * (o.kick.r - ball.rod);
+        if (deep && this.myKicks(off, { side: 0, rod: o.kick.r, fig: o.tr.to }, 2, true).some((k) => k.open && k.kick.r === 4)) v += 30;
+        pass = Math.max(pass, v);
+      }
+    }
+    let v = shots ? 100 + 25 * (shots - 1) : 0;
+    v += pass;
+    if (deep && this.ai().look) {
+      for (const d of [-1, 1]) {
+        if (!this.canMove(0, ball.rod, d, off)) continue;
+        const o2 = [off[0].slice(), off[1]];
+        o2[0][ball.rod] += d;
+        const n = this.myKicks(o2, ball, 2, false).filter((k) => k.open && k.kick.r === 4).length;
+        v += 18 * Math.min(2, n);
+      }
+    }
+    return v;
+  }
+
+  /** The rival's best single slide against your ball, or null to stay put. Deterministic: ties keep the seed's order. */
+  bestDefence(off: number[][], ball = this.m.ball): { r: number; d: Dir } | null {
+    const m = this.m;
+    let best = this.danger(off, ball);
+    let mv: { r: number; d: Dir } | null = null;
+    for (const r of m.pref) {
+      for (const d of [-1, 1] as Dir[]) {
+        if (!this.canMove(1, r, d, off)) continue;
+        const o2 = [off[0], off[1].slice()];
+        o2[1][r] += d;
+        const v = this.danger(o2, ball);
+        if (v < best - 1e-9) {
+          best = v;
+          mv = { r, d };
+        }
+      }
+    }
+    return mv;
+  }
+
+  /** Where the rival's rods end up after it reacts to the position `off`. */
+  reactTo(off: number[][], ball = this.m.ball, n = this.ai().react): { off: number[][]; moves: { r: number; d: Dir }[] } {
+    const moves: { r: number; d: Dir }[] = [];
+    let cur = off;
+    for (let k = 0; k < n; k++) {
+      const mv = this.bestDefence(cur, ball);
+      if (!mv) break;
+      cur = [cur[0], cur[1].slice()];
+      cur[1][mv.r] += mv.d;
+      moves.push(mv);
+    }
+    return { off: cur, moves };
+  }
+
+  // ------------------------------------------------------------ the rival with the ball
+  /** The rival's kicks from its ball, against your figures where they stand in `off`. */
+  theirKicks(off = this.m.off, ball = this.m.ball) {
+    const lane = laneOf(ball.rod, off[1][ball.rod], ball.fig);
+    const pw = this.ai().power;
+    const keeperHolds = has(this.s, "diamond");
+    const out: { kick: Kick; tr: Trace; open: boolean; at: Trace["blockers"][number] | null; beaten: number; value: number }[] = [];
+    for (const kick of KICKS) {
+      if (kick.r !== 4 && kick.r <= ball.rod) continue;
+      const tr = trace(off, this.pulledArr(), 1, ball.rod, lane, kick);
+      if (!tr.legal) continue;
+      const res = resolveBlock(tr.blockers, kick.r === 4 ? pw : 0, keeperHolds);
+      out.push({ kick, tr, open: !res.at, at: res.at, beaten: res.beaten, value: 0 });
+    }
+    for (const o of out) {
+      if (!o.open) continue;
+      if (o.kick.r === 4) o.value = 100;
+      else {
+        o.value = 10 * (o.kick.r - ball.rod);
+        if (this.theirKicks2(off, { side: 1, rod: o.kick.r, fig: o.tr.to })) o.value += 30;
+      }
+    }
+    return out;
+  }
+  private theirKicks2(off: number[][], ball: Ball): boolean {
+    const lane = laneOf(ball.rod, off[1][ball.rod], ball.fig);
+    const pw = this.ai().power;
+    const keeperHolds = has(this.s, "diamond");
+    const tr0 = (d: Dir) => trace(off, this.pulledArr(), 1, ball.rod, lane, { r: 4, d });
+    for (const d of [0, -1, 1] as Dir[]) {
+      const tr = tr0(d);
+      if (tr.legal && !resolveBlock(tr.blockers, pw, keeperHolds).at) return true;
+    }
+    return false;
+  }
+  /** The rival's plan with the ball: its best open kick, or the slide that opens the most. */
+  aiChoose(off = this.m.off): NonNullable<Match["intent"]> {
+    const m = this.m;
+    const ks = this.theirKicks(off).filter((k) => k.open);
+    if (ks.length) {
+      let best = ks[0];
+      for (const k of ks) if (k.value > best.value) best = k;
+      return { kind: "kick", kick: best.kick };
+    }
+    let pick: { r: number; d: Dir } | null = null;
+    let top = -1;
+    for (const r of [m.ball.rod, ...m.pref.filter((x) => x !== m.ball.rod)]) {
+      if (r < m.ball.rod) continue;
+      for (const d of [-1, 1] as Dir[]) {
+        if (!this.canMove(1, r, d, off)) continue;
+        const o2 = [off[0], off[1].slice()];
+        o2[1][r] += d;
+        const all = this.theirKicks(o2);
+        const v = Math.max(0, ...all.map((k) => k.value)) + all.length * 0.5;
+        if (v > top) {
+          top = v;
+          pick = { r, d };
+        }
+      }
+    }
+    if (!pick) {
+      // boxed in: shuffle the keeper a lane
+      const d: Dir = this.canMove(1, 0, 1, off) ? 1 : -1;
+      pick = { r: 0, d };
+    }
+    return { kind: "slide", ...pick };
+  }
+  /** The kicks the rival threatens right now: all of them when it reads you, only its call when it commits. */
+  threats() {
+    const m = this.m;
+    if (this.s.phase !== "defend") return [];
+    const ks = this.theirKicks().filter((k) => k.open);
+    if (this.ai().read) return ks;
+    const it = m.intent;
+    if (it && it.kind === "kick") {
+      const k = this.theirKicks().find((x) => x.kick.r === it.kick.r && x.kick.d === it.kick.d);
+      return k ? [k] : [];
+    }
+    return [];
+  }
+
+  // ------------------------------------------------------------ possession
+  private startPossession(side: Side, rod: number, fig: number, why: "kickoff" | "won" | "lost" | "dead") {
+    const s = this.s;
+    const m = this.m;
+    if (m.poss[0] + m.poss[1] >= 2 * m.limit) {
+      this.endMatch(m.score[0] > m.score[1]);
+      return;
+    }
+    m.poss[side]++;
+    m.ball = { side, rod, fig };
+    if (side === 0) {
+      s.phase = "attack";
+      const first = m.poss[0] === 1;
+      m.touches = this.baseTouches(first);
+      m.free = RODS.map((d, r) => {
+        let pace = false;
+        for (let f = 0; f < d.n; f++) if (this.stats(slotOf(r, f)).pace) pace = true;
+        return pace && m.pulled !== r ? (has(s, "potato") ? 2 : 1) : 0;
+      });
+      m.freeAny = s.drills.feet + (has(s, "gas") ? 1 : 0);
+      m.passes = 0;
+      m.chain = [slotOf(rod, fig)];
+      m.afterPass = false;
+      m.gripUsed = [];
+      m.echoUsed = false;
+      m.freekick = 0;
+      m.longball = false;
+      m.dummy = 0;
+      // the rival gets its defence set before your first touch
+      this.react(SETUP_SLIDES);
+    } else {
+      s.phase = "defend";
+      m.aiTouches = this.ai().touches;
+      m.blockSlides = this.blockBase() + (why === "lost" && has(s, "paper") ? 1 : 0);
+      m.intent = this.aiChoose();
+    }
+  }
+
+  private turnover(to: Side, why: "touches" | "blocked" | "dead") {
+    this.events.push({ e: "turnover", to, why });
+    // a dead ball goes to the keeper of the side that gets it
+    this.startPossession(to, 0, 0, to === 1 ? "lost" : "dead");
+  }
+
+  private scored(side: Side) {
+    const m = this.m;
+    m.score[side]++;
+    if (side === 0) this.s.goalsFor++;
+    else this.s.goalsAgainst++;
+    if (m.score[side] >= m.target) {
+      this.endMatch(side === 0);
+      return;
+    }
+    const other: Side = side === 0 ? 1 : 0;
+    this.events.push({ e: "kickoff", side: other });
+    this.startPossession(other, 2, 2, "kickoff");
+  }
+
+  /** Full time. A friendly or a league match may end level: you go through without the win fans. A boss club has to be beaten. */
+  private endMatch(won: boolean) {
+    const s = this.s;
+    const m = this.m;
+    const draw = !won && m.score[0] === m.score[1] && m.kind < 2;
+    this.events.push({ e: "end", won, draw });
+    if (!won && !draw) {
+      s.phase = "over";
+      return;
+    }
+    if (won) s.cleared++;
+    else s.draws++;
+    const kind = ["friendly", "league match", "boss club"][m.kind];
+    const rows: [string, number][] = [won ? [`Win (${kind})`, WIN_FANS[m.kind]] : [`Draw (${kind}): through, no win fans`, 0]];
+    if (m.fans) rows.push(["Goals and balls won", m.fans]);
+    if (won && has(s, "mm")) rows.push(["Market Maker", 3]);
+    const total = rows.reduce((n, r) => n + r[1], 0);
+    s.fulltime = { rows, total };
+    if (this.isFinal(m.kind)) {
+      s.fans += total;
+      s.phase = "won";
+      return;
+    }
+    s.phase = "fulltime";
+  }
+
+  /** How good a goal was. Skill only: passes, angles, walls, blockers beaten, distance, touches to spare. */
+  private rate(tr: Trace, beaten: number, rod: number, kick: Kick, touchesLeft: number): { total: number; style: string } {
+    const m = this.m;
+    let v = 100 + 50 * m.passes + (kick.d !== 0 ? 75 : 0) + 150 * tr.bounces + 200 * beaten + (rod <= 2 ? 120 : 0) + 40 * touchesLeft;
+    v *= (1 + 0.25 * (this.s.round - 1)) * (m.kind === 2 ? 1.5 : 1);
+    const style =
+      beaten > 0
+        ? "Power drive"
+        : tr.bounces > 0
+          ? "Bank shot"
+          : rod <= 2
+            ? "Long range"
+            : m.passes >= 2
+              ? "Team move"
+              : m.afterPass
+                ? "One-touch finish"
+                : kick.d !== 0
+                  ? "Angled finish"
+                  : "Tap-in";
+    return { total: Math.round(v), style };
+  }
+
+  // ------------------------------------------------------------ shelf
   private makeOffers(): Offer[] {
     const s = this.s;
-    const rnd = stream(s.seed, "shop", s.shopVisit, s.rerolls);
+    const rnd = stream(s.seed, "room", s.visit);
     const out: Offer[] = [];
-    const taken = new Set(s.insiders.map((j) => j.id));
+    const taken = new Set(s.coaches.map((j) => j.id));
     for (let k = 0; k < 2; k++) {
-      const pool = INSIDERS.filter((j) => !taken.has(j.id));
+      const pool = COACHES.filter((j) => !taken.has(j.id));
       const j = pickWeighted(pool, (x) => RARITY_WEIGHT[x.rarity], rnd);
       if (!j) break;
       taken.add(j.id);
-      out.push({ kind: "insider", id: j.id, cost: j.cost, sold: false });
+      out.push({ kind: "coach", id: j.id, cost: j.cost, sold: false });
     }
-    const hand = pickWeighted(HANDS, (h) => ({ solo: 3, echo: 10, index: 7, double: 9, pile: 8, run: 7, flush: 7, book: 5, stockflush: 2, stampede: 3, gradrun: 1 })[h.id], rnd)!;
-    out.push({ kind: "alpha", id: hand.id, cost: 3, sold: false });
-    const mv = MOVES[Math.floor(rnd() * MOVES.length)];
-    out.push({ kind: "move", id: mv.id, cost: mv.cost, sold: false });
+    const open = DRILLS.filter((d) => s.drills[d.id] < d.max);
+    if (open.length) {
+      const d = open[Math.floor(rnd() * open.length)];
+      out.push({ kind: "drill", id: d.id, cost: drillCost(s.drills[d.id]), sold: false });
+    }
+    const pl = PLAYS[Math.floor(rnd() * PLAYS.length)];
+    out.push({ kind: "play", id: pl.id, cost: pl.cost, sold: false });
     return out;
-  }
-  rerollCost(): number {
-    return 4 + this.s.rerolls;
   }
   sellValue(o: Owned): number {
     return Math.max(1, Math.floor(o.paid / 2));
@@ -444,201 +783,319 @@ export class Run {
   // ------------------------------------------------------------ actions
   apply(a: Action): void {
     const s = this.s;
-    this.lastScored = null;
-    this.lastDrawn = [];
-    const fail = (m: string): never => {
-      throw new Error(m);
+    this.events = [];
+    const fail = (msg: string): never => {
+      throw new Error(msg);
     };
     switch (a.t) {
       case "go": {
-        if (s.phase !== "blind") fail("not choosing a blind");
-        s.phase = "round";
-        s.round++;
-        s.score = 0;
-        s.target = targetFor(s.ante, s.blind, s.bosses[s.ante - 1]);
-        const boss = this.bossNow();
-        s.hands = boss === "bell" ? 3 : HANDS_PER_ROUND;
-        s.discards = boss === "gasspike" ? 0 : DISCARDS_PER_ROUND + (has(s, "gas") ? 1 : 0);
-        s.handsPlayedRound = 0;
-        s.discardedRound = 0;
-        s.typesRound = [];
-        s.hand = [];
-        s.used = [];
-        s.draw = shuffle(
-          s.deck.map((c) => c.id),
-          stream(s.seed, "deal", s.round),
-        );
-        this.lastDrawn = this.drawUp();
+        if (s.phase !== "fixture") fail("not before a match");
+        const boss = this.bossOf();
+        const level = this.levelOf();
+        const rnd = stream(s.seed, "match", s.round, s.kind);
+        const final = boss === "bell";
+        s.match = {
+          kind: s.kind,
+          club: this.clubName(),
+          boss,
+          level,
+          target: final ? 3 : GOALS_TO_WIN,
+          limit: final ? POSSESSIONS + 4 : POSSESSIONS,
+          score: [0, 0],
+          poss: [0, 0],
+          off: START_OFF.map((o) => o.slice()),
+          ball: { side: 0, rod: 2, fig: 2 },
+          touches: 0,
+          free: [0, 0, 0, 0],
+          freeAny: 0,
+          passes: 0,
+          chain: [],
+          afterPass: false,
+          gripUsed: [],
+          echoUsed: false,
+          freekick: 0,
+          longball: false,
+          dummy: 0,
+          shots: 0,
+          saves: 0,
+          aiTouches: 0,
+          blockSlides: 0,
+          intent: null,
+          pulled: boss === "rug" ? 1 : -1,
+          frozen: boss === "halt" ? [1, 2][Math.floor(rnd() * 2)] : -1,
+          drift: boss === "depeg" ? (rnd() < 0.5 ? -1 : 1) : 0,
+          pref: shuffle([0, 1, 2, 3], rnd),
+          fans: 0,
+        };
+        this.events.push({ e: "kickoff", side: 0 });
+        this.startPossession(0, 2, 2, "kickoff");
         break;
       }
-      case "play": {
-        if (s.phase !== "round") fail("not in a round");
-        const ids = this.validSel(a.c, this.minPlay(), 5);
-        const first = s.handsPlayedRound === 0;
-        const last = s.hands === 1;
-        const sc = this.score(ids, first, last);
-        this.lastScored = sc;
-        s.hands--;
-        s.handsPlayedRound++;
-        s.handsTotal++;
-        s.typesRound.push(sc.hand);
-        s.score += sc.total;
-        if (!s.best || sc.total > s.best.total)
-          s.best = {
-            total: sc.total,
-            hand: sc.hand,
-            cards: ids.map((i) => {
-              const c = this.card(i);
-              return { t: c.l.t, s: c.l.s, c: c.l.c, rank: c.rank, suit: c.suit };
-            }),
-          };
-        s.hand = s.hand.filter((i) => !ids.includes(i));
-        s.used.push(...ids);
-        if (s.score >= s.target) {
-          this.winRound();
-        } else if (s.hands <= 0) {
-          s.phase = "over";
-        } else {
-          this.lastDrawn = this.drawUp();
-          if (s.hand.length === 0) s.phase = "over";
+      case "slide": {
+        const m = this.m;
+        const r = a.r;
+        if (!(r >= 0 && r <= 3)) fail("no such rod");
+        if (!this.canMove(0, r, a.d)) fail("that rod can't go there");
+        if (s.phase === "attack") {
+          const cost = this.slideCost(r);
+          if (cost > m.touches) fail("not enough touches");
+          if (m.free[r] > 0) m.free[r]--;
+          else if (m.freeAny > 0) m.freeAny--;
+          else m.touches -= cost;
+          if (cost) s.touchesTotal++;
+          m.off[0][r] += a.d;
+          m.afterPass = false;
+          this.events.push({ e: "slide", side: 0, r, d: a.d, why: "you" });
+          if (m.boss === "wash") {
+            const facing = [0, 3, 2, 1][r];
+            if (this.canMove(1, facing, a.d)) {
+              m.off[1][facing] += a.d;
+              this.events.push({ e: "slide", side: 1, r: facing, d: a.d, why: "mirror" });
+            }
+          }
+          if (m.touches <= 0) this.turnover(1, "touches");
+          else {
+            this.react();
+            this.afterTouch();
+          }
+        } else if (s.phase === "defend") {
+          if (m.blockSlides <= 0) fail("no block slides left: hold");
+          m.blockSlides--;
+          m.off[0][r] += a.d;
+          this.events.push({ e: "slide", side: 0, r, d: a.d, why: "block" });
+        } else fail("not during a match");
+        break;
+      }
+      case "kick": {
+        if (s.phase !== "attack") fail("you don't have the ball");
+        const m = this.m;
+        const kick: Kick = { r: a.r, d: a.d };
+        if (!(kick.r >= 1 && kick.r <= 4) || ![-1, 0, 1].includes(kick.d)) fail("no such kick");
+        const ball = m.ball;
+        const slot = slotOf(ball.rod, ball.fig);
+        const isShot = kick.r === 4;
+        if (!isShot && kick.r <= ball.rod) fail("passes go forward");
+        let tr = trace(m.off, this.pulledArr(), 0, ball.rod, this.ballLane(), kick, isShot ? m.drift : 0);
+        if (!tr.legal) fail(isShot ? "that shot misses the goal" : "no figure of yours there");
+        if (isShot && !this.mayShoot(slot)) fail("Vibe Check: this figure has no stat to shoot with");
+        const free = !isShot && kick.d === 0 && has(s, "echo") && !m.echoUsed;
+        const touchesBefore = m.touches;
+        if (free) m.echoUsed = true;
+        else m.touches--;
+        s.touchesTotal++;
+        if (!isShot && m.boss === "jam") {
+          // the pass lands late: they get their reaction before the ball arrives
+          this.react();
+          tr = trace(m.off, this.pulledArr(), 0, ball.rod, this.ballLane(), kick, 0);
+        }
+        const power = isShot ? this.shotPower(slot, ball.rod, tr, touchesBefore, m.afterPass) : 0;
+        const res = !isShot && m.longball ? { at: null, beaten: 0 } : resolveBlock(tr.blockers, power, false, m.boss === "bell" ? FINAL_KEEPER : 1);
+        if (isShot) {
+          m.shots++;
+          if (m.freekick > 0) m.freekick--;
+        } else if (m.longball) m.longball = false;
+        if (res.at) {
+          let kept = false;
+          if (!isShot) {
+            if (this.stats(slot).grip && !m.gripUsed.includes(slot)) {
+              m.gripUsed.push(slot);
+              kept = true;
+            } else if (m.saves < s.drills.pass) {
+              m.saves++;
+              kept = true;
+            }
+          }
+          this.events.push({ e: "kick", side: 0, rod: ball.rod, fig: ball.fig, kick, steps: tr.steps, result: kept ? "kept" : "blocked", at: { rod: res.at.rod, fig: res.at.fig }, beaten: res.beaten, to: -1, drift: isShot ? m.drift : 0 });
+          if (kept) {
+            m.afterPass = false;
+            if (m.touches <= 0) this.turnover(1, "touches");
+            else {
+              if (m.boss !== "jam") this.react();
+              this.afterTouch();
+            }
+          } else {
+            this.events.push({ e: "turnover", to: 1, why: "blocked" });
+            this.startPossession(1, res.at.rod, res.at.fig, "lost");
+          }
+          break;
+        }
+        this.events.push({ e: "kick", side: 0, rod: ball.rod, fig: ball.fig, kick, steps: tr.steps, result: isShot ? "goal" : "pass", at: null, beaten: res.beaten, to: tr.to, drift: isShot ? m.drift : 0 });
+        if (isShot) {
+          const r = this.rate(tr, res.beaten, ball.rod, kick, m.touches);
+          m.fans += 1 + (has(s, "ape") ? 1 : 0) + (has(s, "airdrop") && s.squad[slot].d ? 2 : 0);
+          this.events.push({ e: "goal", side: 0, rating: r.total, style: r.style });
+          if (!s.best || r.total > s.best.total) {
+            const slots = [...new Set([...m.chain, slot])];
+            for (const extra of [8, 9, 10, 3, 4, 5, 6, 7]) if (slots.length < 5 && !slots.includes(extra)) slots.push(extra);
+            s.best = {
+              total: r.total,
+              style: r.style,
+              figs: slots.slice(0, 5).map((i) => {
+                const l = s.squad[i];
+                return { t: l.t, s: l.s, c: l.c, u: l.u };
+              }),
+            };
+          }
+          this.scored(0);
+          break;
+        }
+        m.ball = { side: 0, rod: kick.r, fig: tr.to };
+        m.passes++;
+        m.chain.push(slotOf(kick.r, tr.to));
+        m.afterPass = true;
+        if (m.touches <= 0) this.turnover(1, "touches");
+        else {
+          if (m.boss !== "jam") this.react();
+          this.afterTouch();
         }
         break;
       }
-      case "disc": {
-        if (s.phase !== "round") fail("not in a round");
-        if (s.discards <= 0) fail("no discards left");
-        const ids = this.validSel(a.c, 1, 5);
-        s.discards--;
-        s.discardedRound += ids.length;
-        for (const j of s.insiders) if (j.id === "bag") j.v += ids.length;
-        s.hand = s.hand.filter((i) => !ids.includes(i));
-        s.used.push(...ids);
-        this.lastDrawn = this.drawUp();
+      case "hold": {
+        if (s.phase !== "defend") fail("they don't have the ball");
+        const m = this.m;
+        const p = this.ai();
+        const plan = p.read || !m.intent ? this.aiChoose() : m.intent;
+        m.aiTouches--;
+        if (plan.kind === "slide") {
+          if (this.canMove(1, plan.r, plan.d)) m.off[1][plan.r] += plan.d;
+          this.events.push({ e: "slide", side: 1, r: plan.r, d: plan.d, why: "ai" });
+        } else {
+          const ball = m.ball;
+          const tr = trace(m.off, this.pulledArr(), 1, ball.rod, this.ballLane(), plan.kick);
+          if (!tr.legal) {
+            // a plan always lands where it aimed (your slides never move their figures); a dead ball if it ever doesn't
+            this.turnover(0, "dead");
+            break;
+          }
+          const res = resolveBlock(tr.blockers, plan.kick.r === 4 ? p.power : 0, has(s, "diamond"));
+          if (res.at) {
+            this.events.push({ e: "kick", side: 1, rod: ball.rod, fig: ball.fig, kick: plan.kick, steps: tr.steps, result: "blocked", at: { rod: res.at.rod, fig: res.at.fig }, beaten: res.beaten, to: -1, drift: 0 });
+            if (has(s, "bag")) m.fans++;
+            this.events.push({ e: "turnover", to: 0, why: "blocked" });
+            this.startPossession(0, res.at.rod, res.at.fig, "won");
+            break;
+          }
+          if (plan.kick.r === 4) {
+            this.events.push({ e: "kick", side: 1, rod: ball.rod, fig: ball.fig, kick: plan.kick, steps: tr.steps, result: "goal", at: null, beaten: res.beaten, to: -1, drift: 0 });
+            this.events.push({ e: "goal", side: 1, rating: 0, style: "" });
+            this.scored(1);
+            break;
+          }
+          this.events.push({ e: "kick", side: 1, rod: ball.rod, fig: ball.fig, kick: plan.kick, steps: tr.steps, result: "pass", at: null, beaten: 0, to: tr.to, drift: 0 });
+          m.ball = { side: 1, rod: plan.kick.r, fig: tr.to };
+        }
+        if (m.aiTouches <= 0) {
+          this.turnover(0, "dead");
+          break;
+        }
+        m.intent = this.aiChoose();
         break;
       }
       case "use": {
-        const id = s.moves[a.i];
-        if (!id) fail("no such move");
-        const mv = MOVE[id];
-        if (s.phase === "over" || s.phase === "won") fail("run is over");
-        if (mv.id === "treasury") {
-          s.money += Math.min(12, Math.max(0, s.money));
-        } else {
-          if (s.phase !== "round") fail("use this during a round");
-          const ids = this.validSel(a.c, mv.min, mv.max);
-          this.doMove(mv.id, ids);
-        }
-        s.moves.splice(a.i, 1);
+        const id = s.plays[a.i];
+        if (!id) fail("no such set piece");
+        const pl = PLAY[id];
+        if (pl.when === "attack" && s.phase !== "attack") fail("use it while you have the ball");
+        if (pl.when === "defend" && s.phase !== "defend") fail("use it while they have the ball");
+        if (pl.when === "any" && (s.phase === "over" || s.phase === "won")) fail("the season is over");
+        const m = s.match;
+        if (id === "freekick") m!.freekick++;
+        else if (id === "onetwo") m!.touches += 2;
+        else if (id === "dummy") m!.dummy += 2;
+        else if (id === "longball") m!.longball = true;
+        else if (id === "bus") m!.blockSlides += 3;
+        else if (id === "tickets") s.fans += Math.min(10, Math.max(0, s.fans));
+        s.plays.splice(a.i, 1);
+        this.events.push({ e: "play", id });
+        break;
+      }
+      case "swap": {
+        if (s.phase !== "fixture" && s.phase !== "room") fail("swap figures before a match");
+        const { a: i, b: j } = a;
+        if (!(i >= 0 && i < s.squad.length && j >= 0 && j < s.squad.length) || i === j) fail("no such figures");
+        [s.squad[i], s.squad[j]] = [s.squad[j], s.squad[i]];
         break;
       }
       case "sell": {
-        const j = s.insiders[a.i];
-        if (!j) fail("no such insider");
-        if (s.phase === "over" || s.phase === "won") fail("run is over");
-        s.money += this.sellValue(j);
-        s.insiders.splice(a.i, 1);
+        if (s.phase !== "fixture" && s.phase !== "room") fail("let a coach go before a match");
+        const j = s.coaches[a.i];
+        if (!j) fail("no such coach");
+        s.fans += this.sellValue(j);
+        s.coaches.splice(a.i, 1);
         break;
       }
-      case "cash": {
-        if (s.phase !== "cashout" || !s.cashout) fail("nothing to cash");
-        s.money += s.cashout!.total;
-        s.cashout = null;
-        s.phase = "shop";
-        s.shopVisit++;
-        s.rerolls = 0;
+      case "collect": {
+        const ft = s.fulltime;
+        if (s.phase !== "fulltime" || !ft) fail("nothing to collect");
+        s.fans += ft!.total;
+        s.fulltime = null;
+        s.match = null;
+        s.kind++;
+        if (s.kind > 2) {
+          s.kind = 0;
+          s.round++;
+        }
+        s.phase = "room";
+        s.visit++;
         s.offers = this.makeOffers();
         break;
       }
       case "buy": {
-        if (s.phase !== "shop") fail("shop is closed");
+        if (s.phase !== "room") fail("the dressing room is closed");
         const o = s.offers[a.i];
-        if (!o || o.sold) fail("not for sale");
-        if (s.money < o.cost) fail("not enough money");
-        if (o.kind === "insider") {
-          if (s.insiders.length >= MAX_INSIDERS) fail("insider slots full");
-          s.insiders.push({ id: o.id, v: 0, paid: o.cost });
-        } else if (o.kind === "alpha") {
-          s.levels[o.id as HandId]++;
+        if (!o || o.sold) fail("not on the shelf");
+        if (s.fans < o.cost) fail("not enough fans");
+        if (o.kind === "coach") {
+          if (s.coaches.length >= MAX_COACHES) fail("coach slots full");
+          s.coaches.push({ id: o.id, v: 0, paid: o.cost });
+        } else if (o.kind === "drill") {
+          const d = DRILLS.find((x) => x.id === o.id)!;
+          if (s.drills[d.id] >= d.max) fail("that drill is maxed");
+          s.drills[d.id]++;
         } else {
-          if (s.moves.length >= MAX_MOVES) fail("move slots full");
-          s.moves.push(o.id);
+          if (s.plays.length >= MAX_PLAYS) fail("set piece slots full");
+          s.plays.push(o.id);
         }
-        s.money -= o.cost;
+        s.fans -= o.cost;
         o.sold = true;
         break;
       }
-      case "roll": {
-        if (s.phase !== "shop") fail("shop is closed");
-        const c = this.rerollCost();
-        if (s.money < c) fail("not enough money");
-        s.money -= c;
-        s.rerolls++;
-        s.offers = this.makeOffers();
-        break;
-      }
       case "next": {
-        if (s.phase !== "shop") fail("shop is closed");
-        s.phase = "blind";
+        if (s.phase !== "room") fail("the dressing room is closed");
+        s.phase = "fixture";
         s.offers = [];
-        s.target = targetFor(s.ante, s.blind, s.bosses[s.ante - 1]);
         break;
       }
+      default:
+        fail("unknown action");
     }
     this.trail.push(a);
   }
 
-  private validSel(c: number[], min: number, max: number): number[] {
-    const ids = [...new Set(c)];
-    if (ids.length < min || ids.length > max) throw new Error(`select ${min === max ? min : `${min}-${max}`} cards`);
-    for (const i of ids) if (!this.s.hand.includes(i)) throw new Error("card not in hand");
-    return ids;
+  /** True while you have something legal to do with the ball: an affordable slide or a kick that lands. */
+  canAct(): boolean {
+    const m = this.m;
+    for (let r = 0; r < 4; r++) for (const d of [-1, 1]) if (this.canMove(0, r, d) && this.slideCost(r) <= m.touches) return true;
+    return this.myKicks().length > 0;
   }
 
-  private doMove(id: string, ids: number[]): void {
-    const s = this.s;
-    const cards = ids.map((i) => this.card(i));
-    if (id === "shill") for (const c of cards) c.rank = c.rank >= 14 ? 2 : c.rank + 1;
-    else if (id === "pump") for (const c of cards) c.enh = "pump";
-    else if (id === "hype") for (const c of cards) c.enh = "hot";
-    else if (id === "burn") {
-      s.deck = s.deck.filter((c) => !ids.includes(c.id));
-      s.hand = s.hand.filter((i) => !ids.includes(i));
-    } else if (id === "clone") {
-      const src = cards[0];
-      const copy: Card = { ...src, id: s.nextCardId++ };
-      s.deck.push(copy);
-      s.hand.push(copy.id);
-    } else if (id.startsWith("bridge")) {
-      const u = Number(id[6]) as Suit;
-      for (const c of cards) {
-        if (c.suit !== u) {
-          c.suit = u;
-          c.bridged = true;
-        }
-      }
-    }
+  /** Ends your possession when nothing legal is left (out of touches, or Gas Spike with one touch and no kick). */
+  private afterTouch() {
+    const m = this.m;
+    if (this.s.phase !== "attack") return;
+    if (m.touches <= 0 || !this.canAct()) this.turnover(1, "touches");
   }
 
-  private winRound(): void {
-    const s = this.s;
-    s.cleared++;
-    for (const j of s.insiders) if (j.id === "bonding") j.v++;
-    const reward = BLIND_REWARD[s.blind];
-    const interest = Math.min(5, Math.floor(Math.max(0, s.money) / 5));
-    const extra = s.insiders.filter((j) => j.id === "mm").length * 3;
-    s.cashout = { reward, handsLeft: s.hands, interest, extra, total: reward + s.hands + interest + extra };
-    s.hand = [];
-    s.draw = [];
-    if (s.blind === 2 && s.ante >= MAX_ANTE) {
-      s.money += s.cashout.total;
-      s.phase = "won";
+  /** The rival reacts to your touch (unless a Dummy Run has it frozen). */
+  private react(n = this.ai().react) {
+    const m = this.m;
+    if (m.dummy > 0) {
+      m.dummy--;
       return;
     }
-    if (s.blind === 2) {
-      s.ante++;
-      s.blind = 0;
-    } else s.blind++;
-    s.phase = "cashout";
+    const { off, moves } = this.reactTo(m.off, m.ball, n);
+    m.off = off.map((o) => o.slice());
+    for (const mv of moves) this.events.push({ e: "slide", side: 1, r: mv.r, d: mv.d, why: "react" });
   }
 
   summary() {
@@ -646,19 +1103,21 @@ export class Run {
     return {
       seed: s.seed,
       edition: s.edition,
-      ante: s.ante,
-      blind: s.blind,
+      round: s.round,
+      fixture: s.kind,
       cleared: s.cleared,
+      draws: s.draws,
       won: s.phase === "won",
       over: s.phase === "over" || s.phase === "won",
       best: s.best,
-      hands: s.handsTotal,
-      money: s.money,
+      goals: s.goalsFor,
+      against: s.goalsAgainst,
+      fans: s.fans,
     };
   }
 }
 
-/** Re-runs an action list; throws on the first illegal move. */
+/** Re-runs an action list; throws on the first illegal action. */
 export function rerun(ed: Edition, seed: string, actions: Action[]): Run {
   const r = new Run(ed, seed);
   for (const a of actions) r.apply(a);
@@ -672,20 +1131,22 @@ export function encodeTrail(actions: Action[]): string {
       switch (a.t) {
         case "go":
           return "g";
-        case "play":
-          return "p" + a.c.join(".");
-        case "disc":
-          return "d" + a.c.join(".");
+        case "slide":
+          return `s${a.r}.${a.d + 1}`;
+        case "kick":
+          return `k${a.r}.${a.d + 1}`;
+        case "hold":
+          return "h";
         case "use":
-          return "u" + [a.i, ...a.c].join(".");
+          return "u" + a.i;
+        case "swap":
+          return `w${a.a}.${a.b}`;
         case "sell":
-          return "s" + a.i;
-        case "cash":
+          return "x" + a.i;
+        case "collect":
           return "c";
         case "buy":
           return "b" + a.i;
-        case "roll":
-          return "r";
         case "next":
           return "n";
       }
@@ -698,27 +1159,53 @@ export function decodeTrail(str: string): Action[] {
   return str.split("_").map((tok): Action => {
     const k = tok[0];
     const nums = tok.length > 1 ? tok.slice(1).split(".").map((x) => Number(x)) : [];
-    if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 100000)) throw new Error("bad trail");
+    if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 100)) throw new Error("bad trail");
+    const two = () => {
+      if (nums.length !== 2) throw new Error("bad trail");
+      return nums;
+    };
+    const one = () => {
+      if (nums.length !== 1) throw new Error("bad trail");
+      return nums[0];
+    };
+    const none = () => {
+      if (nums.length) throw new Error("bad trail");
+    };
     switch (k) {
       case "g":
+        none();
         return { t: "go" };
-      case "p":
-        return { t: "play", c: nums };
-      case "d":
-        return { t: "disc", c: nums };
+      case "s": {
+        const [r, d] = two();
+        if (d !== 0 && d !== 2) throw new Error("bad trail");
+        return { t: "slide", r, d: (d - 1) as Dir };
+      }
+      case "k": {
+        const [r, d] = two();
+        if (d > 2) throw new Error("bad trail");
+        return { t: "kick", r, d: (d - 1) as Dir };
+      }
+      case "h":
+        none();
+        return { t: "hold" };
       case "u":
-        return { t: "use", i: nums[0] ?? -1, c: nums.slice(1) };
-      case "s":
-        return { t: "sell", i: nums[0] ?? -1 };
+        return { t: "use", i: one() };
+      case "w": {
+        const [a, b] = two();
+        return { t: "swap", a, b };
+      }
+      case "x":
+        return { t: "sell", i: one() };
       case "c":
-        return { t: "cash" };
+        none();
+        return { t: "collect" };
       case "b":
-        return { t: "buy", i: nums[0] ?? -1 };
-      case "r":
-        return { t: "roll" };
+        return { t: "buy", i: one() };
       case "n":
+        none();
         return { t: "next" };
     }
     throw new Error("bad trail");
   });
 }
+

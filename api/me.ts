@@ -1,6 +1,6 @@
 // POST /api/me {action: "signin", name, address, signature, receipt?}
 //   -> one signed plain message (no gas, no transaction) per device per day: ties the name to the address,
-//      returns a session claim, house colours if the address holds $KICKER, and the player's record.
+//      returns a session claim, team kits if the address holds $KICKER, and the player's record.
 // POST /api/me {action: "profile", session} -> the signed-in player's record ("Your table").
 // The address comes from the wallet the player signed in with through Para.
 import { HouseError } from "./_house.js";

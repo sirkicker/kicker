@@ -1,5 +1,5 @@
 // Deterministic randomness. Every random choice in a run comes from a stream named by
-// (seed, purpose, index...), so the same seed deals the same cards on any machine.
+// (seed, purpose, index...), so the same seed picks the same squad and the same rivals on any machine.
 
 export function hash32(s: string): number {
   let h1 = 0xdeadbeef ^ s.length;

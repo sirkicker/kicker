@@ -1,7 +1,7 @@
 // POST /api/house {name, address, signature} -> {claim, expires, day} for a $KICKER holder.
 // The signature is over a plain text message (no gas, no transaction), made with the wallet the player signed in
 // with through Para; the balance is a read call. Smart-account signatures are checked with a read call too (ERC-1271).
-// What the claim buys: a card back, a felt and a small mark next to the name. Cosmetic only.
+// What the claim buys: a team kit, a felt and a small mark next to the name. Cosmetic only.
 import { checkHouse, HouseError } from "./_house.js";
 
 const json = (body: unknown, status = 200) =>
