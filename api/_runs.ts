@@ -1,5 +1,5 @@
 // Posted seasons: re-run on the server from the action trail, then frozen.
-import { parseTrail, rerun, type FigInfo } from "../shared/engine.js";
+import { CURRENT_RULES, parseTrail, rerun, type FigInfo } from "../shared/engine.js";
 import { HAUNT } from "../shared/content.js";
 import { normSeed } from "../shared/rng.js";
 import { hash32 } from "../shared/rng.js";
@@ -32,7 +32,7 @@ export interface Result {
   against: number;
   at: string;
   daily?: string; // the UTC day whose Daily Match this was
-  mode?: "haunt"; // a Haunted table run (2.1); absent for a season
+  mode?: "haunt" | "daily"; // a Haunted table run (2.1), a Daily match day (3.0); absent for a season
   kit?: boolean; // a Haunted match won while the event ran: the Haunted kit (cosmetic only)
   house?: boolean; // a $KICKER holder's house mark (cosmetic only)
   verified?: boolean; // posted by the address that owns the name
@@ -69,11 +69,14 @@ export async function verifyAndStore(
   if (trail.length > 60000) throw new Error("trail too long");
   const ed = await getEdition(edition);
   if (!ed) throw new Error("squad cut not found");
-  // the mode rides in the trail itself; a mode flag that says otherwise is refused
+  // the rules and the mode ride in the trail itself: an unknown rules token is refused by parseTrail, rules newer
+  // than this server plays are refused here, and a mode flag that says otherwise is refused. A trail with no rules
+  // token is a legacy (2.1) trail and replays under the legacy rules, byte for byte.
   const parsed = parseTrail(trail);
+  if (parsed.rules > CURRENT_RULES) throw new Error("those rules are not live yet");
   if (input.mode !== undefined && input.mode !== null && input.mode !== parsed.mode) throw new Error("mode does not match the trail");
   const mode = parsed.mode;
-  const run = rerun(ed, seed, parsed.actions, mode); // throws on any illegal touch
+  const run = rerun(ed, seed, parsed.actions, mode, parsed.rules); // throws on any illegal touch
   const sum = run.summary();
   if (!sum.over) throw new PostError("That season is not finished yet.");
   const rawName = typeof input.name === "string" ? cleanName(input.name) : "";
@@ -89,6 +92,8 @@ export async function verifyAndStore(
   // the house mark rides along only with a valid claim for this very name; it never touches the replay above
   const house = !!name && claimOk(input.house, name, now);
   const daily = mode === "haunt" ? null : await dailyDayOf(seed, edition, now);
+  // a Daily match day is only ever the day's pinned seed and cut
+  if (mode === "daily" && !daily) throw new PostError("That is not today's Daily Match.");
   const kit = mode === "haunt" && sum.cleared > 0 && now <= HAUNT.end;
   const id = shortId(`v2|${edition}|${seed}|${trail}|${name || ""}${house ? "|house" : ""}${verified ? "|verified" : ""}`);
   const rec: Result = {
@@ -109,7 +114,7 @@ export async function verifyAndStore(
     against: sum.against,
     at: new Date(now).toISOString(),
     ...(daily ? { daily } : {}),
-    ...(mode === "haunt" ? { mode } : {}),
+    ...(mode === "haunt" || mode === "daily" ? { mode } : {}),
     ...(kit ? { kit } : {}),
     ...(house ? { house } : {}),
     ...(verified ? { verified } : {}),
@@ -120,7 +125,8 @@ export async function verifyAndStore(
     if (!(e instanceof Taken)) throw e;
   }
   if (rec.name && rec.best && rec.best.total > 0) {
-    await addToHall(rec);
+    // a Daily match day goes on the Daily board only: one put, as a daily season did
+    if (rec.mode !== "daily") await addToHall(rec);
     if (rec.daily) await addToBoard(rec.daily, rec.edition, hallEntry(rec));
   }
   // the signed-in player's record follows them: one put, only for a verified season
@@ -157,7 +163,7 @@ export interface HallEntry {
   at: string;
   house?: boolean;
   verified?: boolean;
-  mode?: "haunt";
+  mode?: "haunt" | "daily";
 }
 export interface Hall {
   day: string;

@@ -1,16 +1,18 @@
-// Drawing the pieces: figures on the rods (seen from above), coach plaques, shelf items, plus token-art loading.
+// Drawing the pieces: figures on the rods (seen from above), coaches and shelf items as dressing-room name plates,
+// plus token-art loading.
 import { Circle, Container, Graphics, Sprite, Text, Texture, type TextStyleOptions } from "pixi.js";
-import { facePath, type Launch } from "../shared/data.js";
-import { COACH, COACH_VIBER, DRILL, PLAY, type DrillId } from "../shared/content.js";
+import { facePath, type Launch, type TraitId } from "../shared/data.js";
+import { COACH, COACH_VIBER, DRILL, PLAY, TIER_NAME, type DrillId } from "../shared/content.js";
 import { hash32 } from "../shared/rng.js";
-import { COL, FONT, THEM } from "./theme.js";
+import { COL, FONT, THEM, type Kit } from "./theme.js";
+import { ease, reduced, tween, wait } from "./tween.js";
 import { look } from "./house.js";
 
-/** Plaque size for coaches and shelf items. */
+/** Locker-bay size for coaches and shelf items. */
 export const PW = 112;
 export const PH = 156;
 /** Figure head radius on the table. */
-export const FR = 21;
+export const FR = 19;
 
 export function txt(text: string, style: TextStyleOptions): Text {
   const st: TextStyleOptions = { ...style };
@@ -86,37 +88,54 @@ export function pairGlyph(g: Graphics, u: number, x: number, y: number, s: numbe
 }
 
 // ------------------------------------------------------------ a figure on a rod, seen from above
-/** How a figure is dressed: your kit, the rival's turquoise, or a ghost club's pale sheet. */
+/** How a figure is dressed: your kit, the rival's club kit, or a ghost club's pale sheet. */
 export type FigLook = "you" | "them" | "ghost";
 export const GHOST = { main: 0xcfe3ee, hi: 0xf4fbff, trim: 0x8fb6c8 };
 
+/** Body half-width and half-length (along the rod): the kit is the biggest shape on a figure, so a side reads at a glance. */
+const BW = 19;
+const BL = FR + 19;
+
 /**
- * A table-football man from above: shoulders and arms across the rod in the kit colour, the launch's own picture
- * as the head, and a boot that shows under the body towards the goal it attacks (it swings out on a kick).
- * Your side wears the kit (house colours); a rival wears turquoise; a ghost club is pale and see-through.
+ * A table-football man from above: a kit-coloured disc on the felt under it, broad shoulders and arms across the rod
+ * in the kit, the launch's own picture as the head, and a boot that shows under the body towards the goal it attacks
+ * (it swings out on a kick). Your side wears your kit (house colours); a rival wears its club's kit (turquoise when
+ * the club has none); a ghost club is pale and see-through. Stat badges sit behind the shoulders; a trait sets the idle.
  */
 export class FigureView extends Container {
+  floor = new Graphics();
   glow = new Graphics();
   body = new Graphics();
   foot = new Graphics();
+  headBox = new Container();
   head = new Graphics();
   ring = new Graphics();
   pips = new Graphics();
   syn = new Graphics();
+  spark: Graphics | null = null;
   tag: Text | null = null;
   tex: Texture | null = null;
   hover = 0;
   look: FigLook;
+  /** The idle this figure plays, from its launch's numbers (cosmetic only). */
+  trait: TraitId | null = null;
+  ph = Math.random() * 6.28;
+  /** Real-time seconds until a dipped figure slumps again after a goal. */
+  perk = 0;
+  /** True while a celebration owns the head's transform. */
+  busy = false;
 
   constructor(
     public side: 0 | 1,
     public launch: Launch | null,
     public number = 0,
     look?: FigLook,
+    public club: Kit | null = null,
   ) {
     super();
     this.look = look || (side === 0 ? "you" : "them");
-    this.addChild(this.syn, this.glow, this.foot, this.body, this.head, this.ring, this.pips);
+    this.headBox.addChild(this.head);
+    this.addChild(this.floor, this.syn, this.glow, this.foot, this.body, this.pips, this.headBox, this.ring);
     this.draw();
     if (launch) {
       tokenTexture(launch.c, launch.s, (t) => {
@@ -124,9 +143,9 @@ export class FigureView extends Container {
         this.tex = t;
         this.drawHead();
       });
-      const lb = txt("$" + launch.s.slice(0, 6), { fontSize: 11, fill: this.look === "you" ? COL.cream : this.look === "ghost" ? GHOST.hi : THEM.hi, stroke: { color: COL.ink, width: 4 } });
+      const lb = txt("$" + launch.s.slice(0, 6), { fontSize: 11, fill: this.look === "you" ? COL.cream : this.look === "ghost" ? GHOST.hi : this.kit().hi, stroke: { color: COL.ink, width: 4 } });
       lb.anchor.set(0.5, 0);
-      lb.position.set(0, FR + 12);
+      lb.position.set(0, BL + 2);
       this.tag = lb;
       this.addChild(lb);
     }
@@ -134,12 +153,12 @@ export class FigureView extends Container {
     this.eventMode = "static";
     this.cursor = "pointer";
     // a finger is bigger than a figure: the whole lane square answers
-    this.hitArea = new Circle(0, 0, FR + 10);
+    this.hitArea = new Circle(0, 0, FR + 12);
   }
 
-  kit(): { main: number; hi: number; trim: number } {
+  kit(): Kit {
     if (this.look === "ghost") return GHOST;
-    if (this.look === "them") return THEM;
+    if (this.look === "them") return this.club || THEM;
     const lk = look();
     return { main: lk.kit, hi: lk.kitHi, trim: lk.trim };
   }
@@ -148,31 +167,71 @@ export class FigureView extends Container {
     return this.side === 0 ? 1 : -1;
   }
 
+  /** Re-dress in another kit (a rival club's). */
+  setKit(k: Kit | null) {
+    this.club = k;
+    this.draw();
+    if (this.tag && this.look === "them") this.tag.style.fill = this.kit().hi;
+  }
+
+  /** Sets the trait idle; `haunted` lets a 0-trade launch show as a ghost. */
+  setTrait(list: TraitId[], haunted: boolean) {
+    this.trait = list.find((t) => t !== "ghost" || haunted) || null;
+    if (this.spark) {
+      this.spark.destroy();
+      this.spark = null;
+    }
+    if (this.trait === "fresh") {
+      // a four-point twinkle at the head's shoulder
+      const s = new Graphics();
+      s.poly([0, -7, 1.6, -1.6, 7, 0, 1.6, 1.6, 0, 7, -1.6, 1.6, -7, 0, -1.6, -1.6]).fill(0xffffff);
+      s.position.set(FR * 0.75, -FR * 0.75);
+      this.headBox.addChild(s);
+      this.spark = s;
+    }
+    if (this.trait === "ghost" && this.look !== "ghost") this.alpha = 0.6;
+    this.draw();
+  }
+
   draw() {
     const k = this.kit();
     const b = this.body;
     const fwd = this.fwd;
     const ghost = this.look === "ghost";
+    const wide = this.trait === "whale" ? 1.14 : 1;
+    const w = BW * wide;
+    // the floor disc: the team's colour on the felt, so a side reads from arm's length
+    const f = this.floor;
+    f.clear();
+    if (!ghost) {
+      f.circle(0, 0, FR + 15).fill({ color: this.look === "you" ? k.hi : k.main, alpha: 0.2 });
+      f.circle(0, 0, FR + 15).stroke({ width: 2.5, color: this.look === "you" ? k.hi : k.main, alpha: 0.55 });
+    } else f.circle(0, 0, FR + 13).fill({ color: GHOST.main, alpha: 0.08 });
     b.clear();
     // shadow across the felt
-    b.roundRect(-13 + 4, -FR - 12 + 5, 26, 2 * FR + 24, 12).fill({ color: 0x000000, alpha: ghost ? 0.15 : 0.35 });
-    // shoulders and arms along the rod: a long capsule, darker at the hands
-    b.roundRect(-13, -FR - 12, 26, 2 * FR + 24, 12).fill(COL.ink);
-    b.roundRect(-11, -FR - 10, 22, 2 * FR + 20, 10).fill(k.main);
-    b.roundRect(-11, -FR - 10, 22, 9, 6).fill({ color: k.trim, alpha: 0.9 });
-    b.roundRect(-11, FR + 1, 22, 9, 6).fill({ color: k.trim, alpha: 0.9 });
-    // a shirt highlight on the side facing the light
-    b.roundRect(-10, -FR - 6, 6, 2 * FR + 12, 3).fill({ color: k.hi, alpha: 0.5 });
-    if (this.launch) pairGlyph(b, this.launch.u, fwd * -6, -FR - 5, 7, COL.ink);
+    b.roundRect(-w + 4, -BL + 5, w * 2, BL * 2, w).fill({ color: 0x000000, alpha: ghost ? 0.15 : 0.38 });
+    // shoulders and arms along the rod: a broad capsule, darker at the hands
+    b.roundRect(-w, -BL, w * 2, BL * 2, w).fill(COL.ink);
+    b.roundRect(-w + 2.5, -BL + 2.5, w * 2 - 5, BL * 2 - 5, w - 2.5).fill(k.main);
+    // hands: trim-coloured ends
+    b.roundRect(-w + 2.5, -BL + 2.5, w * 2 - 5, 10, 7).fill({ color: k.trim, alpha: 0.95 });
+    b.roundRect(-w + 2.5, BL - 12.5, w * 2 - 5, 10, 7).fill({ color: k.trim, alpha: 0.95 });
+    // a shirt highlight on the side facing the light, and a collar ring
+    b.roundRect(-w + 4, -BL + 8, 6, BL * 2 - 16, 3).fill({ color: k.hi, alpha: 0.55 });
+    b.circle(0, 0, FR + 5).fill(COL.ink);
+    b.circle(0, 0, FR + 3.5).fill(k.main);
+    if (this.launch) pairGlyph(b, this.launch.u, fwd * -5, -BL + 16, 8, COL.ink);
     // the boot: under the body, pointing at the goal this side attacks
     this.foot.clear();
     if (ghost) {
       // a ghost has no boot: a ragged sheet hem instead
-      this.foot.poly([0, -10, fwd * 22, -9, fwd * 17, -3, fwd * 24, 2, fwd * 17, 7, fwd * 22, 10, 0, 10]).fill({ color: k.main, alpha: 0.75 });
+      this.foot.poly([0, -10, fwd * 24, -9, fwd * 19, -3, fwd * 26, 2, fwd * 19, 7, fwd * 24, 10, 0, 10]).fill({ color: k.main, alpha: 0.75 });
     } else {
-      this.foot.roundRect(fwd > 0 ? 4 : -26, -7, 22, 14, 6).fill(COL.ink);
-      this.foot.roundRect(fwd > 0 ? 6 : -24, -5, 18, 10, 5).fill(k.trim);
-      this.foot.rect(fwd > 0 ? 20 : -24, -5, 4, 10).fill({ color: COL.ink, alpha: 0.5 });
+      const boot = this.trait === "flown" ? COL.money : this.trait === "fresh" ? 0xffffff : k.trim;
+      this.foot.roundRect(fwd > 0 ? 6 : -30, -8, 24, 16, 6).fill(COL.ink);
+      this.foot.roundRect(fwd > 0 ? 8 : -28, -6, 20, 12, 5).fill(boot);
+      this.foot.rect(fwd > 0 ? 24 : -28, -6, 4, 12).fill({ color: COL.ink, alpha: 0.5 });
+      if (this.trait === "flown") this.foot.roundRect(fwd > 0 ? 10 : -26, -5, 10, 3, 1.5).fill({ color: 0xfff0b0, alpha: 0.9 });
     }
     this.drawHead();
   }
@@ -180,7 +239,7 @@ export class FigureView extends Container {
   drawHead() {
     const k = this.kit();
     const h = this.head;
-    const ghost = this.look === "ghost";
+    const ghost = this.look === "ghost" || this.trait === "ghost";
     h.clear();
     h.circle(0, 0, FR).fill(COL.ink);
     if (this.launch && this.tex && this.tex !== Texture.WHITE) {
@@ -195,7 +254,7 @@ export class FigureView extends Container {
       h.circle(-5, -4, 2.5).fill(COL.ink);
       h.circle(5, -4, 2.5).fill(COL.ink);
     }
-    h.circle(0, 0, FR - 2).stroke({ width: 3, color: k.trim, alpha: 0.95 });
+    h.circle(0, 0, FR - 2).stroke({ width: 3, color: this.look === "you" ? k.hi : k.trim === COL.ink ? k.main : k.trim, alpha: 0.95 });
     if (ghost) {
       // two hollow eyes over the picture
       h.ellipse(-6, -3, 3, 4).fill({ color: COL.ink, alpha: 0.75 });
@@ -204,31 +263,97 @@ export class FigureView extends Container {
   }
 
   /** The kick: the boot swings out and back, the shoulders flick round the rod. */
-  swing(tween: (o: object, to: Keyed<string, number>, ms: number, e?: (t: number) => number) => Promise<void>, back: (t: number) => number) {
+  swing(tw: (o: object, to: Keyed<string, number>, ms: number, e?: (t: number) => number) => Promise<void>, back: (t: number) => number) {
     const fwd = this.fwd;
     this.foot.x = 0;
     this.rotation = -fwd * 0.28;
     this.body.scale.x = 0.7;
-    void tween(this.foot, { x: fwd * 14 }, 90).then(() => tween(this.foot, { x: 0 }, 220, back));
-    void tween(this.body.scale, { x: 1 }, 260, back);
-    void tween(this, { rotation: 0 }, 280, back);
+    const quick = this.trait === "degen" ? 0.7 : 1;
+    void tw(this.foot, { x: fwd * 16 }, 90 * quick).then(() => tw(this.foot, { x: 0 }, 220 * quick, back));
+    void tw(this.body.scale, { x: 1 }, 260 * quick, back);
+    void tw(this, { rotation: 0 }, 280 * quick, back);
   }
 
-  /** Small coloured pips for the stats this figure plays with: Power, Pace, Grip. */
+  /** The scorer: the head pops up and flips over, then lands. */
+  async celebrate() {
+    if (reduced()) return;
+    this.busy = true;
+    this.perk = 8;
+    const hb = this.headBox;
+    hb.rotation = 0;
+    await tween(hb.scale, { x: 1.75, y: 1.75 }, 160, ease.outBack);
+    await tween(hb.scale, { x: -1.75 }, 170, ease.inOut);
+    await tween(hb.scale, { x: 1.75 }, 170, ease.inOut);
+    void tween(hb, { rotation: 0 }, 1);
+    await tween(hb.scale, { x: 1, y: 1 }, 320, ease.outElastic);
+    this.busy = false;
+  }
+
+  /** A teammate's bump: a short hop after `delay` ms. */
+  async bump(delay = 0) {
+    if (reduced()) return;
+    this.perk = 8;
+    await wait(delay);
+    if (this.destroyed) return;
+    await tween(this.headBox.scale, { x: 1.25, y: 1.25 }, 110, ease.outCubic);
+    await tween(this.headBox.scale, { x: 1, y: 1 }, 260, ease.outBack);
+  }
+
+  /** Idle life, once a frame: a small breath for everyone, and the trait's own way of waiting. */
+  idle(t: number, dt: number) {
+    if (this.busy || this.destroyed) return;
+    const hb = this.headBox;
+    const p = this.ph;
+    if (this.perk > 0) this.perk -= dt;
+    let rot = Math.sin(t * 1.3 + p) * 0.05;
+    let x = 0;
+    let s = 1;
+    switch (this.trait) {
+      case "whale":
+        rot = Math.sin(t * 0.7 + p) * 0.08;
+        break;
+      case "degen":
+        rot = (Math.sin(t * 23 + p) * 0.6 + Math.sin(t * 37 + p * 2) * 0.4) * 0.07;
+        x = Math.sin(t * 29 + p) * 0.8;
+        break;
+      case "dip":
+        // slumped: a smaller head, sunk back; it perks up for a while after a goal
+        if (this.perk <= 0) {
+          s = 0.88;
+          x = -this.fwd * 2.5;
+          rot = Math.sin(t * 0.6 + p) * 0.03 - this.fwd * 0.12;
+        }
+        break;
+      case "ghost":
+        x = Math.sin(t * 1.1 + p) * 2;
+        this.body.alpha = 0.7 + Math.sin(t * 1.7 + p) * 0.15;
+        break;
+    }
+    hb.rotation = rot;
+    hb.x = x;
+    if (hb.scale.x !== s && Math.abs(hb.scale.x) < 1.2) hb.scale.set(s);
+    if (this.spark) {
+      const k = Math.max(0, Math.sin(t * 2.6 + p));
+      this.spark.alpha = k;
+      this.spark.scale.set(0.4 + k * 0.8);
+      this.spark.rotation = t * 0.8;
+    }
+  }
+
+  /** Badges for the stats this figure plays with: a bolt for Power, chevrons for Pace, a shield for Grip. */
   setStats(st: { power: boolean; pace: boolean; grip: boolean } | null) {
     const g = this.pips;
     g.clear();
     if (!st) return;
-    const list: number[] = [];
-    if (st.power) list.push(COL.pink);
-    if (st.pace) list.push(COL.cyan);
-    if (st.grip) list.push(COL.money);
+    const list: ("power" | "pace" | "grip")[] = [];
+    if (st.power) list.push("power");
+    if (st.pace) list.push("pace");
+    if (st.grip) list.push("grip");
     const fwd = this.fwd;
-    list.forEach((c, i) => {
-      const x = -fwd * 18;
-      const y = -12 + i * 12;
-      g.circle(x, y, 6).fill(COL.ink);
-      g.circle(x, y, 4.2).fill(c);
+    list.forEach((k, i) => {
+      const x = -fwd * (BW + 9);
+      const y = (i - (list.length - 1) / 2) * 19;
+      statBadge(g, k, x, y, 9);
     });
   }
 
@@ -236,23 +361,45 @@ export class FigureView extends Container {
   setRing(color: number | null, width = 3) {
     this.ring.clear();
     if (color === null) return;
-    this.ring.circle(0, 0, FR + 3).stroke({ width, color });
+    this.ring.circle(0, 0, FR + 4).stroke({ width, color });
   }
 
   /** The ball holder: a soft halo under the figure, pulsed by the table's frame loop. */
   setGlow(color: number | null) {
     this.glow.clear();
     if (color === null) return;
-    this.glow.circle(0, 0, FR + 16).fill({ color, alpha: 0.18 });
-    this.glow.circle(0, 0, FR + 9).fill({ color, alpha: 0.3 });
+    this.glow.circle(0, 0, FR + 20).fill({ color, alpha: 0.18 });
+    this.glow.circle(0, 0, FR + 12).fill({ color, alpha: 0.3 });
   }
 
   /** A soft halo in a coach's hue while that coach is hovered. */
   setSynergy(color: number | null) {
     this.syn.clear();
     if (color === null) return;
-    this.syn.circle(0, 0, FR + 12).fill({ color, alpha: 0.28 });
-    this.syn.circle(0, 0, FR + 7).stroke({ width: 3, color, alpha: 0.9 });
+    this.syn.circle(0, 0, FR + 14).fill({ color, alpha: 0.28 });
+    this.syn.circle(0, 0, FR + 9).stroke({ width: 3, color, alpha: 0.9 });
+  }
+}
+
+/** Stat colours: Power hot pink, Pace cyan, Grip gold. */
+export const STAT_COL = { power: COL.pink, pace: COL.cyan, grip: COL.money } as const;
+
+/** One stat badge: an ink disc with the stat's glyph, readable at a glance. `r` is the disc radius. */
+export function statBadge(g: Graphics, k: "power" | "pace" | "grip", x: number, y: number, r: number) {
+  const c = STAT_COL[k];
+  g.circle(x, y, r + 1.5).fill(COL.ink);
+  g.circle(x, y, r).fill(c);
+  const u = r / 9;
+  if (k === "power") {
+    // a lightning bolt
+    g.poly([x + 1.5 * u, y - 6.5 * u, x - 4 * u, y + 1 * u, x - 0.3 * u, y + 1 * u, x - 1.8 * u, y + 6.5 * u, x + 4.2 * u, y - 1.2 * u, x + 0.4 * u, y - 1.2 * u]).fill(COL.ink);
+  } else if (k === "pace") {
+    // two chevrons
+    for (const dx of [-2.6, 2.2]) g.poly([x + (dx - 2.2) * u, y - 4.5 * u, x + (dx + 2.4) * u, y, x + (dx - 2.2) * u, y + 4.5 * u, x + (dx - 0.4) * u, y + 4.5 * u, x + (dx + 0.6) * u, y, x + (dx - 0.4) * u, y - 4.5 * u]).fill(COL.ink);
+  } else {
+    // a shield
+    g.poly([x, y - 5.5 * u, x + 4.6 * u, y - 3.8 * u, x + 4 * u, y + 1.5 * u, x, y + 5.8 * u, x - 4 * u, y + 1.5 * u, x - 4.6 * u, y - 3.8 * u]).fill(COL.ink);
+    g.poly([x, y - 3 * u, x + 2.4 * u, y - 2 * u, x + 2 * u, y + 1 * u, x, y + 3 * u]).fill(c);
   }
 }
 
@@ -300,9 +447,49 @@ function hsl(h: number, s: number, l: number): number {
 }
 export const hslHex = hsl;
 
-const RARE_COL = { 1: 0x27c4e8, 2: 0x3ddc97, 3: 0xff3d7f } as const;
+/** The brass of a coach's name plate by standing: steel for the Academy, brass for the first team, gold for a legend. */
+const PLATE = {
+  1: { face: 0xa9b6bf, hi: 0xe2eaef, lo: 0x5d6a73 },
+  2: { face: 0xc9a24a, hi: 0xf2d98c, lo: 0x7a5a1c },
+  3: { face: 0xffc23d, hi: 0xfff0b0, lo: 0x9a6a10 },
+} as const;
+const PLATE_H = 34;
 
-/** A coach on the bench: a plaque with one of the vibers. */
+/**
+ * A spot on the dressing-room wall: a locker bay in the item's colour with slats and two vents, its label at the top, and an
+ * engraved name plate screwed on below. What stands in the bay is drawn by the caller. Used by coaches and items.
+ */
+function lockerBay(wall: number, plate: { face: number; hi: number; lo: number }, label: string): { g: Graphics; label: Text } {
+  const g = new Graphics();
+  const x0 = -PW / 2;
+  const y0 = -PH / 2;
+  g.roundRect(x0, y0, PW, PH, 8).fill(COL.ink);
+  g.roundRect(x0 + 4, y0 + 4, PW - 8, PH - 8, 5).fill(wall);
+  // slats and vents: a locker door, not a picture frame
+  for (const fx of [-0.25, 0.25]) g.rect(fx * PW - 1, y0 + 34, 2, PH - PLATE_H - 44).fill({ color: COL.ink, alpha: 0.28 });
+  for (let i = 0; i < 2; i++) g.roundRect(-18, y0 + 8 + i * 5, 36, 3, 1.5).fill({ color: COL.ink, alpha: 0.55 });
+  // the name plate, screwed on
+  const py = PH / 2 - PLATE_H - 6;
+  g.roundRect(x0 + 7, py, PW - 14, PLATE_H, 4).fill(plate.lo);
+  g.roundRect(x0 + 7, py, PW - 14, PLATE_H - 3, 4).fill(plate.face).stroke({ width: 2, color: COL.ink });
+  g.rect(x0 + 11, py + 3, PW - 22, 2).fill({ color: plate.hi, alpha: 0.85 });
+  for (const sx of [x0 + 13, -x0 - 13]) g.circle(sx, py + PLATE_H / 2 - 1, 2.2).fill(plate.lo);
+  const lb = txt(label, { fontSize: 8, fill: COL.cream2, letterSpacing: 1 });
+  lb.anchor.set(0.5);
+  lb.alpha = 0.85;
+  lb.position.set(0, y0 + 25);
+  return { g, label: lb };
+}
+
+/** The name, engraved on the plate: ink on brass, one or two lines. */
+function plateName(name: string): Text {
+  const nm = txt(name, { fontSize: name.length > 10 ? 10 : 12, fill: COL.ink, align: "center", wordWrap: true, wordWrapWidth: PW - 30, lineHeight: 11 });
+  nm.anchor.set(0.5);
+  nm.position.set(0, PH / 2 - PLATE_H / 2 - 7);
+  return nm;
+}
+
+/** A coach in the dressing room: their viber standing in a locker bay, the name on a plate in the brass of their standing. */
 export class CoachView extends Container {
   shadow = new Graphics();
   body = new Container();
@@ -310,17 +497,15 @@ export class CoachView extends Container {
   constructor(public coachId: string) {
     super();
     const d = COACH[coachId];
-    this.shadow.roundRect(-PW / 2 + 5, -PH / 2 + 7, PW, PH, 10).fill({ color: 0x000000, alpha: 0.38 });
+    this.shadow.roundRect(-PW / 2 + 5, -PH / 2 + 7, PW, PH, 8).fill({ color: 0x000000, alpha: 0.38 });
     this.addChild(this.shadow, this.body);
-    const g = new Graphics();
-    g.roundRect(-PW / 2, -PH / 2, PW, PH, 10).fill(COL.ink);
-    g.roundRect(-PW / 2 + 4, -PH / 2 + 4, PW - 8, PH - 8, 7).fill(hsl(d.hue, 0.45, 0.24));
-    g.rect(-PW / 2 + 4, -PH / 2 + 4, PW - 8, 14).fill(RARE_COL[d.rarity]);
-    this.body.addChild(g);
-    const disc = new Graphics().circle(0, -12, 40).fill({ color: hsl(d.hue, 0.6, 0.45), alpha: 0.35 });
-    this.body.addChild(disc);
-    const p = portrait(d.id, d.hue, 6);
-    p.position.set(0, -10);
+    const bay = lockerBay(hsl(d.hue, 0.32, 0.22), PLATE[d.tier], (d.reads ? `${TIER_NAME[d.tier]} · reads` : TIER_NAME[d.tier]).toUpperCase());
+    this.body.addChild(bay.g);
+    // a floor shadow for the coach to stand on
+    const floor = new Graphics().ellipse(0, PH / 2 - PLATE_H - 14, 30, 6).fill({ color: COL.ink, alpha: 0.4 });
+    this.body.addChild(floor);
+    const p = portrait(d.id, d.hue, 5);
+    p.position.set(0, -2);
     this.body.addChild(p);
     const vb = COACH_VIBER[d.id];
     if (vb) {
@@ -328,21 +513,14 @@ export class CoachView extends Container {
         if (this.destroyed) return;
         p.visible = false;
         const sp = new Sprite(t);
-        sp.anchor.set(0.5);
-        sp.width = 96;
-        sp.height = 96;
-        sp.position.set(0, -14);
+        sp.anchor.set(0.5, 1);
+        sp.width = 84;
+        sp.height = 84;
+        sp.position.set(0, PH / 2 - PLATE_H - 10);
         this.body.addChildAt(sp, this.body.getChildIndex(p));
       });
     }
-    const nm = txt(d.name, { fontSize: d.name.length > 12 ? 11 : 13, fill: COL.cream, align: "center", wordWrap: true, wordWrapWidth: PW - 14 });
-    nm.anchor.set(0.5);
-    nm.position.set(0, 50);
-    this.body.addChild(nm);
-    const tag = txt(d.reads ? "COACH · READS" : "COACH", { fontSize: 9, fill: COL.ink });
-    tag.anchor.set(0.5);
-    tag.position.set(0, -PH / 2 + 11);
-    this.body.addChild(tag);
+    this.body.addChild(bay.label, plateName(d.name));
     this.eventMode = "static";
     this.cursor = "pointer";
   }
@@ -358,38 +536,29 @@ export class ItemView extends Container {
     public itemId: string,
   ) {
     super();
-    this.shadow.roundRect(-PW / 2 + 5, -PH / 2 + 7, PW, PH, 10).fill({ color: 0x000000, alpha: 0.38 });
+    this.shadow.roundRect(-PW / 2 + 5, -PH / 2 + 7, PW, PH, 8).fill({ color: 0x000000, alpha: 0.38 });
     this.addChild(this.shadow, this.body);
-    const g = new Graphics();
-    const tone = kind === "drill" ? 0x0f4a50 : 0x4a1240;
+    const wall = kind === "drill" ? 0x0f4a50 : 0x4a1240;
     const band = kind === "drill" ? COL.cyan : COL.money;
-    g.roundRect(-PW / 2, -PH / 2, PW, PH, 10).fill(COL.ink);
-    g.roundRect(-PW / 2 + 4, -PH / 2 + 4, PW - 8, PH - 8, 7).fill(tone);
-    g.rect(-PW / 2 + 4, -PH / 2 + 4, PW - 8, 14).fill(band);
+    const bay = lockerBay(wall, { face: COL.cream2, hi: 0xffffff, lo: 0x8a7460 }, kind === "drill" ? "TRAINING" : "SET PIECE");
     const e = new Graphics();
     if (kind === "drill") {
-      // a cone and a ball: training
+      // a cone and a ball on the floor of the bay: training kit
       e.poly([0, -34, 16, 8, -16, 8]).fill(COL.money).stroke({ width: 3, color: COL.ink });
       e.rect(-12, -10, 24, 5).fill(COL.cream);
       e.circle(22, 16, 9).fill(COL.cream).stroke({ width: 3, color: COL.ink });
     } else {
-      // a whistle-board: a set piece drawn on a slate
+      // a tactics slate in the bay: a set piece
       e.roundRect(-28, -32, 56, 52, 8).fill(COL.ink).stroke({ width: 3, color: band });
       e.circle(-12, -14, 4).fill(band);
       e.circle(12, 4, 4).fill(band);
       e.moveTo(-12, -14).lineTo(12, 4).stroke({ width: 2, color: COL.cream, alpha: 0.8 });
       e.poly([12, 4, 4, 3, 9, -3]).fill(COL.cream);
     }
-    e.position.set(0, -6);
-    this.body.addChild(g, e);
+    e.position.set(0, 0);
+    e.scale.set(0.9);
     const name = kind === "drill" ? DRILL[itemId as DrillId].name : PLAY[itemId].name;
-    const nm = txt(name, { fontSize: name.length > 12 ? 11 : 13, fill: COL.cream, align: "center", wordWrap: true, wordWrapWidth: PW - 14 });
-    nm.anchor.set(0.5);
-    nm.position.set(0, 50);
-    const tag = txt(kind === "drill" ? "TRAINING" : "SET PIECE", { fontSize: 9, fill: COL.ink });
-    tag.anchor.set(0.5);
-    tag.position.set(0, -PH / 2 + 11);
-    this.body.addChild(nm, tag);
+    this.body.addChild(bay.g, e, bay.label, plateName(name));
     this.eventMode = "static";
     this.cursor = "pointer";
   }

@@ -226,3 +226,31 @@ export const GAME_TOKEN = {
 /** Where the game's source lives. */
 export const SOURCE_URL = "https://github.com/sirkicker/kicker";
 export const facePath = (cid: string | null, sym: string) => `/api/face?c=${encodeURIComponent(cid || "")}&s=${encodeURIComponent(sym.slice(0, 6))}`;
+
+// ---------------------------------------------------------------- temperament (3.0, cosmetic only)
+/** A figure's temperament, read off its numbers. It changes how a figure idles and its one-word tag, never how it plays. */
+export type TraitId = "whale" | "degen" | "fresh" | "dip" | "pump" | "flown" | "ghost";
+export const TRAIT: Keyed<TraitId, { name: string; text: string }> = {
+  whale: { name: "Whale", text: "held by 15 or more" },
+  degen: { name: "Degen", text: "25 or more trades in 24h" },
+  fresh: { name: "Fresh", text: "launched under 6 h before the cut" },
+  dip: { name: "Dip", text: "price down 5% or more" },
+  pump: { name: "Pump", text: "price up 15% or more" },
+  flown: { name: "Flown", text: "flew the whole curve" },
+  ghost: { name: "Ghost", text: "0 trades in 24h" },
+};
+/**
+ * The traits a launch shows at a cut (unix seconds), strongest first. Pure and seedless: the same numbers always
+ * give the same traits. "ghost" is listed for any 0-trade launch; the table shows it only on the Haunted table.
+ */
+export function traitsOf(l: Launch, editionAt: number): TraitId[] {
+  const out: TraitId[] = [];
+  if (l.g) out.push("flown");
+  if (l.k === 0) out.push("ghost");
+  if (l.h >= 15) out.push("whale");
+  if (l.k >= 25) out.push("degen");
+  if ((editionAt - l.a) / 3600 < 6) out.push("fresh");
+  if (l.x !== null && l.x <= -500) out.push("dip");
+  if (l.x !== null && l.x >= 1500) out.push("pump");
+  return out;
+}

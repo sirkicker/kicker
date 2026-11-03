@@ -1,21 +1,31 @@
 // The table: everything drawn in Pixi. State lives in the shared engine; this file shows it and plays back
 // what the engine says happened (slides, kicks, blocks, goals), one event at a time.
+// 3.0: the stands (crowd.ts), the desk's wire (desk.ts), boss rules on the table (rules.ts), the replay
+// (replay.ts), the goal moment, the reaction preview, and music that follows the match. The screens
+// around the table use Game.onMoment, playReplay and crowdLevel.
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, type FederatedPointerEvent } from "pixi.js";
-import { BOSS, COACH, DRILL, DRILLS, FIXTURE_NAME, GHOST_RULES, LANES, MAX_COACHES, MAX_PLAYS, MOUTH, PLAY, RARITY_NAME, RODS, STYLES, WIN_FANS, drillCost, type DrillId } from "../shared/content.js";
-import { colOf, laneOf, slotOf, type Action, type Dir, type Ev, type Kick, type Run } from "../shared/engine.js";
-import { ghostWhy, type Launch } from "../shared/data.js";
-import { bestBlock, bestTouch } from "../shared/bot.js";
-import { figureFacts, roomHint } from "../shared/insight.js";
-import { hash32 } from "../shared/rng.js";
-import { sfx } from "./audio.js";
-import { setUi, toast, ui } from "./store.js";
+import { BOSS, COACH, DRILL, GHOST_RULES, LANES, MAX_COACHES, MAX_PLAYS, MOUTH, PLAY, TIER_NAME, RODS, STYLES, type DrillId } from "../shared/content.js";
+import { fixtureLabel, targetOf, winFansOf } from "./season.js";
+import { colOf, laneOf, slotOf, type Action, type BestGoal, type Dir, type Ev, type Kick, type Run, type RuleView, type TableEventId } from "../shared/engine.js";
+import { ghostWhy, traitsOf, type Launch } from "../shared/data.js";
+import { bestBlock, bestTouch, botStep } from "../shared/bot.js";
+import { figureFacts } from "../shared/insight.js";
+import { lineFor } from "../shared/voice.js";
+import { setCrowdBed, setMood, sfx, type Mood } from "./audio.js";
+import { setUi, showTip, toast, ui } from "./store.js";
 import { CoachView, FR, FigureView, ItemView, PH, PW, hslHex, tokenTexture, txt } from "./figures.js";
 import { crtFilter, setSwirlColors, swirlFilter, type FxFilter } from "./fx.js";
-import { BRASS, COL, NUM, THEM } from "./theme.js";
+import { BRASS, COL, NUM, TAPE, THEM, cssHex, kitOf } from "./theme.js";
 import { look } from "./house.js";
-import { ease, reduced, tween, wait } from "./tween.js";
+import { ease, hitStop, reduced, setTimeScale, tween, wait } from "./tween.js";
 import { Button, Tip, fmt, panel } from "./widgets.js";
 import { hudOf, hudStep, type Hud } from "./hud.js";
+import { drawStage, type StageHost } from "./stage.js";
+import { CAB_B, CAB_T, CTRL_Y, DESK_P, HANDLE_Y, LANE0, LH, PITCH_H, RAIL, RAIL_T, STAND_T, TS_H, TS_W, TX0, TX1, colX, laneY, mirror } from "./table.js";
+import { Crowd, loadCrowd } from "./crowd.js";
+import { Desk, type Tone } from "./desk.js";
+import { EVENT_LOOK, RULE_LABEL, bellIcon, crest, eventBadge, glove, haltTape, padlock, ruleBadge, rug } from "./rules.js";
+import { playPath } from "./replay.js";
 
 type Mode = "land" | "port";
 interface Layout {
@@ -35,36 +45,25 @@ interface Layout {
   btnX: number;
 }
 
+/** The table's big moments, for the screens around it. */
+export type Moment = "goal" | "conceded" | "fulltime" | "replay-ready" | "replay-done" | "boss-walkout-done" | "lane-open";
+
 export interface GameHooks {
   onAction(a: Action, run: Run): void;
   onOver(run: Run): void;
   openOverlay(o: "squad" | "options" | "how" | "boss"): void;
+  /** Optional: told about the table's big moments as they happen. */
+  onMoment?(kind: Moment, data?: unknown): void;
 }
 
-// ------------------------------------------------------------ table space (drawn flat, turned upright on phones)
-const TX0 = 70; // your goal line
-const TX1 = 930; // theirs
-const LH = 47; // one lane
-const LANE0 = 86; // top edge of lane 0 (room above for their handles and the ghost marks)
-const PITCH_H = LANES * LH;
-const RAIL = 22;
-const HANDLE_Y = LANE0 + PITCH_H + RAIL; // where your rods leave the cabinet
-const CTRL_Y = HANDLE_Y + 6; // your handles: the slide buttons sit on the rod end
+// ------------------------------------------------------------ table space (drawn flat, turned upright on phones): src/table.ts
 const ARROW_W = 92;
 /** Handle buttons are taller (wider on screen) on phones, where the table stands upright and has no labels under them. */
 let ARROW_H = 58;
 const capY = () => CTRL_Y + ARROW_H * 2 + 24;
-const TS_W = 1000;
-const TS_H = CTRL_Y + 58 * 2 + 46;
-const colX = (x: number) => TX0 + (x * (TX1 - TX0)) / 9;
-const laneY = (l: number) => LANE0 + (l + 0.5) * LH;
-
-/** Continuous mirror of a lane off the side walls (walls sit half a lane outside lanes 0 and 9). */
-function mirror(v: number): number {
-  const p = 2 * LANES;
-  const m = (((v + 0.5) % p) + p) % p;
-  return m < LANES ? m - 0.5 : p - 0.5 - m;
-}
+/** The phone's HUD rows above the table. */
+const PORT_TOP = 252;
+void LANES;
 
 /** A soft black vignette with a clear centre: the Graveyard shift's lantern, drawn once. */
 let lanternTex: Texture | null = null;
@@ -91,54 +90,6 @@ interface RodView {
   c: Container;
   bar: Graphics;
   figs: FigureView[];
-}
-
-/** A club crest from its name: two colours, a field pattern and an emblem. A boss crest is spiked; a ghost club's is a headstone. */
-export function crest(name: string, kind: "club" | "boss" | "ghost", R: number): Graphics {
-  const g = new Graphics();
-  const h = hash32(name);
-  const c1 = hslHex(h % 360, 0.62, 0.42);
-  const c2 = hslHex((h >> 9) % 360, 0.7, 0.62);
-  if (kind === "ghost") {
-    g.roundRect(-R * 0.9, -R * 1.05, R * 1.8, R * 2.15, R * 0.9).fill(0x3b4a55).stroke({ width: 5, color: COL.ink });
-    g.roundRect(-R * 0.7, -R * 0.85, R * 1.4, R * 1.8, R * 0.7).fill(0x56697a);
-    g.poly([-R * 0.38, R * 0.55, -R * 0.38, -R * 0.15, 0, -R * 0.5, R * 0.38, -R * 0.15, R * 0.38, R * 0.55, R * 0.22, R * 0.38, R * 0.07, R * 0.55, -R * 0.07, R * 0.38, -R * 0.22, R * 0.55]).fill(0xeaf6ff);
-    g.ellipse(-R * 0.14, -R * 0.12, R * 0.07, R * 0.1).fill(COL.ink);
-    g.ellipse(R * 0.14, -R * 0.12, R * 0.07, R * 0.1).fill(COL.ink);
-    return g;
-  }
-  const shield = [-R, -R * 0.9, R, -R * 0.9, R, R * 0.25, 0, R * 1.15, -R, R * 0.25];
-  if (kind === "boss") {
-    g.poly([-R * 1.12, -R * 1.2, -R * 0.55, -R * 0.92, 0, -R * 1.3, R * 0.55, -R * 0.92, R * 1.12, -R * 1.2, R, R * 0.25, 0, R * 1.2, -R, R * 0.25]).fill(COL.ink);
-    g.poly(shield).fill(0x2a0618).stroke({ width: 5, color: COL.pink });
-    g.poly([-R, -R * 0.2, R, -R * 0.2, R, R * 0.1, -R, R * 0.1]).fill({ color: COL.pink, alpha: 0.85 });
-  } else {
-    g.poly(shield).fill(c1).stroke({ width: 5, color: COL.ink });
-    const p = (h >> 4) % 4;
-    if (p === 0) for (let i = -2; i <= 2; i += 2) g.rect(i * R * 0.22 - R * 0.11, -R * 0.9, R * 0.22, R * 1.9).fill({ color: c2, alpha: 0.9 });
-    else if (p === 1) g.poly([0, -R * 0.9, R, -R * 0.9, R, R * 0.25, 0, R * 1.15]).fill({ color: c2, alpha: 0.9 });
-    else if (p === 2) g.poly([-R, -R * 0.1, 0, R * 0.55, R, -R * 0.1, R, R * 0.25, 0, R * 1.0, -R, R * 0.25]).fill({ color: c2, alpha: 0.9 });
-    else for (let y = -0.6; y < 0.4; y += 0.5) g.rect(-R, y * R, R * 2, R * 0.22).fill({ color: c2, alpha: 0.9 });
-    g.poly(shield).stroke({ width: 5, color: COL.ink });
-  }
-  // the emblem in a disc
-  g.circle(0, -R * 0.05, R * 0.44).fill(COL.cream).stroke({ width: 3, color: COL.ink });
-  const e = (h >> 12) % 5;
-  const ec = kind === "boss" ? COL.pink : c1;
-  const s = R * 0.26;
-  if (e === 0) g.circle(0, -R * 0.05, s * 0.8).fill(COL.ink);
-  else if (e === 1) {
-    const pts: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
-      const rr = i % 2 ? s * 0.45 : s;
-      pts.push(Math.cos(a) * rr, -R * 0.05 + Math.sin(a) * rr);
-    }
-    g.poly(pts).fill(ec);
-  } else if (e === 2) g.poly([0, -R * 0.05 - s, s, -R * 0.05, 0, -R * 0.05 + s, -s, -R * 0.05]).fill(ec);
-  else if (e === 3) g.poly([-s * 0.2, -R * 0.05 - s, s * 0.6, -R * 0.05 - s * 0.1, 0, -R * 0.05, s * 0.3, -R * 0.05 + s, -s * 0.6, -R * 0.05 + s * 0.05, 0, -R * 0.05]).fill(ec);
-  else g.poly([-s, -R * 0.05 + s * 0.5, -s, -R * 0.05 - s * 0.4, -s * 0.5, -R * 0.05, 0, -R * 0.05 - s * 0.7, s * 0.5, -R * 0.05, s, -R * 0.05 - s * 0.4, s, -R * 0.05 + s * 0.5]).fill(ec);
-  return g;
 }
 
 export class Game {
@@ -203,6 +154,45 @@ export class Game {
   benchLabel!: Text;
   playLabel!: Text;
   particles: { g: Graphics; vx: number; vy: number; life: number; up?: boolean }[] = [];
+  // ---------------------------------------------------------------- 3.0 layers
+  /** The stands, behind the cabinet. */
+  crowd = new Crowd();
+  /** The desk's wire on the rail. */
+  desk = new Desk();
+  /** Felt tint for a table event, under the rods. */
+  eventLayer = new Container();
+  /** The build-up's lit lanes on the felt. */
+  chainLayer = new Container();
+  /** Ghost rods: where theirs go if you make the slide under the pointer. */
+  previewLayer = new Container();
+  /** The boss rule's marks on the table. */
+  ruleLayer = new Container();
+  /** Corner plaques: the boss rule, the table event. */
+  badgeLayer = new Container();
+  /** The instant replay draws here, over everything on the table. */
+  replayLayer = new Container();
+  /** Ticker tape and the big centre score: over the table, in screen space. */
+  tapeLayer = new Container();
+  tape: { s: Sprite; sy: number; vx: number; vy: number; twirl: number; flip: number; life: number }[] = [];
+  /** Lines the desk has shown this match: the count that varies them. */
+  deskN = 0;
+  /** The ball's trail: recent positions, drawn as a fading ribbon. */
+  trail: { x: number; y: number; t: number }[] = [];
+  trailG = new Graphics();
+  /** Open shots on the table at the last draw, for the "lane opened" sting. */
+  openShots = -1;
+  lastSlide = false;
+  /** Fans the stands show. */
+  fansShown = 0;
+  /** A replay is playing; a tap cuts it short. */
+  replaying = false;
+  replaySkip = false;
+  /** The season best when this match kicked off: a new best gets an instant replay at full time. */
+  bestAtKickoff = 0;
+  /** The empty-defence auto press: pending timer. */
+  autoTimer = 0;
+  /** Seconds since the last frame, for the frame-driven layers. */
+
 
   constructor(
     public app: Application,
@@ -213,7 +203,8 @@ export class Game {
     this.crt = crtFilter();
     this.bg.filters = [this.swirl];
     app.stage.addChild(this.bg, this.root);
-    this.root.addChild(this.hud, this.tbl, this.benchLayer, this.stageLayer, this.tipLayer);
+    this.root.addChild(this.hud, this.tbl, this.tapeLayer, this.benchLayer, this.stageLayer, this.tipLayer);
+    this.tapeLayer.eventMode = "none";
     this.root.visible = false;
     this.rodLayer.mask = this.rodMask;
     this.dark.texture = lantern();
@@ -223,8 +214,34 @@ export class Game {
     this.dark.eventMode = "none";
     this.dark.visible = false;
     this.mistLayer.eventMode = "none";
-    this.tbl.addChild(this.pitch, this.mark, this.mistLayer, this.rodMask, this.dragLayer, this.rodLayer, this.rail, this.knobLayer, this.darkMask, this.dark, this.guideLayer, this.ballLayer, this.ctrlLayer, this.fxLayer);
-    this.ballLayer.addChild(this.ball);
+    this.tbl.addChild(
+      this.crowd,
+      this.pitch,
+      this.eventLayer,
+      this.mark,
+      this.chainLayer,
+      this.mistLayer,
+      this.rodMask,
+      this.dragLayer,
+      this.rodLayer,
+      this.rail,
+      this.knobLayer,
+      this.desk,
+      this.badgeLayer,
+      this.darkMask,
+      this.dark,
+      this.previewLayer,
+      this.ruleLayer,
+      this.guideLayer,
+      this.ballLayer,
+      this.ctrlLayer,
+      this.fxLayer,
+      this.replayLayer,
+    );
+    for (const l of [this.eventLayer, this.chainLayer, this.previewLayer, this.ruleLayer, this.badgeLayer, this.replayLayer, this.fxLayer]) l.eventMode = "none";
+    // the fx layer (nets, flashes, the walk-out) is decoration over the kick targets: it must never take a tap
+    this.ballLayer.addChild(this.trailG, this.ball);
+    this.trailG.eventMode = "none";
     this.tipLayer.addChild(this.tip);
     app.stage.filters = [this.crt];
     this.crt.resolution = Math.min(2, window.devicePixelRatio || 1);
@@ -232,6 +249,7 @@ export class Game {
     app.stage.eventMode = "static";
     app.stage.hitArea = app.screen;
     app.stage.on("pointertap", (e) => {
+      if (this.replaying) this.replaySkip = true;
       if (e.target === app.stage || e.target === this.bg) this.tip.hide();
     });
     app.stage.on("globalpointermove", (e) => this.dragMove(e));
@@ -246,6 +264,8 @@ export class Game {
     window.addEventListener("wheel", drop, { passive: true });
     window.addEventListener("scroll", drop, { passive: true, capture: true });
     this.resize();
+    // the stands' atlas loads once the title has painted, never before
+    setTimeout(() => void loadCrowd(), 2500);
   }
 
   get haunted() {
@@ -285,10 +305,21 @@ export class Game {
     if (this.dark.visible) this.dark.position.set(this.ball.visible ? this.ball.x : (TX0 + TX1) / 2, this.ball.visible ? this.ball.y : LANE0 + PITCH_H / 2);
     // the figure on the ball breathes
     const b = this.disp.ball;
+    if (this.ballFree && this.ball.visible) this.trail.push({ x: this.ball.x, y: this.ball.y, t: this.t });
     if (b && !this.ballFree) {
       const fv = this.rods[b.side]?.[b.rod]?.figs[b.fig];
       if (fv) fv.glow.alpha = rm ? 1 : 0.65 + 0.35 * Math.sin(this.t * 5);
     }
+    const sec = dt / 1000;
+
+    if (this.tbl.visible && this.root.renderable && this.root.visible) {
+      this.crowd.frame(this.t, sec);
+      this.desk.frame(sec);
+      if (!rm) for (const side of this.rods) for (const rv of side) for (const f of rv.figs) f.idle(this.t, sec);
+      this.drawTrail();
+      this.frameRule();
+    }
+    this.frameTape(sec);
     for (const p of this.particles) {
       if (p.up) p.vy -= 0.04;
       else p.vy += 0.35;
@@ -366,7 +397,7 @@ export class Game {
         btnX: left + (W - left - 16) / 2,
       };
     } else {
-      const top = 236;
+      const top = PORT_TOP;
       const bench = this.benchRow() ? 104 : 0;
       this.L = {
         mode,
@@ -389,22 +420,85 @@ export class Game {
     this.buildTable();
     this.placeTable();
     if (this.run) this.refreshAll();
+    this.tipZone();
   }
 
-  /** Fits the flat table into its area; on phones it stands upright (your goal at the bottom, your rods' ends on the right). */
+  /**
+   * Where the coach's tip may sit, as CSS vars in screen pixels: never over the score or the possession panel. On a
+   * wide screen it is the foot of the left column (over the bench, above Squad/Rules/Menu); on a phone it sits just
+   * above the bottom buttons (on match day, above Line-up), and in a match it leaves the handles column free.
+   */
+  tipZone() {
+    const L = this.L;
+    if (!L) return;
+    const k = this.app.screen.width / L.W;
+    const px = (u: number) => `${Math.round(u * k)}px`;
+    const css = document.documentElement.style;
+    if (L.mode === "land") {
+      css.setProperty("--tip-left", px(14));
+      css.setProperty("--tip-width", px(352 - 28));
+      css.setProperty("--tip-width-round", px(352 - 28));
+      css.setProperty("--tip-bottom", px(L.H - (L.H - 58 - 34)));
+      return;
+    }
+    const matchDay = this.run?.s.phase === "fixture";
+    const a = L.area;
+    css.setProperty("--tip-left", px(10));
+    css.setProperty("--tip-width", px(L.W - 20));
+    css.setProperty("--tip-width-round", px(L.W - 20 - 210));
+    css.setProperty("--tip-bottom", px(matchDay ? L.H - (a.y + a.h - 96) : L.H - (L.btnY - 46)));
+  }
+
+  /** The title covers the game: the table, HUD and panels stop drawing behind it so nothing old shows through. */
+  cover(on: boolean) {
+    this.root.renderable = !on;
+    if (on) {
+      clearTimeout(this.autoTimer);
+      setMood("title");
+      setCrowdBed(0, 0);
+    } else this.syncMood();
+  }
+
+  /** The table's resting scale and place, kept so the goal's camera push can return to them. */
+  tblHome = { k: 1, x: 0, y: 0 };
+
+  /**
+   * Fits the flat table into its area; on phones it stands upright (your goal at the bottom, your rods' ends on the
+   * right). Table space runs from the stands above the far rail (y = -STAND_T) to under your handles (TS_H); on a
+   * phone the desk adds a strip past their goal (x up to TS_W + DESK_P).
+   */
   placeTable() {
     const a = this.L.area;
-    const tw = this.port ? TS_H : TS_W;
-    const th = this.port ? TS_W : TS_H;
+    const spanY = TS_H + STAND_T;
+    const spanX = TS_W + (this.port ? DESK_P : 0);
+    const tw = this.port ? spanY : spanX;
+    const th = this.port ? spanX : spanY;
     const k = Math.min(a.w / tw, a.h / th);
     this.tbl.scale.set(k);
     if (this.port) {
       this.tbl.rotation = -Math.PI / 2;
-      this.tbl.position.set(a.x + (a.w - tw * k) / 2, a.y + (a.h - th * k) / 2 + th * k);
+      this.tbl.position.set(a.x + (a.w - tw * k) / 2 + STAND_T * k, a.y + (a.h - th * k) / 2 + th * k);
     } else {
       this.tbl.rotation = 0;
-      this.tbl.position.set(a.x + (a.w - tw * k) / 2, a.y + (a.h - th * k) / 2);
+      this.tbl.position.set(a.x + (a.w - tw * k) / 2, a.y + (a.h - th * k) / 2 + STAND_T * k);
     }
+    this.tblHome = { k, x: this.tbl.x, y: this.tbl.y };
+  }
+
+  /** Pushes the camera in by `z` towards a table point, or back home with z = 1. */
+  push(z: number, at: { x: number; y: number }, ms: number): Promise<void> {
+    const h = this.tblHome;
+    if (reduced()) return Promise.resolve();
+    // keep `at` where it is on screen while the scale changes
+    const g0 = { x: h.x, y: h.y };
+    const cos = Math.cos(this.tbl.rotation);
+    const sin = Math.sin(this.tbl.rotation);
+    const sx = g0.x + h.k * (at.x * cos - at.y * sin);
+    const sy = g0.y + h.k * (at.x * sin + at.y * cos);
+    const k = h.k * z;
+    const x = sx - k * (at.x * cos - at.y * sin);
+    const y = sy - k * (at.x * sin + at.y * cos);
+    return Promise.all([tween(this.tbl.scale, { x: k, y: k }, ms, ease.inOut), tween(this.tbl, { x, y }, ms, ease.inOut)]).then(() => {});
   }
 
   /** Text inside the table stays upright on screen whichever way the table is turned. */
@@ -473,7 +567,7 @@ export class Game {
         const x = 30 + i * 74;
         const y = 406;
         mk(x, y, 70, 70, COL.ink, COL.edge);
-        label(name, x + 35, y + 15, 12);
+        label(k === "round" && this.run && this.run.mode !== "season" ? "Match" : name, x + 35, y + 15, 12);
         const v = txt("-", { fontFamily: NUM, fontSize: 32, fill: color });
         v.anchor.set(0.5);
         v.position.set(x + 35, y + 45);
@@ -497,36 +591,37 @@ export class Game {
     } else {
       const W = L.W;
       // row 1: the club and its rule, the score
-      mk(14, 14, W * 0.62, 112, COL.ink2, COL.edge);
-      this.clubName = label("", 14 + W * 0.31, 36, 22, COL.cream);
-      this.clubRule = txt("", { fontSize: 12, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: W * 0.58, lineHeight: 16 });
+      // phone type: nothing on the canvas under 12 px at 390 wide (18 units here, after txt's 1.3)
+      mk(14, 14, W * 0.62, 122, COL.ink2, COL.edge);
+      this.clubName = label("", 14 + W * 0.31, 36, 23, COL.cream);
+      this.clubRule = txt("", { fontSize: 18, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: W * 0.58, lineHeight: 19 });
       this.clubRule.anchor.set(0.5, 0);
       this.clubRule.position.set(14 + W * 0.31, 54);
       this.hud.addChild(this.clubRule);
       const sx = 26 + W * 0.62;
       const swd = W - sx - 14;
-      mk(sx, 14, swd, 112, COL.ink2, COL.edge);
-      label("YOU", sx + swd * 0.25, 32, 13);
-      label("THEM", sx + swd * 0.75, 32, 13);
-      this.scoreYou = big(sx + swd * 0.25, 80, 58, look().kitHi);
-      this.scoreThem = big(sx + swd * 0.75, 80, 58, THEM.hi);
-      label(":", sx + swd / 2, 74, 36, COL.dim);
+      mk(sx, 14, swd, 122, COL.ink2, COL.edge);
+      label("YOU", sx + swd * 0.25, 34, 18);
+      label("THEM", sx + swd * 0.75, 34, 18);
+      this.scoreYou = big(sx + swd * 0.25, 86, 62, look().kitHi);
+      this.scoreThem = big(sx + swd * 0.75, 86, 62, THEM.hi);
+      label(":", sx + swd / 2, 80, 36, COL.dim);
       // row 2: the possession
-      mk(14, 138, W - 28, 88, COL.ink, COL.edge);
-      this.possText = label("", 30, 162, 17, COL.cream, 0);
-      this.touchText = txt("", { fontSize: 12, fill: COL.dim, wordWrap: true, wordWrapWidth: W - 250, lineHeight: 16 });
+      mk(14, 146, W - 28, 96, COL.ink, COL.edge);
+      this.possText = label("", 30, 170, 19, COL.cream, 0);
+      this.touchText = txt("", { fontSize: 18, fill: COL.dim, wordWrap: true, wordWrapWidth: W - 230, lineHeight: 18 });
       this.touchText.anchor.set(0, 0);
-      this.touchText.position.set(30, 182);
+      this.touchText.position.set(30, 188);
       this.hud.addChild(this.touchText);
-      this.pips.position.set(W - 130, 192);
+      this.pips.position.set(W - 120, 206);
       this.hud.addChild(this.pips);
       this.stat.round = txt("", { fontSize: 1 });
-      this.stat.fans = label("", W - 30, 162, 15, COL.money, 1);
+      this.stat.fans = label("", W - 30, 170, 19, COL.money, 1);
       this.stat.goals = txt("", { fontSize: 1 });
       this.stat.wins = txt("", { fontSize: 1 });
       this.benchLabel = txt("", { fontSize: 1 });
       this.playLabel = txt("", { fontSize: 1 });
-      this.chalText = txt("", { fontSize: 12, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: W - 360 });
+      this.chalText = txt("", { fontSize: 18, fill: COL.money, align: "center", wordWrap: true, wordWrapWidth: W - 300 });
       this.chalText.anchor.set(0.5, 0.5);
       this.chalText.position.set(W / 2, L.H - 112);
       this.hud.addChild(this.chalText);
@@ -552,11 +647,15 @@ export class Game {
     const felt = night ? 0x071a1e : lk.felt;
     const feltHi = night ? 0x10303a : lk.feltHi;
     const wood = night ? 0x1c0b18 : BRASS.wood;
+    const railCol = night ? 0x14060f : BRASS.rail;
     const g = this.pitch;
     g.clear();
-    // the cabinet and its wooden rail
-    g.roundRect(TX0 - 70, LANE0 - RAIL - 18, TX1 - TX0 + 140, PITCH_H + 2 * RAIL + 36, 26).fill({ color: 0x000000, alpha: 0.35 });
-    g.roundRect(TX0 - 64, LANE0 - RAIL - 12, TX1 - TX0 + 128, PITCH_H + 2 * RAIL + 24, 22).fill(wood);
+    const X0 = TX0 - 64;
+    const XW = TX1 - TX0 + 128;
+    // the cabinet and its wooden frame
+    g.roundRect(TX0 - 70, CAB_T - 6, TX1 - TX0 + 140, CAB_B - CAB_T + 12, 26).fill({ color: 0x000000, alpha: 0.35 });
+    g.roundRect(X0, CAB_T, XW, CAB_B - CAB_T, 22).fill(wood);
+    g.roundRect(X0 + 3, CAB_T + 3, XW - 6, 5, 3).fill({ color: 0xffffff, alpha: 0.06 });
     // goal mouths: dark nets behind each goal line (the net lines live in fxLayer so a goal can shake them)
     for (const side of [0, 1]) {
       const gx = side === 0 ? TX0 - 50 : TX1;
@@ -604,18 +703,22 @@ export class Game {
     this.drawMark(night ? 0xbfe6ef : COL.cream);
     // the mask that keeps rod bars inside the cabinet
     this.rodMask.clear();
-    this.rodMask.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, PITCH_H + 2 * RAIL).fill(0xffffff);
+    this.rodMask.rect(X0, LANE0 - RAIL_T, XW, PITCH_H + RAIL_T + RAIL).fill(0xffffff);
     this.darkMask.clear();
-    this.darkMask.roundRect(TX0 - 64, LANE0 - RAIL - 12, TX1 - TX0 + 128, PITCH_H + 2 * RAIL + 24, 22).fill(0xffffff);
+    this.darkMask.roundRect(X0, CAB_T, XW, CAB_B - CAB_T, 22).fill(0xffffff);
     this.dark.visible = night;
-    // the rail on top of the bars, with brass bearings where the rods pass
+    // the rails on top of the bars, with brass bearings where the rods pass. The far rail is deep: the desk's wire
+    // runs along it on a wide screen.
     const r = this.rail;
     r.clear();
-    r.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, RAIL).fill(night ? 0x14060f : BRASS.rail);
-    r.rect(TX0 - 64, LANE0 + PITCH_H, TX1 - TX0 + 128, RAIL).fill(night ? 0x14060f : BRASS.rail);
-    r.rect(TX0 - 64, LANE0 - RAIL, TX1 - TX0 + 128, 4).fill({ color: 0xffffff, alpha: 0.06 });
+    r.rect(X0, LANE0 - RAIL_T, XW, RAIL_T).fill(railCol);
+    r.rect(X0, LANE0 + PITCH_H, XW, RAIL).fill(railCol);
+    r.rect(X0, LANE0 - 3, XW, 3).fill({ color: 0x000000, alpha: 0.35 });
+    r.rect(X0, LANE0 + PITCH_H, XW, 3).fill({ color: 0x000000, alpha: 0.35 });
     for (let x = 1; x <= 8; x++) {
-      for (const y of [LANE0 - RAIL / 2, LANE0 + PITCH_H + RAIL / 2]) r.circle(colX(x), y, 8).fill(BRASS.lo).stroke({ width: 2, color: BRASS.hi, alpha: 0.6 });
+      // collars on the inner edge of the far rail (the wire sits between them), bearings on the near one
+      r.roundRect(colX(x) - 9, LANE0 - 8, 18, 8, 3).fill(BRASS.lo).stroke({ width: 2, color: BRASS.hi, alpha: 0.6 });
+      r.circle(colX(x), LANE0 + PITCH_H + RAIL / 2, 8).fill(BRASS.lo).stroke({ width: 2, color: BRASS.hi, alpha: 0.6 });
     }
     if (night) {
       // cobwebs in the four corners of the frame
@@ -633,10 +736,10 @@ export class Game {
         }
         r.stroke({ width: 1.5, color: 0xdbe9f0, alpha: 0.45 });
       };
-      web(TX0 - 64, LANE0 - RAIL - 12, 1, 1);
-      web(TX1 + 64, LANE0 - RAIL - 12, -1, 1);
-      web(TX0 - 64, LANE0 + PITCH_H + RAIL + 12, 1, -1);
-      web(TX1 + 64, LANE0 + PITCH_H + RAIL + 12, -1, -1);
+      web(X0, CAB_T, 1, 1);
+      web(X0 + XW, CAB_T, -1, 1);
+      web(X0, CAB_B, 1, -1);
+      web(X0 + XW, CAB_B, -1, -1);
       // a carved lantern on each goal
       for (const gx of [TX0 - 58, TX1 + 58]) {
         const y = laneY(MOUTH[0] - 0.5) - 26;
@@ -664,15 +767,41 @@ export class Game {
         this.mists.push({ g: m, x0, y0, ph: i * 1.7 });
       }
     }
-    // rod ends with grips: theirs stick out the top; yours end in the handle controls (drawn with them)
+    // rod ends with grips: theirs stick out over the far frame, in their club's kit; yours end in the handle controls
     this.knobLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     const kg = new Graphics();
+    const theirKit = night ? { main: 0x8fb6c8, hi: 0xcfe3ee } : kitOf(this.clubNow());
     for (let rod = 0; rod < 4; rod++) {
       const x = colX(colOf(1, rod));
-      kg.rect(x - 4, LANE0 - RAIL - 14, 8, 14).fill(BRASS.bar);
-      kg.roundRect(x - 13, LANE0 - RAIL - 30, 26, 20, 7).fill(night ? 0x8fb6c8 : THEM.main).stroke({ width: 2, color: COL.ink });
+      kg.rect(x - 4, CAB_T - 4, 8, 12).fill(BRASS.bar);
+      kg.roundRect(x - 14, CAB_T - 24, 28, 22, 8).fill(theirKit.main).stroke({ width: 2.5, color: COL.ink });
+      kg.roundRect(x - 10, CAB_T - 21, 20, 4, 2).fill({ color: theirKit.hi, alpha: 0.6 });
     }
     this.knobLayer.addChild(kg);
+    // the stands and the wire
+    this.crowd.build(this.port, night);
+    const lk2 = look();
+    this.crowd.setKit(lk2.kit, lk2.kitHi);
+    if (this.run) this.crowd.level(this.fansShown || this.run.s.fans);
+    if (this.port) {
+      // a standing table: the wire runs across the far end, past their goal, upright on screen
+      const len = CAB_B - CAB_T - 8;
+      this.desk.layout(len, DESK_P - 8, 27, night);
+      this.desk.rotation = Math.PI / 2;
+      this.desk.position.set(TS_W + DESK_P - 2, CAB_T + 4);
+    } else {
+      this.desk.layout(XW - 40, RAIL_T - 10, 21, night);
+      this.desk.rotation = 0;
+      this.desk.position.set(X0 + 20, LANE0 - RAIL_T + 1);
+    }
+    this.syncEventTint();
+  }
+
+  /** The club on the other side right now (the match's, or the next fixture's). */
+  clubNow(): string | null {
+    const run = this.run;
+    if (!run) return null;
+    return run.s.match?.club || run.clubName();
   }
 
   /** The two nets; `side` ripples with `amp` (0 = still). */
@@ -739,6 +868,8 @@ export class Game {
     const off = m ? m.off : [[4, 2, 0, 1], [5, 3, 1, 2]];
     const rivals = run.rivals();
     const ghost = run.mode === "haunt";
+    const kit = ghost ? null : kitOf(m?.club || run.clubName());
+    const at = run.s.editionAt;
     this.disp.off = off.map((o) => o.slice());
     for (const side of [0, 1] as (0 | 1)[]) {
       for (let r = 0; r < 4; r++) {
@@ -758,15 +889,13 @@ export class Game {
           for (let f = 0; f < d.n; f++) {
             const slot = slotOf(r, f);
             const l = side === 0 ? run.s.squad[slot] : rivals[slot] || null;
-            const fv = new FigureView(side, l, f, side === 0 ? "you" : ghost ? "ghost" : "them");
+            const fv = new FigureView(side, l, f, side === 0 ? "you" : ghost ? "ghost" : "them", side === 1 ? kit : null);
             fv.position.set(0, (f * d.gap + 0.5) * LH);
+            if (l) fv.setTrait(traitsOf(l, at), ghost);
+            // a phone's table is too small for readable tickers: they show on a hold instead (the figure's tag)
             if (fv.tag) {
               this.upright(fv.tag);
-              if (this.port) {
-                fv.tag.anchor.set(0, 0.5);
-                fv.tag.position.set(-(FR + 4), side === 0 ? -FR - 18 : FR + 18);
-                fv.tag.anchor.set(0.5, 0.5);
-              }
+              if (this.port) fv.tag.visible = false;
             }
             if (side === 0) {
               fv.setStats(run.stats(slot));
@@ -776,17 +905,13 @@ export class Game {
             figs.push(fv);
           }
         } else bar.alpha = 0.25;
-        if (side === 0 && m && m.frozen === r) {
-          const ice = new Graphics().rect(-9, -span, 18, span * 2).fill({ color: COL.cyan, alpha: 0.22 });
-          c.addChildAt(ice, 1);
-        }
         this.rodLayer.addChild(c);
         this.rods[side].push({ c, bar, figs });
         // your rods can be dragged by the bar itself: a wide strip along the rod answers
         if (side === 0 && !pulled) {
           const hit = new Container();
-          hit.position.set(colX(colOf(0, r)), LANE0 - RAIL);
-          hit.hitArea = new Rectangle(-30, 0, 60, PITCH_H + 2 * RAIL);
+          hit.position.set(colX(colOf(0, r)), LANE0 - RAIL_T);
+          hit.hitArea = new Rectangle(-30, 0, 60, PITCH_H + RAIL_T + RAIL);
           hit.eventMode = "static";
           hit.cursor = "ns-resize";
           hit.on("pointerdown", (e) => this.dragStart(r, e));
@@ -797,6 +922,7 @@ export class Game {
     // the figures cross in column order, like a real table
     this.rodLayer.sortableChildren = true;
     this.syncGhostLook();
+    this.applyRuleMarks(false);
   }
 
   /** The phasing rod: see-through while it lets the ball pass. */
@@ -830,19 +956,46 @@ export class Game {
     g.clear();
     if (this.haunted) {
       // a pumpkin: ribs, a stem
-      g.circle(3, 4, 11).fill({ color: 0x000000, alpha: 0.45 });
-      g.circle(0, 0, 18).fill({ color: 0xff8a1c, alpha: 0.12 });
-      g.ellipse(0, 0, 11, 10).fill(0xf07a12).stroke({ width: 2, color: COL.ink });
-      g.ellipse(0, 0, 5, 10).stroke({ width: 1.5, color: 0xb04a08 });
-      g.moveTo(0, -10).lineTo(0, 10).stroke({ width: 1.5, color: 0xb04a08 });
-      g.rect(-1.5, -14, 3, 5).fill(0x3d7a2a);
-      g.circle(-4, -4, 2.5).fill({ color: 0xffd28a, alpha: 0.8 });
+      g.circle(4, 6, 15).fill({ color: 0x000000, alpha: 0.45 });
+      g.circle(0, 0, 25).fill({ color: 0xff8a1c, alpha: 0.12 });
+      g.ellipse(0, 0, 15, 14).fill(0xf07a12).stroke({ width: 2.5, color: COL.ink });
+      g.ellipse(0, 0, 7, 14).stroke({ width: 2, color: 0xb04a08 });
+      g.moveTo(0, -14).lineTo(0, 14).stroke({ width: 2, color: 0xb04a08 });
+      g.rect(-2, -19, 4, 7).fill(0x3d7a2a);
+      g.circle(-5.5, -5.5, 3.2).fill({ color: 0xffd28a, alpha: 0.8 });
       return;
     }
-    g.circle(3, 4, 10).fill({ color: 0x000000, alpha: 0.4 });
-    g.circle(0, 0, 10).fill(0xfff6e6).stroke({ width: 2, color: COL.ink });
-    g.circle(-3, -3, 3).fill({ color: 0xffffff, alpha: 0.9 });
+    // the protagonist: half again the old size, a soft shadow on the felt, a highlight, a seam
+    g.ellipse(5, 7, 15, 12).fill({ color: 0x000000, alpha: 0.32 });
+    g.circle(0, 0, 18).fill({ color: 0xfff6e6, alpha: 0.1 });
+    g.circle(0, 0, 14).fill(0xfff6e6).stroke({ width: 2.5, color: COL.ink });
+    g.circle(2, 3, 9).fill({ color: 0xe8d6bc, alpha: 0.6 });
+    g.poly([0, -6, 5.5, -2, 3.5, 5, -3.5, 5, -5.5, -2]).fill({ color: COL.ink, alpha: 0.75 });
+    g.circle(-5, -5, 3.6).fill({ color: 0xffffff, alpha: 0.95 });
   }
+
+  /** The ball's trail: a ribbon through its last positions that thins and fades, drawn each frame. */
+  drawTrail() {
+    const g = this.trailG;
+    const now = this.t;
+    const tr = this.trail;
+    while (tr.length && now - tr[0].t > (this.haunted ? 0.42 : 0.3)) tr.shift();
+    g.clear();
+    if (tr.length < 2 || reduced()) return;
+    const col = this.haunted ? 0xff7a1c : 0xfff6e6;
+    const life = this.haunted ? 0.42 : 0.3;
+    for (let i = 1; i < tr.length; i++) {
+      const a = tr[i - 1];
+      const b = tr[i];
+      const k = 1 - (now - b.t) / life;
+      if (k <= 0) continue;
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 4 + 18 * k, color: col, alpha: 0.38 * k, cap: "round" });
+    }
+    const last = tr[tr.length - 1];
+    g.circle(last.x, last.y, 12).fill({ color: this.kickTint, alpha: 0.25 });
+  }
+  /** Tint of the trail's head: gold for your shot, cream otherwise. */
+  kickTint = 0xfff6e6;
 
   // ================================================================ run lifecycle
   start(run: Run) {
@@ -850,6 +1003,11 @@ export class Game {
     for (const l of run.s.squad) tokenTexture(l.c, l.s, () => {});
     this.run = run;
     this.busy = false;
+    this.fansShown = 0;
+    this.crowdExternal = false;
+    this.deskN = 0;
+    this.desk.say(run.mode === "haunt" ? "The Haunted table is open. Lights low." : "Market open. The table is live.", "flat", true);
+    void loadCrowd();
     this.calmSwirl();
     this.resize();
   }
@@ -859,7 +1017,7 @@ export class Game {
     if (!run) return;
     this.tip.hide();
     // a phone's bench row comes and goes with what sits on it
-    if (this.port && (this.L.area.y > 236) !== this.benchRow()) {
+    if (this.port && (this.L.area.y > PORT_TOP) !== this.benchRow()) {
       this.resize();
       return;
     }
@@ -905,11 +1063,11 @@ export class Game {
     const ghostLine = run.mode === "haunt" ? ` · ${GHOST_RULES.phasing.name}, ${GHOST_RULES.polter.name}, ${GHOST_RULES.dark.name}` : "";
     this.clubRule.text = boss
       ? `${BOSS[boss].text}. ${style.name}.${ghostLine}`
-      : `${FIXTURE_NAME[kind]} · ${run.mode === "haunt" ? "Haunted table" : `round ${Math.min(s.round, run.rounds)} of ${run.rounds}`} · first to ${m ? m.target : 2} · ${style.name}${ghostLine}`;
+      : `${fixtureLabel(run, kind)} · ${run.mode === "haunt" ? "Haunted table" : run.mode === "daily" ? "Daily match day" : `round ${Math.min(s.round, run.rounds)} of ${run.rounds}`} · first to ${m ? m.target : 2} · ${style.name}${ghostLine}`;
     this.scoreYou.text = String(h.you);
     this.scoreThem.text = String(h.them);
     this.scoreYou.style.fill = look().kitHi;
-    this.stat.round.text = run.mode === "haunt" ? `${Math.min(s.kind + 1, 3)}/3` : `${Math.min(s.round, run.rounds)}/${run.rounds}`;
+    this.stat.round.text = run.mode !== "season" ? `${Math.min(s.kind + 1, 3)}/3` : `${Math.min(s.round, run.rounds)}/${run.rounds}`;
     this.stat.fans.text = this.port ? `${s.fans} fans` : String(s.fans);
     this.stat.goals.text = String(h.goals);
     this.stat.wins.text = String(h.wins);
@@ -923,12 +1081,25 @@ export class Game {
       const free = m.free.reduce((a, b) => a + b, 0) + m.freeAny;
       const lines = [`${m.touches} touch${m.touches === 1 ? "" : "es"} left${free ? ` · ${free} free slide${free === 1 ? "" : "s"}` : ""}${m.dummy ? ` · they freeze for ${m.dummy}` : ""}`];
       if (ghost) {
-        lines.push(run.fadedRod() >= 0 ? `Their ${RODS[ghost.rod].name.toLowerCase()} is FADED this touch` : `Their ${RODS[ghost.rod].name.toLowerCase()} is SOLID this touch, faded next`);
         const mv = run.driftNow();
-        if (mv) lines.push(`After your next kick their ${RODS[mv.r].name.toLowerCase()} drifts ${mv.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down"}`);
+        const dir = mv ? (mv.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down") : "";
+        if (this.port) {
+          // a phone's panel has room for two lines: the touches, then the ghosts in short
+          lines.push(`${RODS[ghost.rod].name} ${run.fadedRod() >= 0 ? "FADED" : "SOLID"}${mv ? ` · ${RODS[mv.r].name.toLowerCase()} drifts ${dir}` : ""}`);
+        } else {
+          lines.push(run.fadedRod() >= 0 ? `Their ${RODS[ghost.rod].name.toLowerCase()}: FADED now` : `Their ${RODS[ghost.rod].name.toLowerCase()}: SOLID now, faded next`);
+          if (mv) lines.push(`Next kick: their ${RODS[mv.r].name.toLowerCase()} drifts ${dir}`);
+        }
       }
       this.touchText.text = lines.join("\n");
-      for (let i = 0; i < m.touches; i++) g.circle((i - (m.touches - 1) / 2) * 30, 0, 11).fill(COL.money).stroke({ width: 3, color: COL.ink });
+      const slip = m.boss === "slip" ? 1 : 0;
+      const n = m.touches + slip;
+      for (let i = 0; i < m.touches; i++) g.circle((i - (n - 1) / 2) * 30, 0, 11).fill(COL.money).stroke({ width: 3, color: COL.ink });
+      if (slip) {
+        // Max Slippage: the touch they took, struck through
+        const x = (n - 1 - (n - 1) / 2) * 30;
+        g.circle(x, 0, 10).stroke({ width: 3, color: COL.bad }).moveTo(x - 9, 9).lineTo(x + 9, -9).stroke({ width: 3, color: COL.bad });
+      }
     } else if (m && h.mode === "defend" && s.phase === "defend" && !this.hudNow) {
       this.possText.text = `Their ball · ${m.aiTouches} touch${m.aiTouches === 1 ? "" : "es"} left`;
       this.touchText.text = `${m.blockSlides} block slide${m.blockSlides === 1 ? "" : "s"} left. Slide into the red lanes, then Ready.`;
@@ -940,13 +1111,16 @@ export class Game {
     } else {
       const ph = s.phase;
       if (ph === "fixture") {
-        this.possText.text = `Next up: ${FIXTURE_NAME[s.kind].toLowerCase()}`;
-        this.touchText.text = `${run.clubName()} · first to ${boss === "bell" ? 3 : 2} · a win is +${WIN_FANS[s.kind]} fans`;
+        this.possText.text = `Next up: ${fixtureLabel(run, s.kind).toLowerCase()}`;
+        this.touchText.text = `${run.clubName()} · first to ${targetOf(run, s.kind)} · a win is +${winFansOf(run, s.kind)} fans`;
       } else {
         this.possText.text = ph === "room" ? "Dressing room" : ph === "fulltime" ? "Full time" : ph === "won" ? "Champions" : ph === "over" ? "Season over" : "";
         this.touchText.text = ph === "room" ? `${s.fans} fans to spend` : "";
       }
     }
+    if (!this.crowdExternal) this.crowd.level(s.fans);
+    this.syncMood();
+    this.clubCss(name);
     const ch = ui.challenge;
     this.chalText.text = ch ? `Beat ${ch.name || "the challenger"}: ${ch.won ? "won the season" : `round ${ch.round}`}, best goal ${fmt(ch.best)}` : "";
     this.benchLabel.text = `COACHES ${s.coaches.length}/${MAX_COACHES}`;
@@ -994,6 +1168,8 @@ export class Game {
       t.anchor.set(0.5, 0);
       t.position.set(0, h * 0.24);
       t.alpha = 0.85;
+      // too small to read on a phone: the silhouette says it
+      t.visible = !this.port;
       c.addChild(g, t);
       c.position.set(x, y);
       this.benchLayer.addChild(c);
@@ -1068,7 +1244,7 @@ export class Game {
     const n = run.coachSlots(j.id).length;
     let body = d.text;
     if (d.reads) body += `\nWorks on ${n} of your figures right now.`;
-    body += `\n${RARITY_NAME[d.rarity]} · lets go for ${run.sellValue(j)} fans`;
+    body += `\n${TIER_NAME[d.tier]} · lets go for ${run.sellValue(j)} fans`;
     const offPitch = run.s.phase === "fixture" || run.s.phase === "room";
     if (pin && offPitch) {
       const b = new Button(`Let go +${run.sellValue(j)}`, 160, 46, COL.danger, () => {
@@ -1261,12 +1437,14 @@ export class Game {
     this.ctrlLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.guideLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.arrows = {};
+    this.clearPreview();
     if (!run || !this.inMatch()) return;
     this.syncGhostLook();
     const s = run.s;
     const m = run.m;
     const attack = s.phase === "attack";
-    // your handles: the rod comes out of the cabinet, the two slide buttons are its grip
+    const kit = look();
+    // your handles: the rod comes out of the cabinet and ends in a brass grip; its two halves slide it
     const hg = new Graphics();
     this.ctrlLayer.addChild(hg);
     for (let r = 0; r < 4; r++) {
@@ -1274,21 +1452,42 @@ export class Game {
       const pulled = m.pulled === r;
       const locked = m.frozen === r || (r === 0 && m.boss === "lockup");
       const cost = attack ? run.slideCost(r) : 0;
-      hg.rect(x - 5, HANDLE_Y - 4, 10, ARROW_H * 2 + 18).fill(pulled ? { color: BRASS.bar, alpha: 0.25 } : BRASS.bar);
-      hg.roundRect(x - ARROW_W / 2 - 4, CTRL_Y - 2, ARROW_W + 8, ARROW_H * 2 + 14, 14).fill({ color: COL.ink, alpha: 0.85 });
+      const gas = m.ruleView?.kind === "cost2" && attack && cost === 2;
+      hg.rect(x - 5, HANDLE_Y - 4, 10, 14).fill(pulled ? { color: BRASS.bar, alpha: 0.25 } : BRASS.bar);
+      if (pulled) continue;
+      // the grip's body: a dark rubber sleeve with brass end caps, in your kit colour where the grip is held
+      const top = CTRL_Y - 2;
+      const h = ARROW_H * 2 + 14;
+      if (gas) hg.roundRect(x - ARROW_W / 2 - 12, top - 8, ARROW_W + 24, h + 16, 22).fill({ color: 0xff7a1a, alpha: 0.28 });
+      hg.roundRect(x - ARROW_W / 2 - 4, top + 4, ARROW_W + 8, h, 18).fill({ color: 0x000000, alpha: 0.4 });
+      hg.roundRect(x - ARROW_W / 2 - 4, top, ARROW_W + 8, h, 18).fill(BRASS.lo).stroke({ width: 3, color: COL.ink });
+      hg.roundRect(x - ARROW_W / 2, top + 4, ARROW_W, h - 8, 15).fill(locked ? 0x2a1a24 : kit.kit);
+      hg.roundRect(x - ARROW_W / 2 + 6, top + 8, 8, h - 16, 4).fill({ color: 0xffffff, alpha: 0.12 });
+      // grip ridges across the middle
+      for (let i = -2; i <= 2; i++) hg.rect(x - ARROW_W / 2 + 10, top + h / 2 + i * 5 - 1, ARROW_W - 20, 2).fill({ color: COL.ink, alpha: 0.35 });
       for (const d of [-1, 1] as Dir[]) {
         const ok = !this.busy && !pulled && run.canMove(0, r, d) && (attack ? cost <= m.touches : m.blockSlides > 0);
-        const b = this.arrow(d, ok, () => void this.doSlide(r, d));
+        const b = this.arrow(r, d, ok, () => void this.doSlide(r, d));
         b.position.set(x, CTRL_Y + 2 + ARROW_H / 2 + (d === -1 ? 0 : ARROW_H + 6));
         this.ctrlLayer.addChild(b);
         this.arrows[`${r}${d}`] = b;
       }
+      if (gas) {
+        // Gas Spike: a "2" on the grip, every slide costs two touches
+        const bg = new Graphics().circle(0, 0, 15).fill(0xff7a1a).stroke({ width: 3, color: COL.ink });
+        const t2 = txt("2", { fontFamily: NUM, fontSize: 26, fill: COL.ink });
+        t2.anchor.set(0.5);
+        const c = new Container();
+        c.addChild(bg, t2);
+        this.upright(c);
+        c.position.set(x + ARROW_W / 2 + 2, CTRL_Y + 4);
+        this.ctrlLayer.addChild(c);
+      }
       const capText = pulled ? "PULLED" : locked ? "LOCKED" : attack && cost === 0 && (m.free[r] > 0 || m.freeAny > 0) ? "FREE SLIDE" : attack && cost === 2 ? "2 TOUCHES" : RODS[r].name.toUpperCase();
-      const cap = txt(capText, { fontSize: 13, fill: pulled || locked ? COL.bad : cost === 0 && attack && capText === "FREE SLIDE" ? COL.cyan : COL.cream2, stroke: { color: COL.ink, width: 4 } });
+      const cap = txt(capText, { fontSize: 13, fill: pulled || locked ? COL.bad : cost === 0 && attack && capText === "FREE SLIDE" ? COL.cyan : gas ? 0xffa060 : COL.cream2, stroke: { color: COL.ink, width: 4 } });
       cap.anchor.set(0.5);
       cap.position.set(x, capY());
       this.upright(cap);
-      if (this.port) cap.position.set(x, CTRL_Y + ARROW_H + 6);
       if (this.port) cap.visible = false;
       this.ctrlLayer.addChild(cap);
     }
@@ -1306,13 +1505,14 @@ export class Game {
     const attack = run.s.phase === "attack";
     const px = colX(colOf(1, g.rod));
     const faded = run.fadedRod() === g.rod;
+    const y = CAB_T - 40;
     const tag = txt(attack ? (faded ? "FADED" : "SOLID") : "PHASING", {
-      fontSize: 12,
+      fontSize: this.port ? 18 : 13,
       fill: !attack ? 0xcfe3ee : faded ? COL.dim : COL.cyan,
-      stroke: { color: COL.ink, width: 4 },
+      stroke: { color: COL.ink, width: 5 },
     });
     tag.anchor.set(0.5);
-    tag.position.set(px, LANE0 - RAIL - 38);
+    tag.position.set(px, y);
     this.upright(tag);
     this.ctrlLayer.addChild(tag);
     const mv = run.driftNow();
@@ -1320,7 +1520,6 @@ export class Game {
     const x = colX(colOf(1, mv.r));
     const a = new Graphics();
     const same = mv.r === g.rod;
-    const y = LANE0 - RAIL - 38;
     // a wisp arrow: the way the rod will drift after your next kick
     a.circle(0, 0, 16).fill({ color: 0xcfe3ee, alpha: 0.18 }).stroke({ width: 2, color: 0xcfe3ee, alpha: 0.8 });
     const t = 8;
@@ -1332,31 +1531,131 @@ export class Game {
     this.ctrlLayer.addChild(a);
   }
 
-  arrow(d: Dir, enabled: boolean, fn: () => void): Container {
+  /**
+   * One half of a brass grip: an arrow that slides the rod. Hovering it (or holding it on a touch screen) reads the
+   * tape: their rods show as ghosts where they will go after they react. On a touch screen a hold reads, a tap slides.
+   */
+  arrow(r: number, d: Dir, enabled: boolean, fn: () => void): Container {
     const c = new Container();
     const g = new Graphics();
-    const w = ARROW_W;
-    const h = ARROW_H;
-    const col = enabled ? COL.play : 0x4a3346;
-    g.roundRect(-w / 2, -h / 2 + 4, w, h, 12).fill(0x0a2a30);
-    g.roundRect(-w / 2, -h / 2, w, h, 12).fill(col).stroke({ width: 3, color: COL.ink });
-    g.roundRect(-w / 2 + 6, -h / 2 + 4, w - 12, 6, 3).fill({ color: 0xffffff, alpha: enabled ? 0.18 : 0.05 });
-    const t = 14;
-    if (d === -1) g.poly([0, -t, t * 1.2, t * 0.7, -t * 1.2, t * 0.7]).fill({ color: COL.cream, alpha: enabled ? 1 : 0.35 });
-    else g.poly([0, t, t * 1.2, -t * 0.7, -t * 1.2, -t * 0.7]).fill({ color: COL.cream, alpha: enabled ? 1 : 0.35 });
+    const w = ARROW_W - 8;
+    const h = ARROW_H - 4;
+    const draw = (hot: boolean) => {
+      g.clear();
+      // the face: dark when it can't slide, warm brass when it can, cyan only under the pointer
+      const face = !enabled ? 0x2a1622 : hot ? COL.play : 0x3a1630;
+      g.roundRect(-w / 2, -h / 2, w, h, 12).fill(face).stroke({ width: 2, color: enabled ? (hot ? COL.cyan : BRASS.hi) : 0x4a2a3e, alpha: enabled ? 0.9 : 0.6 });
+      g.roundRect(-w / 2 + 6, -h / 2 + 4, w - 12, 5, 2.5).fill({ color: 0xffffff, alpha: enabled ? 0.14 : 0.04 });
+      const t = 13;
+      const col = enabled ? (hot ? COL.cream : BRASS.hi) : 0x6a4a5e;
+      if (d === -1) g.poly([0, -t, t * 1.2, t * 0.7, -t * 1.2, t * 0.7]).fill(col);
+      else g.poly([0, t, t * 1.2, -t * 0.7, -t * 1.2, -t * 0.7]).fill(col);
+    };
+    draw(false);
     c.addChild(g);
     c.eventMode = "static";
     c.cursor = enabled ? "pointer" : "default";
-    c.hitArea = new Rectangle(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4);
+    c.hitArea = new Rectangle(-ARROW_W / 2 - 2, -ARROW_H / 2 - 2, ARROW_W + 4, ARROW_H + 4);
+    let held = 0;
+    let read = false;
+    c.on("pointerover", (e) => {
+      if (e.pointerType !== "mouse" || !enabled) return;
+      draw(true);
+      this.showPreview(r, d);
+    });
+    c.on("pointerout", (e) => {
+      if (e.pointerType !== "mouse") return;
+      draw(false);
+      this.clearPreview();
+    });
+    c.on("pointerdown", (e) => {
+      if (e.pointerType === "mouse" || !enabled) return;
+      read = false;
+      clearTimeout(held);
+      draw(true);
+      held = window.setTimeout(() => {
+        read = true;
+        sfx.tick();
+        this.showPreview(r, d);
+      }, 300);
+    });
+    const release = () => {
+      clearTimeout(held);
+      if (!c.destroyed) draw(false);
+    };
+    c.on("pointerupoutside", () => {
+      release();
+      if (read) this.clearPreview();
+      read = false;
+    });
     c.on("pointertap", () => {
+      release();
       if (!enabled) {
         sfx.error();
+        return;
+      }
+      // a hold was a read, not a slide
+      if (read) {
+        read = false;
+        this.clearPreview();
         return;
       }
       fn();
     });
     (c as Container & { label: string }).label = d === -1 ? "up" : "down";
     return c;
+  }
+
+  /** "Read the tape": ghosts of their rods where they go after you slide rod `r` the way `d`. */
+  showPreview(r: number, d: Dir) {
+    const run = this.run;
+    const L = this.previewLayer;
+    L.removeChildren().forEach((c) => c.destroy({ children: true }));
+    if (!run || this.busy || run.s.phase !== "attack") return;
+    const p = run.previewReact({ r, d });
+    if (!p) return;
+    const kit = run.mode === "haunt" ? { main: 0xcfe3ee, hi: 0xf4fbff } : kitOf(run.m.club);
+    const g = new Graphics();
+    L.addChild(g);
+    // your rod, a lane over
+    const yx = colX(colOf(0, r));
+    for (let f = 0; f < RODS[r].n; f++) {
+      const y = laneY(p.off[0][r] + f * RODS[r].gap);
+      g.circle(yx, y, FR + 2).stroke({ width: 3, color: look().kitHi, alpha: 0.75 });
+    }
+    let moved = 0;
+    for (let rr = 0; rr < 4; rr++) {
+      const now = run.m.off[1][rr];
+      const to = p.off[1][rr];
+      if (now === to) continue;
+      moved++;
+      const x = colX(colOf(1, rr));
+      for (let f = 0; f < RODS[rr].n; f++) {
+        const y0 = laneY(now + f * RODS[rr].gap);
+        const y1 = laneY(to + f * RODS[rr].gap);
+        // a dashed ghost ring where the figure lands, a short arrow from where it is
+        for (let i = 0; i < 12; i++) {
+          const a0 = (i / 12) * Math.PI * 2;
+          g.arc(x, y1, FR + 2, a0, a0 + Math.PI / 12).stroke({ width: 4, color: kit.hi, alpha: 0.95 });
+        }
+        g.circle(x, y1, FR - 2).fill({ color: kit.main, alpha: 0.28 });
+        const dir = Math.sign(y1 - y0);
+        g.moveTo(x, y0 + dir * (FR + 4)).lineTo(x, y1 - dir * (FR + 6)).stroke({ width: 3, color: kit.hi, alpha: 0.7 });
+        g.poly([x - 7, y1 - dir * (FR + 12), x + 7, y1 - dir * (FR + 12), x, y1 - dir * (FR + 4)]).fill({ color: kit.hi, alpha: 0.85 });
+      }
+    }
+    const label = txt(moved ? `They answer: ${moved} rod${moved === 1 ? "" : "s"} move` : "They hold still", { fontFamily: NUM, fontSize: this.port ? 30 : 24, fill: kit.hi === 0xffffff ? COL.cream : kit.hi });
+    label.anchor.set(0.5);
+    const pill = new Container();
+    const pg = new Graphics().roundRect(-label.width / 2 - 14, -label.height / 2 - 4, label.width + 28, label.height + 8, 10).fill({ color: COL.ink, alpha: 0.88 }).stroke({ width: 2, color: kit.hi === 0xffffff ? COL.cream : kit.hi, alpha: 0.8 });
+    pill.addChild(pg, label);
+    this.upright(pill);
+    pill.position.set(this.port ? TX1 - 34 : (TX0 + TX1) / 2, this.port ? LANE0 + PITCH_H / 2 : LANE0 + 22);
+    L.addChild(pill);
+  }
+
+  clearPreview() {
+    this.previewLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
   }
 
   /** Dashed path of a kick through table space, mirrored off the side walls where it bounces. */
@@ -1395,9 +1694,13 @@ export class Game {
     g.stroke({ width, color, alpha, cap: "round" });
   }
 
-  kickTargets: { kick: Kick; x: number; y: number; open: boolean; fig: FigureView | null; label: string }[] = [];
+  kickTargets: { kick: Kick; x: number; y: number; open: boolean; fig: FigureView | null; label: string; tight: boolean }[] = [];
 
-  /** Your kicks from the ball: gold where they go through, faint red where a figure is in the way. */
+  /**
+   * Your kicks from the ball: gold where they go through, faint red dashes ending in an X at the figure in the way.
+   * An open shot gets the gold disc in their mouth; a shot into a lane their keeper reaches gets an amber disc with
+   * a glove. Under Mempool Jam a pass target shows three pending dots.
+   */
   drawKicks() {
     const run = this.run!;
     const m = run.m;
@@ -1407,34 +1710,95 @@ export class Game {
     const g = new Graphics();
     this.guideLayer.addChild(g);
     this.kickTargets = [];
+    let openShots = 0;
     ks.forEach((k, i) => {
       const shot = k.kick.r === 4;
       const pts = this.pathPoints(0, ball.rod, lane, k.kick, shot ? m.drift : 0);
       const hl = this.hoverKick === i;
-      if (k.open) this.dashed(g, pts, shot ? COL.money : COL.cream, hl ? 1 : shot ? 0.9 : 0.6, hl ? 6 : 4);
-      else if (shot || hl) this.dashed(g, pts, COL.bad, hl ? 0.9 : 0.35, 3);
+      // a lane beside their keeper: the reach costs one Power, unless the shot comes straight off a pass or off a wall
+      const reachOn = shot && k.tight && !m.afterPass && k.tr.bounces === 0;
+      const isTight = k.open && reachOn;
+      if (shot && k.open) openShots++;
+      if (k.open) this.dashed(g, pts, isTight ? 0xffa13d : shot ? COL.money : COL.cream, hl ? 1 : shot ? 0.9 : 0.6, hl ? 6 : 4);
+      else if (shot || hl) {
+        // blocked: dim dashes that stop at the blocker
+        const stop = k.at ? Math.abs(colOf(1, k.at.rod) - colOf(0, ball.rod)) : undefined;
+        const part = stop !== undefined ? this.pathPoints(0, ball.rod, lane, k.kick, shot ? m.drift : 0, stop) : pts;
+        this.dashed(g, part, COL.bad, hl ? 0.9 : 0.45, 3);
+      }
       const end = shot ? pts[pts.length - 2] : pts[pts.length - 1];
       const fig = shot ? null : this.rods[0][k.kick.r]?.figs[k.tr.to] || null;
       const to = fig ? run.s.squad[slotOf(k.kick.r, k.tr.to)] : null;
       const what = shot ? `Shot${k.kick.d ? ", angled" : ""}${k.tr.bounces ? ", off the wall" : ""}` : `Pass to $${to?.s || "?"}`;
-      const how = k.open ? (k.beaten ? `goes through ${k.beaten} with Power` : shot ? "open" : "clean") : `blocked by their ${RODS[k.at!.rod].name.toLowerCase()}`;
-      this.kickTargets.push({ kick: k.kick, x: end.x, y: end.y, open: k.open, fig, label: `${what} · ${how}` });
-      if (!k.open && k.at) {
+      const how = k.open
+        ? isTight
+          ? "tight: Power beats their keeper's reach"
+          : shot && k.tight
+            ? k.tr.bounces
+              ? "off the wall, past their keeper's reach"
+              : "one touch, past their keeper's reach"
+            : k.beaten
+              ? `goes through ${k.beaten} with Power`
+              : shot
+                ? "open"
+                : "clean"
+        : reachOn && k.at?.rod === 0
+          ? "tight: their keeper reaches it"
+          : `blocked by their ${RODS[k.at!.rod].name.toLowerCase()}`;
+      this.kickTargets.push({ kick: k.kick, x: end.x, y: end.y, open: k.open, fig, label: `${what} · ${how}`, tight: isTight });
+      if (!k.open && k.at && shot && reachOn && k.at.rod === 0 && (k.at as { reach?: boolean }).reach) {
+        // the keeper's reach: an amber glove in the tight lane beside him, where the ball would be stopped
+        const kp = this.figPos(1, 0, 0);
+        const y = laneY(k.at.lane);
+        g.circle(kp.x, y, 22).fill({ color: COL.ink, alpha: 0.75 }).stroke({ width: 4, color: 0xffa13d, alpha: hl ? 1 : 0.85 });
+        const gl = glove(26, 0xffa13d);
+        gl.rotation = this.port ? Math.PI / 2 : 0;
+        gl.position.set(kp.x, y);
+        gl.eventMode = "none";
+        this.guideLayer.addChild(gl);
+      } else if (!k.open && k.at && (shot || hl)) {
+        // the X sits just in front of the figure in the way, where the ball would stop
         const bp = this.figPos(1, k.at.rod, k.at.fig);
-        if (shot || hl) g.moveTo(bp.x - 10, bp.y - 10).lineTo(bp.x + 10, bp.y + 10).moveTo(bp.x + 10, bp.y - 10).lineTo(bp.x - 10, bp.y + 10).stroke({ width: 4, color: COL.bad, alpha: hl ? 1 : 0.6 });
+        const x = bp.x - FR - 14;
+        const y = bp.y;
+        const xg = () => g.moveTo(x - 9, y - 9).lineTo(x + 9, y + 9).moveTo(x + 9, y - 9).lineTo(x - 9, y + 9);
+        xg().stroke({ width: 10, color: COL.ink, alpha: hl ? 1 : 0.8, cap: "round" });
+        xg().stroke({ width: 5, color: COL.bad, alpha: hl ? 1 : 0.85, cap: "round" });
       }
     });
-    // target markers: a ring on the receiver, a disc in the goal mouth
+    // the sting: a slide of yours just opened a shot that wasn't there
+    const opened = this.openShots === 0 && openShots > 0 && this.lastSlide;
+    this.openShots = openShots;
+    this.lastSlide = false;
+    if (opened) {
+      sfx.laneOpen();
+      this.moment("lane-open");
+    }
+    // target markers: a ring on the receiver, a disc in the goal mouth (open shots only)
     this.kickTargets.forEach((t, i) => {
-      if (!t.open && t.kick.r !== 4) return;
+      if (!t.open) return;
       const c = new Container();
       const mg = new Graphics();
-      const col = t.open ? (t.kick.r === 4 ? COL.money : COL.cream) : COL.bad;
       if (t.kick.r === 4) {
-        mg.circle(0, 0, 25).fill({ color: COL.ink, alpha: 0.75 }).stroke({ width: 5, color: col });
-        mg.circle(0, 0, 9).fill(col);
-      } else mg.circle(0, 0, FR + 9).stroke({ width: 4, color: col, alpha: 0.95 });
-      c.addChild(mg);
+        const col = t.tight ? 0xffa13d : COL.money;
+        mg.circle(0, 0, 27).fill({ color: COL.ink, alpha: 0.78 }).stroke({ width: 5, color: col });
+        if (t.tight) {
+          mg.circle(0, 0, 17).fill(col);
+          const gl = glove(22, COL.ink);
+          gl.rotation = this.port ? Math.PI / 2 : 0;
+          c.addChild(mg, gl);
+        } else {
+          mg.circle(0, 0, 10).fill(col);
+          c.addChild(mg);
+        }
+      } else {
+        mg.circle(0, 0, FR + 9).stroke({ width: 4, color: COL.cream, alpha: 0.95 });
+        if (m.ruleView?.kind === "late") {
+          // Mempool Jam: the pass is pending, it lands a turn late
+          for (let j = -1; j <= 1; j++) mg.circle(FR + 18, j * 11, 4).fill({ color: COL.cream, alpha: 0.5 + 0.25 * (j + 1) });
+        }
+        c.addChild(mg);
+      }
       c.position.set(t.x, t.y);
       c.eventMode = "static";
       c.cursor = "pointer";
@@ -1446,12 +1810,16 @@ export class Game {
       c.on("pointerout", (e) => e.pointerType === "mouse" && this.hoverTarget(null));
       (c as Container & { label: string }).label = t.kick.r === 4 ? "shot" : "pass";
       this.guideLayer.addChild(c);
+      if (t.kick.r === 4 && opened && !reduced()) {
+        // the moment a lane opens: the disc arrives with a pop
+        c.scale.set(0.3);
+        void tween(c.scale, { x: 1, y: 1 }, 380, ease.outElastic);
+      }
     });
     const holder = this.rods[0][ball.rod]?.figs[ball.fig];
     for (const rv of this.rods[0]) for (const f of rv.figs) f.setRing(null);
     holder?.setRing(COL.money, 5);
   }
-
   hoverTarget(i: number | null) {
     if (this.hoverKick === i) return;
     this.hoverKick = i;
@@ -1465,7 +1833,7 @@ export class Game {
     if (!t) return;
     const p = this.root.toLocal(this.tbl.toGlobal({ x: t.x, y: t.y }));
     this.tipPinned = false;
-    this.tip.show(t.kick.r === 4 ? "Shoot" : "Pass", t.label, p.x, p.y - 26, { w: this.L.W, h: this.L.H }, t.open ? COL.money : COL.bad, 300);
+    this.tip.show(t.kick.r === 4 ? "Shoot" : "Pass", t.label, p.x, p.y - 26, { w: this.L.W, h: this.L.H }, t.tight ? 0xffa13d : t.open ? COL.money : COL.bad, 300);
   }
 
   /** A tap on a pass receiver kicks to it, when that pass is on. */
@@ -1476,7 +1844,7 @@ export class Game {
     return true;
   }
 
-  /** While they have the ball: the lanes it can go down. Red for shots, amber for passes. */
+  /** While they have the ball: the lanes it can go down. Red for shots, amber for passes. A wide body shows its two lanes. */
   drawThreats() {
     const run = this.run!;
     const m = run.m;
@@ -1485,19 +1853,40 @@ export class Game {
     const g = new Graphics();
     this.guideLayer.addChild(g);
     for (const rv of this.rods[0]) for (const f of rv.figs) f.setRing(null);
+    // Grip at the back: a wide body covers its lane and the next toward the middle; a Grip keeper both sides
+    const wide = run.wideCover();
+    if (wide)
+      wide.forEach((lanes, r) =>
+        lanes.forEach((f, ln) => {
+          if (f === undefined || f < 0) return;
+          const p = this.figPos(0, r, f);
+          const y0 = Math.min(p.y, laneY(ln)) - LH / 2;
+          g.roundRect(p.x - 12, y0, 24, LH * 2, 10).fill({ color: COL.money, alpha: 0.16 }).stroke({ width: 2, color: COL.money, alpha: 0.6 });
+        }),
+      );
     const threats = run.threats();
     for (const k of threats) {
       const pts = this.pathPoints(1, ball.rod, lane, k.kick, 0);
       this.dashed(g, pts, k.kick.r === 4 ? COL.bad : COL.money, 0.95, 5);
       const end = k.kick.r === 4 ? pts[pts.length - 2] : pts[pts.length - 1];
-      g.circle(end.x, end.y, 12).stroke({ width: 4, color: k.kick.r === 4 ? COL.bad : COL.money });
+      g.circle(end.x, end.y, 13).stroke({ width: 4, color: k.kick.r === 4 ? COL.bad : COL.money });
     }
     const holder = this.rods[1][ball.rod]?.figs[ball.fig];
     holder?.setRing(COL.bad, 5);
+    // block slides left, as pips on the ball holder
+    if (holder && m.blockSlides > 0) {
+      const hp = this.figPos(1, ball.rod, ball.fig);
+      for (let i = 0; i < m.blockSlides; i++) {
+        const off = (i - (m.blockSlides - 1) / 2) * 16;
+        const px = this.port ? hp.x + FR + 18 : hp.x + off;
+        const py = this.port ? hp.y + off : hp.y - FR - 18;
+        g.roundRect(px - 6, py - 6, 12, 12, 3).fill(COL.cyan).stroke({ width: 2.5, color: COL.ink });
+      }
+    }
     if (!threats.length && m.intent && m.intent.kind === "slide") {
       // the rod it is about to move
       const x = colX(colOf(1, m.intent.r));
-      g.rect(x - 14, LANE0, 28, PITCH_H).fill({ color: THEM.main, alpha: 0.12 });
+      g.rect(x - 14, LANE0, 28, PITCH_H).fill({ color: kitOf(m.club).main, alpha: 0.12 });
     }
   }
 
@@ -1516,14 +1905,19 @@ export class Game {
     return true;
   }
 
-  async perform(a: Action) {
+  async perform(a: Action, fast = false) {
     const run = this.run;
     if (!run || this.busy) return;
+    clearTimeout(this.autoTimer);
     this.hoverKick = null;
     this.tip.hide();
+    this.clearPreview();
     const before = hudOf(run);
+    this.afterPassBefore = !!run.s.match?.afterPass;
+    this.lastSlide = a.t === "slide";
     if (!this.act(a)) return;
     this.busy = true;
+    this.fast = fast;
     this.hudNow = before;
     this.syncHud();
     this.syncControls();
@@ -1533,10 +1927,18 @@ export class Game {
       await this.playEvents(run.events.slice());
     } finally {
       this.busy = false;
+      this.fast = false;
       this.hudNow = null;
+      setTimeScale(1);
       this.afterEvents();
     }
   }
+  /** Whether the ball had just arrived from a pass before this action (a one-touch shot beats the keeper's reach). */
+  afterPassBefore = false;
+  /** The kick playing now came straight off a pass. */
+  shotAfterPass = false;
+  /** Batched playback for the auto-skipped defence: everything moves quicker. */
+  fast = false;
 
   afterEvents() {
     const run = this.run;
@@ -1558,6 +1960,23 @@ export class Game {
     this.syncBall();
     this.syncHud();
     this.syncControls();
+    this.autoDefend();
+  }
+
+  /**
+   * Their ball with nothing to block: no threat line on the table, so Ready would be a pure wait. The table presses it
+   * for you, quickly, through the same action a tap takes (the trail is the same as if you had pressed it).
+   */
+  autoDefend() {
+    clearTimeout(this.autoTimer);
+    const run = this.run;
+    if (!run || run.s.phase !== "defend" || this.busy || run.threats().length) return;
+    this.autoTimer = window.setTimeout(() => {
+      const r = this.run;
+      if (!r || r !== run || r.s.phase !== "defend" || this.busy || r.threats().length || ui.overlay) return;
+      this.say("They pass it around at the back.", "flat");
+      void this.perform({ t: "hold" }, true);
+    }, reduced() ? 250 : 520);
   }
 
   doSlide(r: number, d: Dir) {
@@ -1595,31 +2014,139 @@ export class Game {
     else if (e.key.toLowerCase() === "h" && this.run.s.phase === "attack") this.hint();
   }
 
+  // ================================================================ moments, the desk, the music
+  moment(kind: Moment, data?: unknown) {
+    try {
+      this.hooks.onMoment?.(kind, data);
+    } catch {
+      /* a screen's listener never stops the table */
+    }
+  }
+
+  /** A line on the desk's wire. */
+  say(line: string | null, tone: Tone = "flat") {
+    if (line) this.desk.say(line, tone);
+  }
+
+  /** The desk line for an engine event, from shared/voice.ts. */
+  deskFor(ev: Ev) {
+    const run = this.run;
+    if (!run) return;
+    let line: string | null = null;
+    try {
+      line = lineFor(ev, { run, n: this.deskN });
+    } catch {
+      line = null;
+    }
+    if (!line) return;
+    this.deskN++;
+    let tone: Tone = "flat";
+    if (ev.e === "kick") tone = ev.side === 0 ? (ev.result === "goal" ? "up" : ev.result === "kept" ? "flat" : "down") : "up";
+    else if (ev.e === "goal") tone = ev.side === 0 ? "up" : "down";
+    else if (ev.e === "chain") tone = "up";
+    else if (ev.e === "whistle") tone = ev.reason === "lost" ? "down" : ev.reason === "draw" ? "flat" : "up";
+    else if (ev.e === "turnover") tone = ev.to === 1 ? "down" : "up";
+    this.desk.say(line, tone);
+  }
+
+  /** The music and the crowd's murmur follow the ball. */
+  syncMood() {
+    const run = this.run;
+    const s = run?.s;
+    const m = s?.match;
+    let mood: Mood = "title";
+    let tension = 0;
+    if (run && s && m && (s.phase === "attack" || s.phase === "defend")) {
+      const final = m.boss === "bell";
+      if (s.phase === "attack") {
+        const col = colOf(0, m.ball.rod);
+        tension = Math.min(1, col / 7);
+        mood = final ? "final" : col >= 6 ? "attack" : run.mode === "haunt" ? "haunt" : m.boss ? "boss" : "calm";
+      } else {
+        tension = Math.max(0, (9 - colOf(1, m.ball.rod)) / 9) * 0.5;
+        mood = final ? "final" : run.mode === "haunt" ? "haunt" : "defend";
+      }
+    } else if (run?.mode === "haunt") mood = "haunt";
+    setMood(mood);
+    const full = this.crowd.seats.length ? this.crowd.filled / this.crowd.seats.length : 0;
+    setCrowdBed(this.inMatch() && this.root.renderable ? 0.3 + full * 0.7 : 0, tension);
+  }
+
+  /** The club on the table, as CSS vars for the screens around it (--club-main, --club-hi, --club-trim). */
+  clubCss(club: string | null) {
+    if (club === this.cssClub) return;
+    this.cssClub = club;
+    const k = this.haunted ? { main: 0xcfe3ee, hi: 0xf4fbff, trim: 0x8fb6c8 } : kitOf(club);
+    const st = document.documentElement.style;
+    st.setProperty("--club-main", cssHex(k.main));
+    st.setProperty("--club-hi", cssHex(k.hi));
+    st.setProperty("--club-trim", cssHex(k.trim));
+  }
+  cssClub: string | null | undefined = undefined;
+
+  /** The stands fill with your fans. The screens may call it with the HUD's fans as they count up. */
+  crowdLevel(fans: number) {
+    this.crowdExternal = true;
+    this.fansShown = fans;
+    this.crowd.level(fans);
+  }
+  /** Set once a screen drives the stands through crowdLevel; until then the table follows the season's fans. */
+  crowdExternal = false;
+
   // ================================================================ playback
   async playEvents(evs: Ev[]) {
+    let afterPass = this.afterPassBefore;
+    let reactN = 0;
     for (const ev of evs) {
       if (this.hudNow) {
         this.hudNow = hudStep(this.hudNow, ev);
         this.syncHud();
       }
+      this.deskFor(ev);
       switch (ev.e) {
         case "slide":
-          await this.animSlide(ev.side, ev.r, ev.d, ev.why);
+          if (ev.why === "react") reactN++;
+          await this.animSlide(ev.side, ev.r, ev.d, ev.why, reactN);
           break;
-        case "kick":
+        case "react":
+          reactN = 0;
+          break;
+        case "kick": {
+          this.shotAfterPass = afterPass;
           await this.animKick(ev);
+          afterPass = ev.side === 0 && ev.result === "pass";
+          break;
+        }
+        case "chain":
+          this.lightChain(ev.n, ev.lanes);
           break;
         case "goal":
+          this.chainLayer.removeChildren().forEach((c) => c.destroy());
           await this.animGoal(ev.side, ev.rating, ev.style);
           break;
         case "turnover":
+          this.chainLayer.removeChildren().forEach((c) => c.destroy());
           await this.animTurnover(ev.to, ev.why);
           break;
         case "kickoff":
+          this.chainLayer.removeChildren().forEach((c) => c.destroy());
           this.disp.ball = { side: ev.side, rod: 2, fig: 2 };
           this.ballFree = null;
+          this.trail = [];
           sfx.whistle();
           await wait(220);
+          break;
+        case "rule":
+          // Trading Halt thaws at the first goal: the tape comes off, no second walk-out
+          if (ev.view.kind === "frozen" && (ev.view.rod ?? -1) < 0) this.haltLifted();
+          else await this.walkout(ev.id, ev.view);
+          break;
+        case "event":
+          // tinted at kickoff already (doGo); the beat stays
+          await wait(200);
+          break;
+        case "whistle":
+          await this.whistleBeat(ev.reason);
           break;
         case "play":
           this.flashText(PLAY[ev.id]?.name || "", COL.cyan);
@@ -1629,14 +2156,16 @@ export class Game {
           await this.animEnd(ev.won, ev.draw);
           break;
       }
+      this.syncMood();
     }
   }
 
-  async animSlide(side: 0 | 1, r: number, d: number, why: string) {
+  async animSlide(side: 0 | 1, r: number, d: number, why: string, nth = 0) {
     const rv = this.rods[side][r];
     if (!rv) return;
     this.disp.off[side][r] += d;
     const ghost = why === "ghost";
+    const fast = this.fast;
     if (ghost) {
       sfx.polter();
       // a wisp runs down the rod before it moves
@@ -1648,12 +2177,33 @@ export class Game {
       this.floatText("Poltergeist", p.x, p.y, 0xcfe3ee, 26);
       await wait(160);
     } else sfx.slide(side === 0);
+    if (why === "react") {
+      // they read you: a flicker on their handle, the rods answer one after another
+      sfx.read();
+      this.readFlicker(r);
+      if (nth === 1 && !fast) {
+        const p = this.root.toLocal(this.tbl.toGlobal({ x: rv.c.x, y: CAB_T - 10 }));
+        this.floatText("reads you", p.x, p.y + (this.port ? 0 : 20), kitOf(this.clubNow()).hi, 22);
+      }
+    }
     // the rod carries weight: it overshoots a touch and settles with a thunk
-    const dur = why === "react" || why === "mirror" ? 160 : ghost ? 420 : 210;
+    const heavy = side === 0 && rv.figs.some((f) => f.trait === "whale") ? 1.25 : 1;
+    const dur = fast ? 90 : why === "react" || why === "mirror" ? 170 : ghost ? 420 : 210 * heavy;
     await tween(rv.c, { y: LANE0 + this.disp.off[side][r] * LH }, dur, ghost ? ease.inOut : ease.outBack);
     if (side === 0 && (why === "you" || why === "block")) sfx.thunk();
-    if (why === "react" || why === "ai") await wait(60);
+    if (why === "react") await wait(fast ? 20 : 90);
+    else if (why === "ai") await wait(fast ? 20 : 60);
     if (ghost) this.syncGhostLook();
+  }
+
+  /** A teal flicker on their handle as that rod reads you. */
+  readFlicker(r: number) {
+    if (reduced()) return;
+    const x = colX(colOf(1, r));
+    const kit = this.haunted ? { hi: 0xcfe3ee } : kitOf(this.clubNow());
+    const f = new Graphics().roundRect(x - 20, CAB_T - 30, 40, 34, 12).fill({ color: kit.hi, alpha: 0.55 });
+    this.fxLayer.addChild(f);
+    void tween(f, { alpha: 0 }, 380).then(() => f.destroy());
   }
 
   async animKick(ev: Extract<Ev, { e: "kick" }>) {
@@ -1663,40 +2213,64 @@ export class Game {
     let upTo: number | undefined;
     if (ev.at) upTo = Math.abs(colOf(side === 0 ? 1 : 0, ev.at.rod) - x0);
     const pts = this.pathPoints(side, ev.rod, lane, ev.kick, ev.drift, upTo);
-    const holder = this.rods[side][ev.rod]?.figs[ev.fig];
+    const holder = this.rods[side]?.[ev.rod]?.figs[ev.fig];
     for (const sd of this.rods) for (const rv of sd) for (const f of rv.figs) f.setGlow(null);
+    const shot = ev.kick.r === 4;
+    const myGoal = side === 0 && ev.result === "goal";
     // the kick: the figure swings round its rod, then the ball flies
     if (holder) holder.swing(tween, ease.outBack);
     sfx.kick(ev.beaten > 0);
+    if (ev.first && holder) {
+      sfx.firstTime();
+      const p = this.root.toLocal(holder.getGlobalPosition());
+      this.floatText("First time", p.x, p.y - 44, COL.cyan, 30);
+      this.burst(p.x, p.y, COL.cyan, 10);
+    }
+    // the weight of a shot: the table holds still for a beat at contact
+    if (shot) hitStop(side === 0 ? 70 : 50);
     await wait(70);
     this.ballFree = { x: this.ball.x, y: this.ball.y };
+    this.trail = [];
+    this.kickTint = shot ? (side === 0 ? COL.money : COL.bad) : 0xfff6e6;
     // the ball leaves fast and loses pace along the way
     const total = pts.length;
-    const dur = Math.min(620, 150 + total * 11) / (ev.kick.r === 4 ? 1.3 : 1);
+    const dur = Math.min(620, 150 + total * 11) / (shot ? 1.3 : 1) * (this.fast ? 0.6 : 1);
     const pos = { k: 0 };
     let last = -1;
-    const run = tween(pos, { k: 1 }, dur, (t) => 1 - Math.pow(1 - t, 2.2));
+    // a goal of yours: the last two lanes in slow motion while the camera leans in
+    const slowFrom = myGoal && !reduced() ? Math.max(0, (total - 17) / (total - 1)) : 2;
+    let slowed = false;
+    const goalPt = { x: TX1, y: laneY((MOUTH[0] + MOUTH[1]) / 2) };
+    const fly = tween(pos, { k: 1 }, dur, (t) => 1 - Math.pow(1 - t, 2.2));
     await new Promise<void>((res) => {
       const step = () => {
         const i = Math.min(total - 1, Math.floor(pos.k * (total - 1) + 1e-6));
         if (i !== last) {
-          for (let j = last + 1; j <= i; j++) if (j % 2 === 0) this.trailDot(pts[j].x, pts[j].y);
+          if (this.haunted) for (let j = last + 1; j <= i; j++) if (j % 2 === 0) this.trailDot(pts[j].x, pts[j].y);
           last = i;
           const p = pts[i];
           this.ball.position.set(p.x, p.y);
         }
+        if (!slowed && pos.k >= slowFrom) {
+          slowed = true;
+          setTimeScale(0.35);
+          void this.push(1.07, goalPt, 240);
+          this.crowd.energy = 0.8;
+        }
         if (pos.k >= 1) res();
         else requestAnimationFrame(step);
       };
-      void run.then(() => {
+      void fly.then(() => {
         pos.k = 1;
       });
       step();
     });
+    setTimeScale(1);
     const pEnd = pts[total - 1];
     this.ball.position.set(pEnd.x, pEnd.y);
     if (ev.result === "blocked" || ev.result === "kept") {
       const ghostBlock = this.haunted && side === 0;
+      hitStop(70);
       sfx.block();
       if (ghostBlock) sfx.ghostBlock();
       this.shake = Math.min(1, this.shake + 0.3);
@@ -1706,13 +2280,33 @@ export class Game {
         void tween(blocker.scale, { x: 1, y: 1 }, 280, ease.outBack);
       }
       // the clack: a white flash where ball meets figure
-      const fl = new Graphics().circle(0, 0, 22).fill({ color: ghostBlock ? 0xcfe3ee : 0xffffff, alpha: 0.7 });
+      const fl = new Graphics().circle(0, 0, 24).fill({ color: ghostBlock ? 0xcfe3ee : 0xffffff, alpha: 0.7 });
       fl.position.copyFrom(this.ball.position);
       this.fxLayer.addChild(fl);
       void tween(fl.scale, { x: 2, y: 2 }, 220);
       void tween(fl, { alpha: 0 }, 220).then(() => fl.destroy());
       const p = this.root.toLocal(this.tbl.toGlobal(this.ball.position));
-      this.floatText(ev.result === "kept" ? "Kept it" : side === 0 ? (ghostBlock ? "Ghost block" : "Blocked") : "Saved", p.x, p.y - 40, ev.result === "kept" ? COL.cyan : side === 0 ? COL.bad : COL.good, 30);
+      const keeper = ev.at?.rod === 0;
+      if (side === 0 && shot && ev.tight && keeper && blocker) {
+        // a tight shot: their keeper's glove gets there
+        sfx.glove();
+        const gl = glove(46, COL.cream);
+        gl.position.copyFrom(blocker.position);
+        const gp = this.tbl.toLocal(blocker.getGlobalPosition());
+        gl.position.set(gp.x, gp.y);
+        gl.rotation = this.port ? Math.PI / 2 : 0;
+        this.fxLayer.addChild(gl);
+        gl.scale.set(0.3);
+        void tween(gl.scale, { x: 1.2, y: 1.2 }, 200, ease.outBack).then(() => tween(gl, { alpha: 0 }, 400).then(() => gl.destroy()));
+        this.floatText("Tight. Gloved", p.x, p.y - 40, 0xffa13d, 30);
+      } else if (side === 1 && ev.at && this.run!.wideBody(slotOf(ev.at.rod, ev.at.fig)) && ev.steps.length && ev.steps[ev.steps.length - 1].lane !== laneOf(ev.at.rod, this.disp.off[0][ev.at.rod], ev.at.fig)) {
+        this.floatText("Wide body", p.x, p.y - 40, COL.money, 32);
+        this.burst(p.x, p.y, COL.money, 12);
+      } else this.floatText(ev.result === "kept" ? "Kept it" : side === 0 ? (ghostBlock ? "Ghost block" : "Blocked") : "Saved", p.x, p.y - 40, ev.result === "kept" ? COL.cyan : side === 0 ? COL.bad : COL.good, 30);
+      if (side === 0 && shot) {
+        this.crowd.react("cover");
+        sfx.groan();
+      } else if (side === 1) this.crowd.energy = Math.min(1, this.crowd.energy + 0.5);
       if (ev.result === "kept") {
         await wait(120);
         this.ballFree = null;
@@ -1734,82 +2328,203 @@ export class Game {
         rcv.scale.set(1.18);
         void tween(rcv.scale, { x: 1, y: 1 }, 220, ease.outBack);
       }
-      await wait(120);
+      await wait(this.fast ? 40 : 120);
       return;
     }
-    // into the net
+    // into the net: the contact
     this.ballFree = { x: this.ball.x, y: this.ball.y };
+    if (side === 0) {
+      hitStop(80);
+      sfx.netThud();
+      if (ev.tight) {
+        const p = this.root.toLocal(this.tbl.toGlobal(this.ball.position));
+        this.floatText(ev.bounces ? "Off the wall, past the glove" : this.shotAfterPass ? "One touch, past the glove" : "Power past the glove", p.x, p.y - 50, 0xffa13d, 30);
+      }
+    }
+    this.scorer = side === 0 ? holder || null : null;
+    this.scorerSlot = side === 0 ? ev.slot : -1;
   }
+  scorer: FigureView | null = null;
+  scorerSlot = -1;
 
   trailDot(x: number, y: number) {
     if (reduced()) return;
-    const ember = this.haunted;
-    const d = new Graphics().circle(0, 0, ember ? 5 : 7).fill({ color: ember ? 0xff7a1c : 0xfff6e6, alpha: ember ? 0.85 : 0.5 });
+    const d = new Graphics().circle(0, 0, 6).fill({ color: 0xff7a1c, alpha: 0.85 });
     d.position.set(x, y);
     this.ballLayer.addChildAt(d, 0);
-    void tween(d, { alpha: 0 }, ember ? 420 : 260).then(() => d.destroy());
-    void tween(d.scale, { x: 0.2, y: 0.2 }, ember ? 420 : 260);
-    if (ember) void tween(d, { y: y - 14 }, 420);
+    void tween(d, { alpha: 0 }, 420).then(() => d.destroy());
+    void tween(d.scale, { x: 0.2, y: 0.2 }, 420);
+    void tween(d, { y: y - 14 }, 420);
+  }
+
+  /** The build-up: the cells the move ran through light up on the felt, one pass after another. */
+  lightChain(n: number, lanes: { x: number; lane: number }[]) {
+    const L = this.chainLayer;
+    L.removeChildren().forEach((c) => c.destroy());
+    sfx.chain(n);
+    const kit = look();
+    const g = new Graphics();
+    L.addChild(g);
+    lanes.forEach((s, i) => {
+      if (s.x < 0 || s.x > 9) return;
+      const x = colX(s.x);
+      const y = laneY(Math.max(0, Math.min(LANES - 1, s.lane)));
+      g.roundRect(x - 26, y - LH / 2 + 3, 52, LH - 6, 8).fill({ color: i === lanes.length - 1 ? COL.money : kit.kitHi, alpha: 0.2 });
+    });
+    for (let i = 1; i < lanes.length; i++) {
+      const a = lanes[i - 1];
+      const b = lanes[i];
+      g.moveTo(colX(a.x), laneY(a.lane)).lineTo(colX(b.x), laneY(b.lane));
+    }
+    g.stroke({ width: 3, color: kit.kitHi, alpha: 0.5 });
+    if (!reduced()) {
+      g.alpha = 0;
+      void tween(g, { alpha: 1 }, 260);
+    }
+    // rules 3: the second pass puts +1 Power on the shot (a goal from here is a Team move); 2.1 named the third
+    const rules3 = !!this.run?.nextRules;
+    if (rules3 ? n === 2 : n >= 3) {
+      const p = this.root.toLocal(this.tbl.toGlobal({ x: (TX0 + TX1) / 2, y: LANE0 + 40 }));
+      this.floatText(rules3 ? "Build-up: +1 Power" : "Team move", p.x, p.y, COL.money, 36);
+    }
   }
 
   async animGoal(side: 0 | 1, rating: number, style: string) {
     const L = this.L;
+    const rm = reduced();
     const digit = side === 0 ? this.scoreYou : this.scoreThem;
     digit.scale.set(1.6);
     void tween(digit.scale, { x: 1, y: 1 }, 420, ease.outBack);
     const gx = side === 0 ? TX1 + 30 : TX0 - 30;
-    const net = new Graphics().rect(side === 0 ? TX1 : TX0 - 50, laneY(MOUTH[0] - 0.5), 50, (MOUTH[1] - MOUTH[0] + 1) * LH).fill({ color: side === 0 ? COL.money : COL.bad, alpha: 0.4 });
+    const net = new Graphics().rect(side === 0 ? TX1 : TX0 - 50, laneY(MOUTH[0] - 0.5), 50, (MOUTH[1] - MOUTH[0] + 1) * LH).fill({ color: side === 0 ? COL.money : COL.bad, alpha: 0.45 });
     this.fxLayer.addChild(net);
     void tween(net, { alpha: 0 }, 900).then(() => net.destroy());
     this.ball.position.set(gx, this.ball.y);
+    this.trail = [];
     // the net bellies out and settles
     const rip = { a: 18 };
     const netSide = side === 0 ? 1 : 0;
-    if (!reduced()) {
-      const ripple = tween(rip, { a: 0 }, 700, (t) => t);
+    if (!rm) {
+      void tween(rip, { a: 0 }, 700, (t) => t);
       const step = () => {
         this.drawNets(netSide, rip.a * Math.cos((1 - rip.a / 18) * 9));
         if (rip.a > 0.01) requestAnimationFrame(step);
         else this.drawNets(0, 0);
       };
       step();
-      void ripple;
     }
+    const h = this.hudNow || (this.run ? hudOf(this.run) : null);
     if (side === 0) {
       if (this.haunted) sfx.hauntGoal();
       else sfx.goal();
-      sfx.crowd();
+      sfx.roar();
       this.heat = 1;
       this.shake = 1;
+      this.crowd.react("cheer");
+      this.moment("goal", { rating, style, slot: this.scorerSlot });
+      // the scorer's head pops and flips; teammates bump
+      const sc = this.scorer;
+      if (sc && !sc.destroyed) void sc.celebrate();
+      let k = 0;
+      for (const rv of this.rods[0]) for (const f of rv.figs) if (f !== sc) void f.bump(60 + k++ * 35);
+      const launch = this.scorerSlot >= 0 ? this.run?.s.squad[this.scorerSlot] : null;
+      const lk = look();
+      this.tickerTape([TAPE[launch ? launch.u : 3], lk.kitHi, lk.kit, COL.money, COL.cream]);
       const banner = txt("GOAL", { fontFamily: NUM, fontSize: this.port ? 120 : 140, fill: this.haunted ? 0xff8a1c : COL.money, stroke: { color: COL.ink, width: 12 } });
       banner.anchor.set(0.5);
       const cx = L.area.x + L.area.w / 2;
-      const cy = L.area.y + L.area.h / 2 - 30;
+      const cy = L.area.y + L.area.h / 2 - (this.port ? 110 : 70);
       banner.position.set(cx, cy);
       banner.scale.set(0.2);
-      this.root.addChild(banner);
+      this.tapeLayer.addChild(banner);
       const sub = txt(`${style} · ${fmt(rating)}`, { fontFamily: NUM, fontSize: 44, fill: COL.cream, stroke: { color: COL.pink, width: 8 } });
       sub.anchor.set(0.5);
       sub.position.set(cx, cy + 92);
       sub.alpha = 0;
-      this.root.addChild(sub);
+      this.tapeLayer.addChild(sub);
+      const score = h ? this.bigScore(h.you, h.them, 0, cx, cy + (this.port ? 250 : 200)) : null;
       this.burst(cx - 220, cy, this.haunted ? 0xff8a1c : COL.money, 22);
       this.burst(cx + 220, cy, look().kitHi, 22);
       await tween(banner.scale, { x: 1, y: 1 }, 360, ease.outElastic);
       void tween(sub, { alpha: 1 }, 200);
-      await wait(900);
-      await Promise.all([tween(banner, { alpha: 0 }, 260), tween(sub, { alpha: 0 }, 260)]);
+      await wait(1000);
+      void this.push(1, { x: TX1, y: laneY(4.5) }, 420);
+      await Promise.all([tween(banner, { alpha: 0 }, 260), tween(sub, { alpha: 0 }, 260), score ? tween(score, { alpha: 0 }, 300) : Promise.resolve()]);
       banner.destroy();
       sub.destroy();
+      score?.destroy({ children: true });
     } else {
       sfx.concede();
+      sfx.groan();
       this.shake = 0.6;
+      this.crowd.react("quiet");
+      this.moment("conceded");
       const p = this.root.toLocal(this.tbl.toGlobal({ x: TX0 + 60, y: LANE0 + PITCH_H / 2 }));
       this.flashText("They score", COL.bad, p);
+      const score = h ? this.bigScore(h.you, h.them, 1, L.area.x + L.area.w / 2, L.area.y + L.area.h / 2) : null;
       await wait(900);
+      if (score) await tween(score, { alpha: 0 }, 260);
+      score?.destroy({ children: true });
     }
     this.ballFree = null;
     this.disp.ball = null;
+  }
+
+  /** The score, big, in the middle of the table: the side that scored pops. */
+  bigScore(you: number, them: number, popSide: 0 | 1, x: number, y: number): Container {
+    const c = new Container();
+    const size = this.port ? 150 : 170;
+    const a = txt(String(you), { fontFamily: NUM, fontSize: size, fill: look().kitHi, stroke: { color: COL.ink, width: 12 } });
+    const colon = txt(":", { fontFamily: NUM, fontSize: size * 0.8, fill: COL.cream, stroke: { color: COL.ink, width: 10 } });
+    const b = txt(String(them), { fontFamily: NUM, fontSize: size, fill: this.haunted ? 0xcfe3ee : kitOf(this.clubNow()).hi, stroke: { color: COL.ink, width: 12 } });
+    for (const t of [a, colon, b]) t.anchor.set(0.5);
+    a.x = -size * 0.55;
+    b.x = size * 0.55;
+    colon.y = -size * 0.06;
+    c.addChild(a, colon, b);
+    c.position.set(x, y);
+    this.tapeLayer.addChild(c);
+    const pop = popSide === 0 ? a : b;
+    if (!reduced()) {
+      pop.scale.set(0.2);
+      void tween(pop.scale, { x: 1.25, y: 1.25 }, 260, ease.outBack).then(() => tween(pop.scale, { x: 1, y: 1 }, 220));
+    }
+    return c;
+  }
+
+  /** Ticker tape: strips in the pair's and your kit's colours, falling over the table. */
+  tickerTape(colors: number[]) {
+    if (reduced()) return;
+    const a = this.L.area;
+    for (let i = 0; i < 90 && this.tape.length < 200; i++) {
+      const s = new Sprite(Texture.WHITE);
+      s.anchor.set(0.5);
+      s.width = 5 + Math.random() * 4;
+      s.height = 13 + Math.random() * 10;
+      s.tint = colors[i % colors.length];
+      s.position.set(a.x + Math.random() * a.w, a.y - 20 - Math.random() * a.h * 0.5);
+      s.rotation = Math.random() * 6.28;
+      this.tapeLayer.addChild(s);
+      this.tape.push({ s, sy: s.scale.y, vx: (Math.random() - 0.5) * 60, vy: 140 + Math.random() * 160, twirl: (Math.random() - 0.5) * 6, flip: Math.random() * 6.28, life: 2 + Math.random() * 1 });
+    }
+  }
+
+  frameTape(sec: number) {
+    if (!this.tape.length) return;
+    const H = this.L.H;
+    for (const p of this.tape) {
+      p.life -= sec;
+      p.flip += sec * 9;
+      p.s.x += (p.vx + Math.sin(p.flip * 0.5) * 40) * sec;
+      p.s.y += p.vy * sec;
+      p.s.rotation += p.twirl * sec;
+      p.s.scale.y = p.sy * (0.15 + 0.85 * Math.abs(Math.cos(p.flip)));
+      p.s.alpha = Math.min(1, p.life / 0.6);
+      if (p.s.y > H + 40) p.life = 0;
+    }
+    const dead = this.tape.filter((p) => p.life <= 0);
+    for (const p of dead) p.s.destroy();
+    if (dead.length) this.tape = this.tape.filter((p) => p.life > 0);
   }
 
   async animTurnover(to: 0 | 1, why: string) {
@@ -1817,27 +2532,120 @@ export class Game {
       this.ballFree = null;
       this.disp.ball = { side: to, rod: 0, fig: 0 };
       const p = this.root.toLocal(this.tbl.toGlobal({ x: (TX0 + TX1) / 2, y: LANE0 + PITCH_H / 2 }));
-      this.flashText(why === "touches" ? (to === 1 ? "Out of touches" : "Their touches ran out") : "Dead ball", COL.dim, p);
-      sfx.whoosh();
-      await wait(420);
+      this.flashText(why === "touches" ? (to === 1 ? "Out of touches" : "Their touches ran out") : "Dead ball", why === "touches" && to === 1 ? COL.bad : COL.dim, p);
+      if (why === "touches" && to === 1) sfx.whistle();
+      else sfx.whoosh();
+      await wait(this.fast ? 160 : 420);
     } else await wait(120);
+  }
+
+  /** Full time on the table: the whistle, the stands, and the season's new best goal again if this match made it. */
+  async whistleBeat(reason: "won" | "lost" | "draw" | "final") {
+    sfx.fullTime();
+    this.moment("fulltime", { reason });
+    this.crowd.react(reason === "lost" ? "quiet" : "cheer");
+    if (reason !== "lost") sfx.roar();
+    const dim = new Graphics().rect(TX0, LANE0, TX1 - TX0, PITCH_H).fill({ color: 0x05020a, alpha: 1 });
+    dim.alpha = 0;
+    this.fxLayer.addChild(dim);
+    void tween(dim, { alpha: 0.35 }, 300);
+    // the referee's whistle, drawn big on the centre spot
+    const w = new Graphics();
+    // a referee's whistle: the barrel, the round chamber with its slot, the mouthpiece and the cord
+    w.moveTo(30, -2).bezierCurveTo(60, -40, 96, -10, 86, 30).stroke({ width: 4, color: COL.pink, alpha: 0.9 });
+    w.roundRect(-46, -6, 22, 14, 4).fill(0x9aa6b2).stroke({ width: 4, color: COL.ink });
+    w.roundRect(-30, -16, 50, 30, 8).fill(0xd8dde6).stroke({ width: 4, color: COL.ink });
+    w.circle(22, 4, 22).fill(0xd8dde6).stroke({ width: 4, color: COL.ink });
+    w.roundRect(-26, -12, 40, 6, 3).fill({ color: 0xffffff, alpha: 0.7 });
+    w.circle(15, -3, 6).fill({ color: 0xffffff, alpha: 0.6 });
+    w.rect(-8, -16, 14, 8).fill(COL.ink);
+    w.circle(30, 0, 4).fill(COL.ink);
+    w.position.set((TX0 + TX1) / 2, LANE0 + PITCH_H / 2);
+    this.upright(w);
+    this.fxLayer.addChild(w);
+    if (!reduced()) {
+      w.scale.set(0.2);
+      await tween(w.scale, { x: 1.6, y: 1.6 }, 240, ease.outBack);
+      for (let i = 0; i < 3; i++) {
+        await tween(w.scale, { x: 1.75, y: 1.75 }, 70);
+        await tween(w.scale, { x: 1.6, y: 1.6 }, 90);
+      }
+    }
+    await wait(380);
+    void tween(w, { alpha: 0 }, 220).then(() => w.destroy());
+    const run = this.run;
+    const best = run?.s.best;
+    if (run && best && reason !== "lost" && best.total > this.bestAtKickoff && best.path?.length && !this.fast) {
+      this.moment("replay-ready", best);
+      await this.playReplay(best);
+    }
+    void tween(dim, { alpha: 0 }, 260).then(() => dim.destroy());
+  }
+
+  /** Plays a best goal on the table (the instant replay, called from the season recap). */
+  async playReplay(best: BestGoal): Promise<void> {
+    if (!best?.path?.length || this.replaying) return;
+    const wasRoot = this.root.visible;
+    const wasTbl = this.tbl.visible;
+    this.root.visible = true;
+    this.tbl.visible = true;
+    this.replaying = true;
+    this.replaySkip = false;
+    const lk = look();
+    try {
+      await playPath(
+        {
+          layer: this.replayLayer,
+          upright: (o) => this.upright(o),
+          kit: { main: lk.kit, hi: lk.kitHi },
+          onGoal: () => {
+            if (!this.replaySkip) sfx.crowd();
+          },
+          skip: () => this.replaySkip,
+        },
+        best,
+      );
+    } finally {
+      this.replaying = false;
+      this.tbl.visible = wasTbl;
+      this.root.visible = wasRoot;
+      this.moment("replay-done", best);
+    }
   }
 
   async animEnd(won: boolean, draw: boolean) {
     const L = this.L;
-    sfx.whistle();
     if (won || draw) sfx.clear();
     else sfx.lose();
-    if (won) sfx.crowd();
     const run = this.run!;
     const final = run.s.phase === "won";
-    const text = final ? (run.mode === "haunt" ? "LAID TO REST" : "CHAMPIONS") : won ? "FULL TIME" : draw ? "LEVEL: THROUGH" : "KNOCKED OUT";
+    // a rules-3 league match: a loss is three points gone, not the season (unless the table says so)
+    const league = run.league && (run.s.match?.kind ?? 2) < 2;
+    const over = run.s.phase === "over";
+    const text = final
+      ? run.mode === "haunt"
+        ? "LAID TO REST"
+        : run.mode === "daily"
+          ? "MATCH DAY WON"
+          : "CHAMPIONS"
+      : won
+        ? "FULL TIME"
+        : draw
+          ? league
+            ? "LEVEL: A POINT"
+            : "LEVEL: THROUGH"
+          : league
+            ? over
+              ? "OUT OF THE RACE"
+              : "LOST: NO POINTS"
+            : "KNOCKED OUT";
     const banner = txt(text, { fontFamily: NUM, fontSize: this.port ? 76 : 96, fill: won || draw ? COL.money : COL.bad, stroke: { color: COL.ink, width: 10 } });
     banner.anchor.set(0.5);
     banner.position.set(L.area.x + L.area.w / 2, L.area.y + L.area.h / 2);
     banner.scale.set(0.2);
-    this.root.addChild(banner);
+    this.tapeLayer.addChild(banner);
     if (won) this.heat = 1;
+    if (final) this.tickerTape([COL.money, look().kitHi, COL.cream, look().kit]);
     await tween(banner.scale, { x: 1, y: 1 }, 380, ease.outElastic);
     await wait(900);
     await tween(banner, { alpha: 0 }, 260);
@@ -1876,6 +2684,422 @@ export class Game {
     }
   }
 
+  // ================================================================ boss rules and table events on the table
+  /** A screen offset (right, down) as a table offset, whichever way the table is turned. */
+  scr(dx: number, dy: number): { x: number; y: number } {
+    return this.port ? { x: -dy, y: dx } : { x: dx, y: dy };
+  }
+
+  /** A data line for a launch, short: curve, holders, trades. */
+  dataLine(l: Launch): string {
+    return `curve ${Math.round(l.p / 100)}% · ${l.h} holders · ${l.k} trades`;
+  }
+
+  /**
+   * A boss club walks out: the felt dims, the crest slams down with a brass hit, their captain (a real launch from
+   * the cut) steps forward with its data tag, the rule reads out, and then the rule happens on the table. A tap
+   * cuts it short. Reduced motion: the rule's mark and its corner badge, nothing else.
+   */
+  async walkout(id: string, view: RuleView) {
+    const run = this.run;
+    if (!run || !run.s.match) return;
+    const m = run.m;
+    const club = m.club;
+    const kit = kitOf(club);
+    setMood(view.kind === "bell" ? "final" : "boss");
+    if (reduced() || this.fast) {
+      this.walkoutPending = false;
+      this.applyRuleMarks(false);
+      this.moment("boss-walkout-done", { id, view });
+      return;
+    }
+    this.replaying = true;
+    this.replaySkip = false;
+    const L = new Container();
+    this.fxLayer.addChild(L);
+    const dim = new Graphics().roundRect(TX0 - 64, CAB_T, TX1 - TX0 + 128, CAB_B - CAB_T, 22).fill({ color: 0x05020a, alpha: 1 });
+    dim.alpha = 0;
+    L.addChild(dim);
+    await tween(dim, { alpha: 0.78 }, 220);
+    const C = { x: (TX0 + TX1) / 2, y: LANE0 + PITCH_H / 2 };
+    const at = (dx: number, dy: number) => {
+      const o = this.scr(dx, dy);
+      return { x: C.x + o.x, y: C.y + o.y };
+    };
+    // the crest slams down
+    const cr = crest(club, kit, this.port ? 64 : 72);
+    this.upright(cr);
+    const cp = at(this.port ? 0 : -150, this.port ? -120 : -36);
+    cr.position.set(cp.x, cp.y);
+    cr.scale.set(3);
+    cr.alpha = 0;
+    L.addChild(cr);
+    void tween(cr, { alpha: 1 }, 120);
+    await tween(cr.scale, { x: 1, y: 1 }, 240, ease.inCubic);
+    sfx.brassHit();
+    hitStop(90);
+    this.shake = 0.8;
+    this.heat = 0.8;
+    const ring = new Graphics().circle(0, 0, 90).stroke({ width: 6, color: kit.hi, alpha: 0.9 });
+    ring.position.copyFrom(cr.position);
+    L.addChild(ring);
+    void tween(ring.scale, { x: 2.4, y: 2.4 }, 420);
+    void tween(ring, { alpha: 0 }, 420);
+    const name = txt(club.toUpperCase(), { fontFamily: NUM, fontSize: this.port ? 64 : 58, fill: kit.hi === 0xffffff ? COL.cream : kit.hi, stroke: { color: COL.ink, width: 8 }, letterSpacing: 2 });
+    const rule = txt(BOSS[id]?.text || RULE_LABEL[view.kind], { fontFamily: NUM, fontSize: this.port ? 34 : 30, fill: COL.cream, stroke: { color: COL.ink, width: 6 }, wordWrap: true, wordWrapWidth: this.port ? 420 : 520, align: this.port ? "center" : "left" });
+    for (const t of [name, rule]) {
+      t.anchor.set(this.port ? 0.5 : 0, 0.5);
+      this.upright(t);
+      t.alpha = 0;
+      L.addChild(t);
+    }
+    const np = at(this.port ? 0 : -60, this.port ? 0 : -64);
+    name.position.set(np.x, np.y);
+    const rp = at(this.port ? 0 : -60, this.port ? 76 : 2);
+    rule.position.set(rp.x, rp.y);
+    void tween(name, { alpha: 1 }, 180);
+    await wait(160);
+    void tween(rule, { alpha: 1 }, 200);
+    // their captain steps forward: the strongest curve on their side
+    const rivals = run.rivals();
+    let cap: Launch | null = null;
+    for (const l of rivals) if (l && (!cap || l.p > cap.p)) cap = l;
+    if (cap) {
+      const fv = new FigureView(1, cap, 0, "them", kit);
+      fv.eventMode = "none";
+      if (fv.tag) fv.tag.visible = false;
+      const from = at(this.port ? 0 : 520, this.port ? 360 : 120);
+      const to = at(this.port ? 0 : 180, this.port ? 200 : 120);
+      fv.position.set(from.x, from.y);
+      fv.scale.set(2.2);
+      fv.alpha = 0;
+      L.addChild(fv);
+      void tween(fv, { alpha: 1 }, 200);
+      await tween(fv, { x: to.x, y: to.y }, 360, ease.outBack);
+      const tag = txt(`CAPTAIN $${cap.s}\n${this.dataLine(cap)}`, { fontFamily: NUM, fontSize: this.port ? 30 : 24, fill: COL.cream, stroke: { color: COL.ink, width: 6 }, align: "center", lineHeight: this.port ? 32 : 26 });
+      tag.anchor.set(0.5, 0);
+      this.upright(tag);
+      const tp = at(this.port ? 0 : 180, this.port ? 270 : 190);
+      tag.position.set(tp.x, tp.y);
+      L.addChild(tag);
+    }
+    for (let i = 0; i < 14 && !this.replaySkip; i++) await wait(80);
+    await tween(L, { alpha: 0 }, 220);
+    L.destroy({ children: true });
+    this.replaying = false;
+    this.walkoutPending = false;
+    this.applyRuleMarks(true);
+    this.moment("boss-walkout-done", { id, view });
+  }
+
+  /** Trading Halt thaws at the first goal: the tape comes off the rod and the plaque says so. */
+  haltLifted() {
+    this.applyRuleMarks(false);
+    sfx.latch();
+    const p = this.root.toLocal(this.tbl.toGlobal({ x: (TX0 + TX1) / 2, y: LANE0 + PITCH_H / 2 }));
+    this.floatText("Halt lifted", p.x, p.y - 60, COL.money, 40);
+  }
+
+  /** True from kickoff until a boss club's walk-out has played: the rule's marks wait for it. */
+  walkoutPending = false;
+
+  /** Graphics for the drift wobble and the bell lights, redrawn each frame. */
+  ruleAnim: Graphics | null = null;
+  eventAnim: Graphics | null = null;
+
+  /**
+   * The boss rule's marks on the table, all match: the pulled rod's rug, HALTED tape, a padlock on the keeper,
+   * mirror tethers, their wobbling goal mouth, stats-to-shoot ticks, stadium lights for the final. `intro` plays the
+   * moment it happens (the yank, the tape winding on, the lock dropping, the bell).
+   */
+  applyRuleMarks(intro: boolean) {
+    const run = this.run;
+    const L = this.ruleLayer;
+    L.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.ruleAnim = null;
+    this.badgeLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    for (const rv of this.rods[0] || []) for (const c of rv.c.children.slice()) if ((c as Container & { label: string }).label === "halt-tape") c.destroy({ children: true });
+    const m = run?.s.match;
+    if (!run || !m || !(run.s.phase === "attack" || run.s.phase === "defend") || this.walkoutPending) return;
+    this.placeEventBadge();
+    const v = m.ruleView;
+    if (!v) return;
+    const kit = kitOf(m.club);
+    const anim = intro && !reduced();
+    // the corner plaque
+    const big = this.port;
+    const b = ruleBadge(m.club, kit, v.kind === "frozen" && (v.rod ?? -1) < 0 ? "Halt lifted" : RULE_LABEL[v.kind], big ? 370 : 300, big ? 62 : 50, big ? 27 : 21);
+    this.placeBadge(b, 0);
+    this.badgeLayer.addChild(b);
+    if (anim) {
+      b.alpha = 0;
+      void tween(b, { alpha: 1 }, 300);
+    }
+    const yours = (r: number) => this.rods[0][r];
+    switch (v.kind) {
+      case "pulled": {
+        const r = v.rod ?? 1;
+        const x = colX(colOf(0, r));
+        const rg = rug(64);
+        rg.position.set(x, CTRL_Y + ARROW_H);
+        rg.rotation = -0.2;
+        L.addChild(rg);
+        if (anim) {
+          sfx.clothPull();
+          // the rod's two men go with the cloth
+          const ghost = new Container();
+          for (let f = 0; f < RODS[r].n; f++) {
+            const fv = new FigureView(0, run.s.squad[slotOf(r, f)], f, "you");
+            fv.eventMode = "none";
+            if (fv.tag) fv.tag.visible = false;
+            fv.position.set(0, laneY(m.off[0][r] + f * RODS[r].gap) - LANE0);
+            ghost.addChild(fv);
+          }
+          ghost.position.set(x, LANE0);
+          L.addChild(ghost);
+          void tween(ghost, { y: LANE0 + PITCH_H + 260, alpha: 0 }, 520, ease.inCubic).then(() => ghost.destroy({ children: true }));
+          rg.scale.set(0.2);
+          void tween(rg.scale, { x: 1, y: 1 }, 420, ease.outBack);
+        }
+        break;
+      }
+      case "frozen": {
+        const rv = yours(v.rod ?? 1);
+        if (!rv) break;
+        const tape = haltTape(PITCH_H + RAIL_T + RAIL);
+        tape.position.set(0, LANE0 - RAIL_T + (PITCH_H + RAIL_T + RAIL) / 2 - rv.c.y);
+        tape.alpha = 0.85;
+        (tape as Container & { label: string }).label = "halt-tape";
+        rv.c.addChildAt(tape, 1);
+        const t = txt("HALTED", { fontFamily: NUM, fontSize: this.port ? 30 : 24, fill: 0xffffff, stroke: { color: 0xd83030, width: 6 }, letterSpacing: 2 });
+        t.anchor.set(0.5);
+        this.upright(t);
+        t.position.set(rv.c.x, LANE0 + PITCH_H - 22);
+        L.addChild(t);
+        if (anim) {
+          sfx.latch();
+          tape.scale.y = 0;
+          void tween(tape.scale, { y: 1 }, 520, ease.outCubic);
+        }
+        break;
+      }
+      case "locked": {
+        const fv = yours(0)?.figs[0];
+        if (!fv) break;
+        const lock = padlock(this.port ? 44 : 38);
+        this.upright(lock);
+        lock.position.set(-30, -FR - 8);
+        fv.addChild(lock);
+        if (anim) {
+          sfx.latch();
+          lock.scale.set(2.4);
+          lock.alpha = 0;
+          void tween(lock, { alpha: 1 }, 120);
+          void tween(lock.scale, { x: 1, y: 1 }, 300, ease.outBack);
+        }
+        break;
+      }
+      case "mirror": {
+        // dotted tethers along the near rail: your rod and the one that copies it
+        const g = new Graphics();
+        const y = LANE0 + PITCH_H - 8;
+        for (let r = 0; r < 4; r++) {
+          if (m.pulled === r) continue;
+          const a = colX(colOf(0, r));
+          const bx = colX(colOf(1, [0, 3, 2, 1][r]));
+          const h = 26 + Math.abs(bx - a) * 0.08;
+          for (let i = 0; i <= 24; i++) {
+            if (i % 2) continue;
+            const t0 = i / 24;
+            const t1 = (i + 1) / 24;
+            const px = (t: number) => a + (bx - a) * t;
+            const py = (t: number) => y - Math.sin(Math.PI * t) * h;
+            g.moveTo(px(t0), py(t0)).lineTo(px(t1), py(t1));
+          }
+          g.circle(a, y, 5).circle(bx, y, 5);
+        }
+        g.stroke({ width: 3, color: kit.hi, alpha: 0.75 });
+        L.addChild(g);
+        if (anim) {
+          g.alpha = 0;
+          void tween(g, { alpha: 1 }, 500);
+        }
+        break;
+      }
+      case "drift": {
+        this.ruleAnim = new Graphics();
+        L.addChild(this.ruleAnim);
+        const arrow = new Graphics();
+        const d = v.d ?? 1;
+        const y = laneY(MOUTH[d < 0 ? 0 : 1] + d * 1.2);
+        arrow.poly([TX1 - 60, y - 9 * d, TX1 - 46, y + 7 * d, TX1 - 74, y + 7 * d]).fill({ color: kit.hi, alpha: 0.8 });
+        L.addChild(arrow);
+        break;
+      }
+      case "check": {
+        // Vibe Check: who may shoot. A tick on the figures with a stat, a cross on the ones without
+        for (const rv of this.rods[0]) {
+          rv.figs.forEach((fv) => {
+            const slot = this.slotOfFig(fv);
+            if (slot < 0) return;
+            const st = run.stats(slot);
+            const ok = st.power || st.pace || st.grip;
+            const g = new Graphics();
+            g.circle(0, 0, 9).fill(ok ? COL.good : 0x5a4a56).stroke({ width: 2.5, color: COL.ink });
+            if (ok) g.moveTo(-4, 0).lineTo(-1, 4).lineTo(5, -4).stroke({ width: 3, color: COL.ink, cap: "round" });
+            else g.moveTo(-4, -4).lineTo(4, 4).moveTo(4, -4).lineTo(-4, 4).stroke({ width: 3, color: COL.ink, cap: "round" });
+            this.upright(g);
+            g.position.set(22, -FR - 2);
+            fv.addChild(g);
+            if (anim) {
+              g.scale.set(0);
+              void tween(g.scale, { x: 1, y: 1 }, 260, ease.outBack);
+            }
+          });
+        }
+        break;
+      }
+      case "bell": {
+        // stadium lights for the final: four cones of light from the corners, and the bell at their goal
+        this.ruleAnim = new Graphics();
+        L.addChild(this.ruleAnim);
+        const bell = bellIcon(this.port ? 40 : 34);
+        this.upright(bell);
+        bell.position.set(TX1 + 34, laneY(MOUTH[0] - 0.5) - 34);
+        L.addChild(bell);
+        if (anim) {
+          sfx.bell();
+          void (async () => {
+            for (let i = 0; i < 6; i++) {
+              await tween(bell, { rotation: (this.port ? Math.PI / 2 : 0) + (i % 2 ? -0.35 : 0.35) }, 90);
+            }
+            await tween(bell, { rotation: this.port ? Math.PI / 2 : 0 }, 120);
+          })();
+        }
+        break;
+      }
+      case "cost2":
+      case "late":
+      case "short":
+        // drawn with the handles, the pass targets and the touch pips
+        if (anim) sfx.latch();
+        break;
+    }
+  }
+
+  /** The squad slot of one of your figures on the table, or -1. */
+  slotOfFig(fv: FigureView): number {
+    for (let r = 0; r < 4; r++) {
+      const f = this.rods[0][r]?.figs.indexOf(fv) ?? -1;
+      if (f >= 0) return slotOf(r, f);
+    }
+    return -1;
+  }
+
+  /** Puts a corner plaque in its slot: above the stands' left end on a wide table, the near end on a phone. */
+  placeBadge(b: Container, i: number) {
+    if (this.port) {
+      this.upright(b);
+      b.position.set(70 + i * 70, -STAND_T + 2);
+    } else b.position.set(12 + i * 316, -STAND_T + 2);
+  }
+
+  /** The table event: a tint on the felt, its plaque at the corner. `intro` flashes it in at kickoff. */
+  syncEventTint(id?: TableEventId | null, intro = false) {
+    const L = this.eventLayer;
+    L.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.eventAnim = null;
+    const run = this.run;
+    const ev = id ?? (run && run.s.match && this.inMatch() ? run.s.match.event : null);
+    if (!ev) return;
+    const e = EVENT_LOOK[ev];
+    const g = new Graphics();
+    L.addChild(g);
+    if (ev === "volatile") {
+      this.eventAnim = g;
+    } else if (ev === "thin") {
+      // the sticky lane, through midfield only (columns 3 to 6), where no kick runs along it
+      const lane = run?.s.match?.sticky ?? -1;
+      if (lane >= 0) {
+        const y = LANE0 + lane * LH;
+        const half = (TX1 - TX0) / 18;
+        const x0 = colX(3) - half;
+        const x1 = colX(6) + half;
+        g.rect(x0, y, x1 - x0, LH).fill({ color: e.tint, alpha: 0.2 });
+        for (let x = x0; x < x1 - 1; x += 18) g.moveTo(x, y + LH).lineTo(Math.min(x1, x + 18), y);
+        g.stroke({ width: 2, color: e.tint, alpha: 0.3 });
+        g.rect(x0, y, x1 - x0, LH).stroke({ width: 2, color: e.tint, alpha: 0.55 });
+      }
+    } else if (ev === "green") {
+      g.rect(TX0, LANE0, TX1 - TX0, PITCH_H).fill({ color: e.tint, alpha: 0.06 });
+      g.rect(TX0, LANE0, TX1 - TX0, PITCH_H).stroke({ width: 6, color: e.tint, alpha: 0.35 });
+    } else if (ev === "halfhalt") {
+      const mid = (TX0 + TX1) / 2;
+      for (let y = LANE0; y < LANE0 + PITCH_H; y += 28) g.rect(mid - 6, y, 12, 16).fill({ color: e.tint, alpha: 0.55 });
+    }
+    if (intro && !reduced()) {
+      L.alpha = 0;
+      void tween(L, { alpha: 1 }, 500);
+      const p = this.root.toLocal(this.tbl.toGlobal({ x: (TX0 + TX1) / 2, y: LANE0 + PITCH_H / 2 }));
+      this.floatText(e.name, p.x, p.y, e.tint, 44);
+    }
+    this.placeEventBadge(ev);
+  }
+
+  placeEventBadge(id?: TableEventId | null) {
+    const run = this.run;
+    const ev = id ?? (run && run.s.match ? run.s.match.event : null);
+    for (const c of this.badgeLayer.children.slice()) if ((c as Container & { label: string }).label === "event") c.destroy({ children: true });
+    if (!ev || !this.inMatch()) return;
+    const big = this.port;
+    const b = eventBadge(ev, big ? 370 : 300, big ? 62 : 50, big ? 27 : 21);
+    (b as Container & { label: string }).label = "event";
+    this.placeBadge(b, run?.s.match?.ruleView ? 1 : 0);
+    this.badgeLayer.addChild(b);
+  }
+
+  /** The rule's and the event's moving parts, once a frame. */
+  frameRule() {
+    const t = this.t;
+    const rm = reduced();
+    const g = this.ruleAnim;
+    const v = this.run?.s.match?.ruleView;
+    if (g && v) {
+      g.clear();
+      if (v.kind === "drift") {
+        // their goal mouth wobbles: the shot line bends
+        const y0 = laneY(MOUTH[0] - 0.5);
+        const h = (MOUTH[1] - MOUTH[0] + 1) * LH;
+        g.moveTo(TX1 - 4, y0);
+        for (let y = 0; y <= h; y += 6) g.lineTo(TX1 - 4 + (rm ? 0 : Math.sin(t * 4 + y * 0.12) * 5), y0 + y);
+        g.stroke({ width: 4, color: kitOf(this.run?.s.match?.club).hi, alpha: 0.7 });
+      } else if (v.kind === "bell") {
+        const a = rm ? 0.06 : 0.05 + 0.02 * Math.sin(t * 1.3);
+        for (const [cx, cy] of [
+          [TX0 - 40, LANE0 - 30],
+          [TX1 + 40, LANE0 - 30],
+          [TX0 - 40, LANE0 + PITCH_H + 30],
+          [TX1 + 40, LANE0 + PITCH_H + 30],
+        ]) {
+          const tx = (TX0 + TX1) / 2 + (cx < 500 ? -120 : 120);
+          const ty = LANE0 + PITCH_H / 2;
+          const nx = -(ty - cy);
+          const ny = tx - cx;
+          const len = Math.hypot(nx, ny) || 1;
+          const w = 170;
+          g.poly([cx, cy, tx + (nx / len) * w, ty + (ny / len) * w, tx - (nx / len) * w, ty - (ny / len) * w]).fill({ color: 0xfff6e0, alpha: a });
+        }
+      }
+    }
+    const e = this.eventAnim;
+    if (e) {
+      e.clear();
+      const k = rm ? 0.5 : 0.5 + 0.5 * Math.sin(t * 2.2);
+      const tint = EVENT_LOOK.volatile.tint;
+      for (const y of [LANE0, LANE0 + PITCH_H - 10]) e.rect(TX0, y, TX1 - TX0, 10).fill({ color: tint, alpha: 0.2 + 0.25 * k });
+    }
+  }
+
   // ================================================================ stage panels: match day, full time, dressing room
   showStage() {
     const run = this.run;
@@ -1884,160 +3108,24 @@ export class Game {
     const ph = run.s.phase;
     const inMatch = ph === "attack" || ph === "defend";
     this.tbl.visible = inMatch || ph === "over" || ph === "won";
-    if (ph === "fixture") this.fixturePanel();
-    else if (ph === "fulltime") this.fulltimePanel();
-    else if (ph === "room") this.roomPanel();
+    drawStage(this.stageHost(run));
+    this.tipZone();
   }
 
-  private stageBox(h: number, title: string, color: number, full = false): { c: Container; w: number } {
-    const a = this.L.area;
-    const w = full ? a.w : Math.min(a.w, this.port ? a.w : 1000);
-    const x = a.x + (a.w - w) / 2;
-    const y = this.port || full ? a.y : a.y + Math.max(0, (a.h - h) / 2 - 20);
-    const c = new Container();
-    c.position.set(x, y);
-    c.addChild(panel(w, h, COL.ink2, color));
-    const t = txt(title, { fontFamily: NUM, fontSize: 46, fill: color, stroke: { color: COL.ink, width: 6 } });
-    t.anchor.set(0.5, 0);
-    t.position.set(w / 2, 10);
-    c.addChild(t);
-    this.stageLayer.addChild(c);
-    c.alpha = 0;
-    c.y += 30;
-    void tween(c, { alpha: 1, y }, 260, ease.outCubic);
-    return { c, w };
-  }
-
-  /** Match day: the round's three clubs with their crests and how they play, your eleven, and the way to the dressing room. */
-  fixturePanel() {
-    const run = this.run!;
-    const s = run.s;
-    const port = this.port;
-    const haunt = run.mode === "haunt";
-    const h = this.L.area.h;
-    const { c, w } = this.stageBox(h, haunt ? "HAUNTED TABLE" : `ROUND ${s.round} · MATCH DAY`, haunt ? 0xcfe3ee : COL.money, true);
-    const sub = txt(
-      haunt
-        ? `Three ghost clubs made of the cut's quietest launches. Live ${"through " + "6 Nov"}. ${s.fans} fans.`
-        : `${s.fans} fans · ${s.cleared} won · round ${s.round} of ${run.rounds}`,
-      { fontSize: 15, fill: COL.cream2, align: "center", wordWrap: true, wordWrapWidth: w - 40 },
-    );
-    sub.anchor.set(0.5, 0);
-    sub.position.set(w / 2, 62);
-    c.addChild(sub);
-    // the three tiles take the upper part, your line-up the lower
-    const tilesTop = 96;
-    let lineupH = port ? 330 : 290;
-    const buttonsH = 84;
-    const spare = h - tilesTop - lineupH - buttonsH - 10;
-    const th = Math.min(spare, port ? 440 : 420);
-    lineupH += spare - th;
-    const gap = 14;
-    const tw = (w - 32 - 2 * gap) / 3;
-    for (let k = 0; k < 3; k++) {
-      const x = 16 + k * (tw + gap);
-      const y = tilesTop;
-      const cur = k === s.kind;
-      const done = k < s.kind;
-      const boss = run.bossOf(k);
-      const col = haunt ? 0xcfe3ee : k === 0 ? COL.cyan : k === 1 ? COL.money : COL.pink;
-      const tile = panel(tw, th, cur ? COL.panelHi : COL.ink, cur ? col : COL.edge);
-      tile.position.set(x, y);
-      if (done) tile.alpha = 0.6;
-      c.addChild(tile);
-      const kindT = txt(FIXTURE_NAME[k].toUpperCase(), { fontSize: 12, fill: COL.dim });
-      kindT.anchor.set(0.5, 0);
-      kindT.position.set(x + tw / 2, y + 10);
-      const nm = run.clubName(k);
-      const name = txt(nm, { fontSize: port ? 16 : 20, fill: col, align: "center", wordWrap: true, wordWrapWidth: tw - 14 });
-      name.anchor.set(0.5, 0);
-      name.position.set(x + tw / 2, y + 30);
-      c.addChild(kindT, name);
-      const R = Math.max(22, Math.min(port ? 34 : 46, th * 0.11));
-      const em = crest(nm, haunt ? "ghost" : boss ? "boss" : "club", R);
-      em.position.set(x + tw / 2, name.y + name.height + R * 1.25);
-      c.addChild(em);
-      const lv = run.levelOf(k);
-      const st = STYLES[run.styleOf(k)];
-      const p = lv >= 10 ? "Full strength" : lv >= 8 ? "Shoots through a blocker" : lv >= 6 ? "More touches" : lv >= 4 ? "Reads your blocks" : lv >= 3 ? "Two slides a touch" : lv >= 2 ? "Shuts passing lanes" : "Covers the shots";
-      const info = txt(`${st.name}\n${p}\nFirst to ${boss === "bell" ? 3 : 2} · win +${WIN_FANS[k]} fans`, { fontSize: port ? 12 : 14, fill: COL.cream2, align: "center", lineHeight: port ? 16 : 19, wordWrap: true, wordWrapWidth: tw - 12 });
-      info.anchor.set(0.5, 0);
-      info.position.set(x + tw / 2, em.y + R * 1.3);
-      c.addChild(info);
-      const bottom = y + th - (cur ? (port ? 84 : 76) : 50);
-      if (boss) {
-        const bt = txt(BOSS[boss].text, { fontSize: port ? 12 : 14, fill: COL.cream, align: "center", wordWrap: true, wordWrapWidth: tw - 16, lineHeight: port ? 15 : 18 });
-        bt.anchor.set(0.5, 0);
-        bt.position.set(x + tw / 2, info.y + info.height + 8);
-        const room = bottom - bt.y;
-        if (bt.height > room) bt.scale.set(Math.max(0.6, room / bt.height));
-        c.addChild(bt);
-      }
-      if (cur) {
-        const btn = new Button("Kick off", Math.min(tw - 16, 200), port ? 72 : 62, COL.play, () => this.doGo(), { size: 24 });
-        btn.position.set(x + tw / 2, y + th - (port ? 46 : 42));
-        btn.hitArea = new Rectangle(-tw / 2 + 4, -(port ? 44 : 40), tw - 8, port ? 84 : 76);
-        c.addChild(btn);
-      } else {
-        const st2 = txt(done ? "DONE" : "UP NEXT", { fontFamily: NUM, fontSize: 28, fill: done ? COL.good : COL.dim });
-        st2.anchor.set(0.5);
-        st2.position.set(x + tw / 2, y + th - 28);
-        c.addChild(st2);
-      }
-    }
-    // your eleven on four short rods, front line first, each rod across the box like the table seen from your end
-    const ly = tilesTop + th + 10;
-    const box = panel(w - 32, lineupH - 10, COL.ink, COL.edge);
-    box.position.set(16, ly);
-    c.addChild(box);
-    const head = txt("YOUR ELEVEN · tap a figure for its launch", { fontSize: 12, fill: COL.dim });
-    head.position.set(30, ly + 8);
-    c.addChild(head);
-    const rowH = (lineupH - 46) / 4;
-    const labW = port ? 0 : 110;
-    [3, 2, 1, 0].forEach((r, i) => {
-      const cy = ly + 34 + rowH * (i + 0.5);
-      if (labW) {
-        const lab = txt(RODS[r].name.toUpperCase(), { fontSize: 12, fill: COL.cream2 });
-        lab.anchor.set(0, 0.5);
-        lab.position.set(32, cy);
-        c.addChild(lab);
-      }
-      const x0 = 32 + labW;
-      const x1 = w - 40;
-      const bar = new Graphics().rect(x0, -3, x1 - x0, 6).fill(BRASS.bar);
-      bar.y = cy;
-      c.addChild(bar);
-      const n = RODS[r].n;
-      const k = Math.min(port ? 1.05 : 0.78, rowH / 78);
-      for (let f = 0; f < n; f++) {
-        const slot = RODS[r].slot + f;
-        const fv = new FigureView(0, s.squad[slot], f);
-        fv.rotation = -Math.PI / 2;
-        fv.scale.set(k);
-        if (fv.tag) {
-          fv.tag.rotation = Math.PI / 2;
-          fv.tag.anchor.set(0, 0.5);
-          fv.tag.position.set(0, 0);
-          fv.tag.position.set(-6, FR + 16);
-        }
-        fv.setStats(run.stats(slot));
-        fv.position.set(x0 + ((x1 - x0) * (f + 0.5)) / n - 20 * k, cy);
-        fv.on("pointertap", () => setUi({ detail: { l: s.squad[slot], slot } }));
-        c.addChild(fv);
-      }
-    });
-    // the way to the line-up and the dressing room
-    const by = h - buttonsH / 2 - 6;
-    const bw = Math.min(260, (w - 60) / 2);
-    const sq = new Button("Line-up", bw, 62, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 21 });
-    sq.position.set(w / 2 - bw / 2 - 10, by);
-    const canRoom = s.visit > 0;
-    const room = new Button(canRoom ? `Dressing room · ${s.fans} fans` : "Dressing room after match 1", bw, 62, canRoom ? COL.money : COL.neutral, () => this.doBack(), { size: canRoom ? 19 : 15 });
-    if (canRoom) room.caption.style.fill = COL.ink;
-    room.setEnabled(canRoom);
-    room.position.set(w / 2 + bw / 2 + 10, by);
-    c.addChild(sq, room);
+  /** The table's side of the stage panels (src/stage.ts): where they draw and what their buttons do. */
+  stageHost(run: Run): StageHost {
+    return {
+      run,
+      area: this.L.area,
+      port: this.port,
+      layer: this.stageLayer,
+      go: () => this.doGo(),
+      back: () => this.doBack(),
+      collect: () => this.doCollect(),
+      buy: (i) => this.doBuy(i),
+      next: () => this.doNext(),
+      lineup: () => this.hooks.openOverlay("squad"),
+    };
   }
 
   doBack() {
@@ -2057,7 +3145,16 @@ export class Game {
     }
     setUi({ bossSeen: false });
     const boss = run.bossOf();
+    this.bestAtKickoff = run.s.best?.total ?? 0;
+    this.deskN = 0;
+    this.openShots = -1;
     if (!this.act({ t: "go" })) return;
+    this.walkoutPending = !!run.s.match?.ruleView;
+    // a fresh match: last match's tape and scarves are put away
+    for (const p of this.tape) p.s.destroy();
+    this.tape = [];
+    this.crowd.react("idle");
+    this.crowd.energy = 0.4;
     if (boss && !this.haunted) {
       setSwirlColors(this.swirl, 0x2e0612, 0x3d0b1c, 0xb3123f);
       this.heat = 0.6;
@@ -2068,129 +3165,19 @@ export class Game {
     this.hudNow = null;
     this.syncHud();
     this.syncControls();
+    const m = run.s.match;
+    if (m) this.say(`${m.club} at the table. ${STYLES[m.style].name}.`, "flat");
+    this.syncEventTint(null, true);
     void this.playEvents(run.events.slice()).finally(() => {
       this.busy = false;
       this.afterEvents();
     });
   }
 
-  fulltimePanel() {
-    const run = this.run!;
-    const ft = run.s.fulltime;
-    if (!ft) return;
-    const port = this.port;
-    const h = port ? 470 : 430;
-    const m = run.s.match;
-    const { c, w } = this.stageBox(h, m ? `FULL TIME ${m.score[0]}:${m.score[1]}` : "FULL TIME", COL.money);
-    ft.rows.forEach(([k, v], i) => {
-      const y = 90 + i * 52;
-      const a = txt(k, { fontSize: port ? 18 : 22, fill: COL.cream, wordWrap: true, wordWrapWidth: w - 160 });
-      a.position.set(36, y);
-      const b = txt(`+${v}`, { fontFamily: NUM, fontSize: 40, fill: COL.money });
-      b.anchor.set(1, 0);
-      b.position.set(w - 36, y - 8);
-      c.addChild(a, b);
-      a.alpha = 0;
-      b.alpha = 0;
-      void wait(i * 180).then(() => {
-        sfx.coin();
-        void tween(a, { alpha: 1 }, 150);
-        void tween(b, { alpha: 1 }, 150);
-      });
-    });
-    const btn = new Button(`Collect ${ft.total} fans`, Math.min(w - 60, 380), 76, COL.money, () => this.doCollect(), { size: 26 });
-    btn.caption.style.fill = COL.ink;
-    btn.position.set(w / 2, h - 60);
-    c.addChild(btn);
-  }
-
   doCollect() {
     if (!this.act({ t: "collect" })) return;
     sfx.coin();
     this.refreshAll();
-  }
-
-  roomPanel() {
-    const run = this.run!;
-    const s = run.s;
-    const port = this.port;
-    const h = Math.min(this.L.area.h - 6, port ? 640 : 600);
-    const { c, w } = this.stageBox(h, "DRESSING ROOM", COL.cyan);
-    const fans = txt(`${s.fans} fans in the stands`, { fontSize: 20, fill: COL.money });
-    fans.anchor.set(0.5, 0);
-    fans.position.set(w / 2, 62);
-    c.addChild(fans);
-    const hint = roomHint(s.squad, (l) => run.ageHours(l), s.offers.filter((o) => o.kind === "coach" && !o.sold).map((o) => o.id));
-    let drop = 0;
-    if (hint) {
-      const ht = txt(hint.text, { fontSize: 15, fill: COL.cyan, align: "center", wordWrap: true, wordWrapWidth: w - 60, lineHeight: 19 });
-      ht.anchor.set(0.5, 0);
-      ht.position.set(w / 2, 92);
-      c.addChild(ht);
-      drop = Math.max(0, ht.height - 6);
-    }
-    const n = s.offers.length;
-    const sc = port ? 1.1 : 1.12;
-    const step = Math.min((w - 40) / Math.max(1, n), PW * sc + 44);
-    const y0 = (port ? 112 : 120) + (PH * sc) / 2 + drop;
-    const desc = txt("Tap an item to read it. Coaches work every match; training stays for the season; a set piece is used once.", {
-      fontSize: port ? 15 : 16,
-      fill: COL.cream2,
-      align: "center",
-      wordWrap: true,
-      wordWrapWidth: w - 60,
-      lineHeight: 21,
-    });
-    desc.anchor.set(0.5, 0);
-    desc.position.set(w / 2, y0 + (PH * sc) / 2 + 72);
-    c.addChild(desc);
-    s.offers.forEach((o, i) => {
-      const x = w / 2 - ((n - 1) * step) / 2 + i * step;
-      const v: Container = o.kind === "coach" ? new CoachView(o.id) : new ItemView(o.kind, o.id);
-      v.scale.set(sc);
-      v.position.set(x, y0);
-      if (o.sold) v.alpha = 0.25;
-      c.addChild(v);
-      const say = () => {
-        if (o.kind === "coach") {
-          const d = COACH[o.id];
-          return `${d.name} (${RARITY_NAME[d.rarity]} coach): ${d.text}.`;
-        }
-        if (o.kind === "drill") {
-          const d = DRILL[o.id as DrillId];
-          const lv = s.drills[d.id];
-          return `${d.name} training, level ${lv} to ${lv + 1}: ${d.text(lv + 1)}.`;
-        }
-        return `${PLAY[o.id].name} (set piece, one use): ${PLAY[o.id].text}.`;
-      };
-      v.on("pointertap", () => {
-        desc.text = say();
-        sfx.tick();
-      });
-      v.on("pointerover", (e) => {
-        if (e.pointerType === "mouse") desc.text = say();
-      });
-      const full = (o.kind === "coach" && s.coaches.length >= MAX_COACHES) || (o.kind === "play" && s.plays.length >= MAX_PLAYS);
-      const b = new Button(o.sold ? "Signed" : `${o.cost} fans`, Math.min(step - 12, 130), 52, COL.money, () => this.doBuy(i), { size: 21 });
-      b.caption.style.fill = COL.ink;
-      b.position.set(x, y0 + (PH * sc) / 2 + 34);
-      b.setEnabled(!o.sold && s.fans >= o.cost && !full);
-      c.addChild(b);
-    });
-    const by = h - 50;
-    const sq = new Button("Line-up", 230, 64, COL.neutral, () => this.hooks.openOverlay("squad"), { size: 21 });
-    sq.position.set(w / 2 - (port ? 130 : 140), by);
-    const next = new Button("Match day", 230, 64, COL.play, () => this.doNext(), { size: 21 });
-    next.position.set(w / 2 + (port ? 130 : 140), by);
-    c.addChild(sq, next);
-    // training levels, printed: nothing on this shelf is hidden
-    const lv = DRILLS.filter((d) => s.drills[d.id] > 0).map((d) => `${d.name} ${s.drills[d.id]}`);
-    if (lv.length) {
-      const t = txt(`Training: ${lv.join(" · ")}. Next level prices: ${DRILLS.map((d) => `${d.name} ${s.drills[d.id] >= d.max ? "max" : drillCost(s.drills[d.id])}`).join(", ")}.`, { fontSize: 13, fill: COL.dim, align: "center", wordWrap: true, wordWrapWidth: w - 60 });
-      t.anchor.set(0.5, 1);
-      t.position.set(w / 2, by - 40);
-      c.addChild(t);
-    }
   }
 
   doBuy(i: number) {
@@ -2226,14 +3213,14 @@ export class Game {
       if (p.t === "kick") {
         const i = this.kickTargets.findIndex((t) => t.kick.r === p.r && t.kick.d === p.d);
         if (i >= 0) this.hoverTarget(i);
-        setUi({ coach: { step: 9, text: p.r === 4 ? "Shoot: the gold disc in their goal mouth." : "Pass: the ringed figure. Tap it." } });
+        showTip("hint", "table", p.r === 4 ? "Shoot: the gold disc in their goal mouth." : "Pass: the ringed figure. Tap it.", "touch");
       } else {
-        setUi({ coach: { step: 9, text: `Slide your ${RODS[p.r].name.toLowerCase()} ${p.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down"} one lane: drag the rod, or the ${p.d < 0 ? "top" : "bottom"} button at its handle.` } });
+        showTip("hint", "table", `Slide your ${RODS[p.r].name.toLowerCase()} ${p.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down"} one lane: drag the rod, or the ${p.d < 0 ? "top" : "bottom"} button at its handle.`, "touch");
         this.pulseArrow(p.r, p.d);
       }
     } else if (run.s.phase === "defend") {
       const b = bestBlock(run);
-      setUi({ coach: { step: 9, text: b ? `Block: slide your ${RODS[b.r].name.toLowerCase()} ${b.d < 0 ? "up" : "down"}.` : "Nothing to block that helps. Press Ready." } });
+      showTip("hint", "table", b ? `Block: slide your ${RODS[b.r].name.toLowerCase()} ${b.d < 0 ? "up" : "down"}.` : "Nothing to block that helps. Press Ready.", "touch");
       if (b) this.pulseArrow(b.r, b.d);
     }
   }
@@ -2265,6 +3252,31 @@ export class Game {
     } else if (ph === "fixture") this.doGo();
     return ph;
   }
+  /**
+   * For QA: plays on with the coach's bot, without animation, until the next fixture against boss club `boss` (any
+   * boss when empty), then shows it. Same actions a tap would take, so the trail stays honest. False if the run ends.
+   */
+  fastForward(boss = ""): boolean {
+    const run = this.run;
+    if (!run) return false;
+    // the sim's bot, dressing room included, so a QA season goes as far as the balance numbers say
+    for (let i = 0; i < 20000; i++) {
+      const ph = run.s.phase;
+      if (ph === "over" || ph === "won") break;
+      const b = run.bossOf();
+      if (ph === "fixture" && b && (!boss || b === boss)) break;
+      try {
+        if (!botStep(run)) break;
+      } catch {
+        break;
+      }
+    }
+    this.hooks.onAction(run.trail[run.trail.length - 1] || { t: "go" }, run);
+    this.refreshAll();
+    if (run.s.phase === "over" || run.s.phase === "won") this.hooks.onOver(run);
+    return run.s.phase === "fixture";
+  }
+
   /** True when the coach's next touch is a shot that goes in. */
   nextIsGoal(): boolean {
     const run = this.run;
@@ -2288,5 +3300,37 @@ export class Game {
     if (!a) return null;
     const p = a.getGlobalPosition();
     return { x: p.x, y: p.y };
+  }
+
+  /**
+   * For QA: the coach's next touch and where to tap for it on screen (a rod's handle button, a kick target, Ready),
+   * so a test plays through the real pointer paths. Null when there is nothing to tap.
+   */
+  coachTap(): { a: Action; x: number; y: number } | null {
+    const run = this.run;
+    if (!run || this.busy) return null;
+    if (run.s.phase === "attack") {
+      const p = bestTouch(run);
+      if (!p) return null;
+      if (p.t === "kick") {
+        const t = this.kickTargets.find((k) => k.kick.r === p.r && k.kick.d === p.d);
+        if (!t) return null;
+        const g = this.tbl.toGlobal({ x: t.x, y: t.y });
+        return { a: { t: "kick", r: p.r, d: p.d }, x: g.x, y: g.y };
+      }
+      const g = this.screenOfArrow(p.r, p.d);
+      return g ? { a: { t: "slide", r: p.r, d: p.d }, ...g } : null;
+    }
+    if (run.s.phase === "defend") {
+      const b = run.m.blockSlides > 0 ? bestBlock(run) : null;
+      if (b) {
+        const g = this.screenOfArrow(b.r, b.d);
+        return g ? { a: { t: "slide", r: b.r, d: b.d }, ...g } : null;
+      }
+      if (!this.btnReady.visible) return null;
+      const g = this.btnReady.getGlobalPosition();
+      return { a: { t: "hold" }, x: g.x, y: g.y };
+    }
+    return null;
   }
 }

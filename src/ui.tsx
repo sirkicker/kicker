@@ -1,14 +1,14 @@
 // HTML overlays: title, how to play, today's transfer list, the line-up, boss intros, the season over + challenge
 // links, menus, coach tips, the Daily board, sign-in (through Para), team kits and the what's-new note.
 import { render } from "preact";
-import { useEffect, useState } from "preact/hooks";
-import { BOSS, BOSSES, COACHES, DRILLS, FINAL_BOSS, FIXTURE_NAME, GHOST_RULES, HAUNT, LANES, MOUTH, PLAYS, RODS, ROUNDS, STYLES, WIN_FANS } from "../shared/content.js";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { BOSSES, COACHES, DRAW_FANS_R3, DRILLS, FINAL_BOSS, GHOST_RULES, HAUNT, LANES, LEAGUE_CLUBS, MOUTH, PLAYS, RODS, ROUNDS_R3, STYLES, TABLE_EVENTS, TABLE_EVENT_IDS, WIN_FANS, WIN_FANS_R3 } from "../shared/content.js";
 import { GAME_TOKEN, PAIRS, SOURCE_URL, STAT, facePath, tokenUrl, type Launch } from "../shared/data.js";
-import type { FigInfo } from "../shared/engine.js";
-import { BASE_BLOCKS, BASE_TOUCHES, GOALS_TO_WIN, POSSESSIONS } from "../shared/engine.js";
+import type { FigInfo, Step } from "../shared/engine.js";
+import { BASE_BLOCKS, BASE_TOUCHES, GOALS_TO_WIN, POSSESSIONS, parseTrail, rerun } from "../shared/engine.js";
 import { ageLabel, figureFacts } from "../shared/insight.js";
 import { audioState, setMusic, setSfx, unlock } from "./audio.js";
-import { local, setUi, subscribe, toast, ui } from "./store.js";
+import { local, screenNow, setUi, toast, ui } from "./store.js";
 import { cleanName, nameProblem } from "../shared/names.js";
 import { dayLabel, liveStreak, utcDay, type Streak } from "../shared/daily.js";
 import { CHAIN_NAME, LOOKS, house, look, type Look } from "./house.js";
@@ -16,8 +16,11 @@ import { endSession, me, refreshProfile, startSession } from "./me.js";
 import { PARA, openSignIn, short, signOut, warm } from "./signin.js";
 import { HAUNT_UNTIL, hauntKit, hauntOn } from "./haunt.js";
 import type { RunMode } from "../shared/engine.js";
+import type { Edition } from "../shared/data.js";
+import { Fig, PAIR_HEX, PAIR_SHAPE, PathFelt, fmt, hex, useUi } from "./kit.js";
+import { BossIntro, LeagueTable, Programme, Stage, bindScreens } from "./screens.js";
 
-export const VERSION = "2.1.0";
+export const VERSION = "3.0.0";
 export const X_URL = "https://x.com/kyriektnrv";
 
 export interface Shared {
@@ -47,6 +50,11 @@ export interface UiActions {
   kickOff(): void;
   hasSaved(): boolean;
   playEntry(h: { id: string; name: string; round: number; cleared: number; won: boolean; total: number; style: string; seed: string; edition: number; mode?: string }): void;
+  /** The table can play the season's best goal again (Game.playReplay). */
+  canReplay(): boolean;
+  replay(): Promise<void> | null;
+  /** A squad cut, from the page's cache or the server (the Hall's path thumbnails replay posted trails on it). */
+  edition(id: number): Promise<Edition>;
 }
 
 /** Your best goal of a season, kept in this browser. */
@@ -59,27 +67,12 @@ export interface LocalGoal {
   cleared: number;
   figs: FigInfo[];
   at: number;
+  /** The goal's move (3.0), kept in this browser for the Hall's thumbnail. */
+  path?: Step[][];
+  scorer?: FigInfo;
 }
 
 let A: UiActions;
-
-const PAIR_HEX = ["#5ad7ff", "#ff7a3d", "#ff4fb4", "#ffd43b"];
-const PAIR_SHAPE = ["◆", "▲", "●", "■"];
-const fmt = (n: number) => Math.floor(n).toLocaleString("en-US");
-const hex = (n: number) => "#" + n.toString(16).padStart(6, "0");
-
-function useUi() {
-  const [, set] = useState(0);
-  const seen = ui.version;
-  useEffect(() => {
-    const off = subscribe(() => set((x) => x + 1));
-    if (ui.version !== seen) set((x) => x + 1);
-    return () => {
-      off();
-    };
-  }, []);
-  return ui;
-}
 
 function close() {
   setUi({ overlay: ui.run && !(ui.run.s.phase === "over" || ui.run.s.phase === "won") ? null : ui.run ? "over" : "title" });
@@ -316,25 +309,7 @@ function AccountPill() {
   );
 }
 
-/** One figure, drawn in HTML: a round head with the launch's picture, shoulders in the kit, the ticker under it. */
-function Fig(props: { l: { s: string; c: string | null; u: number }; i?: number; small?: boolean }) {
-  const lk = look();
-  return (
-    <span
-      class={"lfig" + (props.small ? " sm" : "")}
-      style={{ "--i": props.i ?? 0, "--kit": hex(lk.kit), "--kithi": hex(lk.kitHi), "--trim": hex(lk.trim) } as Record<string, string | number>}
-    >
-      <span class="lbody" aria-hidden="true" />
-      <img src={facePath(props.l.c, props.l.s)} alt="" width={64} height={64} />
-      <span class="lpair" style={{ color: PAIR_HEX[props.l.u] }} aria-hidden="true">
-        {PAIR_SHAPE[props.l.u]}
-      </span>
-      <span class="ltick">${props.l.s.slice(0, 7)}</span>
-    </span>
-  );
-}
-
-/** Five real launches from today's cut on a brass rod: the liveliest of each pair kind, and one more. */
+/** Five real launches from today's cut on a brass rod, passing a ball along the line and into the net. */
 function HeroLineup(props: { ed: NonNullable<typeof ui.edition> }) {
   const picks: Launch[] = [];
   const sorted = props.ed.pool.map((p) => p.slice().sort((a, b) => b.k + b.h - (a.k + a.h)));
@@ -346,9 +321,11 @@ function HeroLineup(props: { ed: NonNullable<typeof ui.edition> }) {
   return (
     <div class="lineup" aria-hidden="true">
       <span class="lrod" />
+      <span class="lnet" />
       {picks.map((l, i) => (
-        <Fig l={l} i={i - 2} />
+        <Fig l={l} i={i} />
       ))}
+      <span class="lball" />
     </div>
   );
 }
@@ -493,11 +470,7 @@ function DailyPanel() {
         </>
       ) : (
         <div class="side-empty">
-          <div class="empty-felt" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
+          <EmptyGoal />
           <p class="side-note">Nobody has posted today. The board is yours.</p>
           {prev && prev.entries[0] && (
             <p class="side-hint">
@@ -521,136 +494,84 @@ function DailyPanel() {
           <i class="ic">⏱</i>Next Daily Match in <b>{span(nextDaily)}</b>
         </p>
       </div>
-      <button class="btn gold side-btn" onClick={() => A.dailyRun()}>
-        Play the Daily Match
-      </button>
     </aside>
   );
 }
 
-/** Desktop only, right of the title: live facts from the cut the page already loaded, each with the coach who cares. */
+/** An empty goal on the felt, the ball waiting to the side: nobody has scored on today's board yet. */
+function EmptyGoal() {
+  const net: preact.JSX.Element[] = [];
+  for (let x = 62; x < 142; x += 8) net.push(<line x1={x} y1={22} x2={x} y2={78} />);
+  for (let y = 26; y < 78; y += 8) net.push(<line x1={56} y1={y} x2={144} y2={y} />);
+  return (
+    <svg class="empty-goal" viewBox="0 0 200 92" aria-hidden="true" shape-rendering="crispEdges">
+      <rect x="0" y="78" width="200" height="14" fill="#0c3438" />
+      <rect x="0" y="78" width="200" height="2" fill="#14494e" />
+      <rect x="56" y="20" width="88" height="58" fill="rgba(0,0,0,0.22)" />
+      <g stroke="rgba(255,241,220,0.3)" stroke-width="1">
+        {net}
+      </g>
+      <rect x="50" y="14" width="6" height="66" fill="#fff1dc" />
+      <rect x="144" y="14" width="6" height="66" fill="#fff1dc" />
+      <rect x="50" y="14" width="100" height="6" fill="#fff1dc" />
+      <rect x="50" y="80" width="100" height="3" fill="rgba(0,0,0,0.35)" />
+      <circle cx="174" cy="73" r="6" fill="#fff1dc" stroke="#1a0816" stroke-width="2" />
+      <rect x="171" y="70" width="4" height="4" fill="#1a0816" />
+    </svg>
+  );
+}
+
+/** Desktop only, right of the title: three launches from today's cut, one for each stat, big. */
 function CutPanel(props: { ed: NonNullable<typeof ui.edition> }) {
   const ed = props.ed;
   const now = useClock();
-  const cutAt = Date.parse(ed.at) / 1000;
-  const all = ed.pool.flatMap((p, u) => p.map((l) => ({ l, u })));
+  const all = ed.pool.flat();
   const total = all.length;
-  const counts = ed.pool.map((p) => p.length);
-  const max = Math.max(1, ...counts);
-  const power = ed.pool.map((p) => p.filter((l) => l.p >= STAT.power.at).length);
-  const hot = all.slice().sort((a, b) => b.l.k - a.l.k || b.l.h - a.l.h).slice(0, 3);
-  const youngest = all.slice().sort((a, b) => b.l.a - a.l.a)[0];
-  const young = all.filter((c) => (cutAt - c.l.a) / 3600 < 6).length;
-  const down = all.filter((c) => c.l.x !== null && c.l.x < 0).length;
-  const held = all.filter((c) => c.l.h >= STAT.grip.at).length;
-  const flown = all.filter((c) => c.l.g).length;
+  const by = (f: (l: Launch) => number) => all.slice().sort((a, b) => f(b) - f(a) || a.s.localeCompare(b.s))[0];
+  const power = by((l) => l.p);
+  const pace = by((l) => l.k);
+  const grip = by((l) => l.h);
   const next = Math.round(((ed.id + 3) * 3_600_000 - now) / 60000);
+  const hero = (l: Launch | undefined, stat: string, cls: string, big: string, what: string) =>
+    l && (
+      <button class={"hero " + cls} onClick={() => setUi({ detail: { l } })} aria-label={`$${l.s}: ${what}`}>
+        <span class="hero-fig">
+          <Fig l={l} noTick />
+        </span>
+        <span class="hero-text">
+          <span class={"hero-stat " + cls}>{stat}</span>
+          <b class="hero-tick" style={{ color: PAIR_HEX[l.u] }}>
+            ${l.s.slice(0, 9)}
+          </b>
+          <span class="hero-big">{big}</span>
+          <small>{what}</small>
+        </span>
+      </button>
+    );
   return (
-    <aside class="side side-r" aria-label="In today's squad cut">
+    <aside class="side side-r" aria-label="Today's transfer list">
       <h3>
         <span>Today's transfer list</span>
       </h3>
       <div class="side-meta">
         <span>
-          <i class="ic">#</i>Cut {ed.id} · {ago(ed.at)}
+          <i class="ic">#</i>Cut {ed.id} · {ago(ed.at)} · {total} launches
         </span>
       </div>
-      <hr class="pix" />
-      <ul class="side-bars">
-        {PAIRS.map((s, i) => (
-          <li>
-            <span class="sl" style={{ color: PAIR_HEX[i] }}>
-              {PAIR_SHAPE[i]} {s.name}
-            </span>
-            <span class="bar">
-              <span style={{ width: `${(counts[i] / max) * 100}%`, background: PAIR_HEX[i] }} />
-            </span>
-            <b>
-              <CountUp n={counts[i]} />
-            </b>
-            <small>{power[i]} with Power</small>
-          </li>
-        ))}
-      </ul>
-      <p class="side-hint lo">Power is 10% of the curve. The maxis lend it to their whole pair.</p>
-      <hr class="pix" />
-      <div class="side-hots">
-        {hot.map((c) => (
-          <div class="mini">
-            <img src={facePath(c.l.c, c.l.s)} alt="" width={44} height={44} />
-            <div>
-              <b style={{ color: PAIR_HEX[c.u] }}>${c.l.s}</b>
-              <span>{c.l.k.toLocaleString("en-US")} trades</span>
-              <span>{c.l.h.toLocaleString("en-US")} holders</span>
-            </div>
-          </div>
-        ))}
+      <div class="heroes">
+        {power && hero(power, "Power", "pw", `${(power.p / 100).toFixed(power.p < 1000 ? 1 : 0)}%`, "furthest up the curve")}
+        {pace && hero(pace, "Pace", "pc", fmt(pace.k), "trades in 24h, the busiest")}
+        {grip && hero(grip, "Grip", "gr", fmt(grip.h), "holders, the most held")}
       </div>
-      <p class="side-hint">
-        The busiest three: Pace, a free slide every possession.<span class="lo"> Volume Guy lowers the bar to 3 trades.</span>
-      </p>
-      <hr class="pix" />
       <div class="side-rows">
-        {youngest && (
-          <p class="row-fact">
-            <i class="ic">✦</i>Youngest: <b>${youngest.l.s}</b>, {ageLabel((cutAt - youngest.l.a) / 3600)} before the cut
-            <small>Early Bird likes {young} under 6 h</small>
-          </p>
-        )}
-        <p class="row-fact">
-          <i class="ic">↓</i>
-          <b>
-            <CountUp n={down} />
-          </b>{" "}
-          of {total} are down
-          <small>Dip Buyer gives them Grip</small>
-        </p>
-        <p class="row-fact">
-          <i class="ic gold">★</i>
-          <b class="gold">
-            <CountUp n={held} />
-          </b>{" "}
-          with {STAT.grip.at}+ holders
-          <small>Grip: keep the ball once when a pass is blocked</small>
-        </p>
-        <p class="row-fact lo2">
-          <i class="ic">▲</i>
-          <b>{flown}</b> flew the whole curve
-          <small>Valedictorian picks your furthest along</small>
-        </p>
         <p class="row-fact">
           <i class="ic">⏱</i>Next cut in <b>{span(next)}</b>
         </p>
       </div>
+      <button class="btn side-btn" onClick={() => setUi({ overlay: "pool" })}>
+        All {total} on the list
+      </button>
     </aside>
-  );
-}
-
-/** The Haunted table's entry on the title: a tile while the event runs, a small archive line after it. */
-function HauntTile() {
-  const live = hauntOn();
-  const kit = hauntKit();
-  if (!live)
-    return (
-      <p class="haunt-archive">
-        Haunted table: closed. <button class="textlink" onClick={() => A.newRun("haunt")}>Play the past event</button>
-      </p>
-    );
-  return (
-    <button class="haunt-tile" onClick={() => A.newRun("haunt")} aria-label="Play the Haunted table">
-      <span class="ht-art" aria-hidden="true">
-        <i class="pumpkin" />
-        <i class="ghost" />
-      </span>
-      <span class="ht-text">
-        <b>Haunted table</b>
-        <small>
-          {HAUNT_UNTIL}. Three ghost clubs made of the cut's deadest launches, a rod that phases, a poltergeist, the lights low.
-          {kit ? " Haunted kit: yours." : ""}
-        </small>
-      </span>
-      <span class="ht-go">Play</span>
-    </button>
   );
 }
 
@@ -685,12 +606,14 @@ function Title() {
   const saved = A.hasSaved();
   const savedMode = A.savedMode();
   const live = ed
-    ? `${ed.pool.reduce((n, p) => n + p.length, 0)} live launches on today's transfer list · new cut every few hours`
+    ? `${ed.pool.reduce((n, p) => n + p.length, 0)} live launches on today's transfer list`
     : u.editionError
       ? "The launch index is not answering. Try again in a minute."
       : "Reading the newest launches...";
+  const streak = streakNow();
+  const haunt = hauntOn();
   return (
-    <div class="title-screen">
+    <div class="title-screen t3">
       <Parade rows={0} />
       <SoundIcons />
       <AccountPill />
@@ -722,48 +645,45 @@ function Title() {
         ) : (
           <div class="lineup empty" aria-hidden="true" />
         )}
-        <div class="title-buttons">
-          <div class="row play">
-            {saved ? (
-              <button class="btn big teal" onClick={() => A.continueRun()}>
-                {savedMode === "haunt" ? "Continue Haunted table" : "Continue season"}
-              </button>
-            ) : (
-              <button class="btn big teal" disabled={!ed} onClick={() => A.newRun()}>
-                {ed ? "New season" : u.editionError ? "Squad unavailable" : "Picking the squad..."}
-              </button>
-            )}
-            <button class="btn big gold daily-btn" disabled={!u.daily && !ed} onClick={() => A.dailyRun()} aria-label="Daily Match">
-              <span>Daily Match</span>
-              <small>
-                {u.daily ? `${u.daily.label} · ${u.daily.players ? plural(u.daily.players, "player") + " today" : "same squad for all"}` : dayLabel(utcDay())}
-                {streakNow() > 1 ? ` · streak ${streakNow()}` : ""}
-              </small>
+        <div class="t3-play">
+          {saved ? (
+            <button class="t3-act season" onClick={() => A.continueRun()}>
+              <b>{savedMode === "haunt" ? "Continue Haunted" : savedMode === "daily" ? "Continue match day" : "Continue season"}</b>
+              <small>Right where you left it</small>
             </button>
-          </div>
-          <HauntTile />
-          <div class="row three">
-            <button class="btn" onClick={() => setUi({ overlay: "how" })}>
-              How to play
+          ) : (
+            <button class="t3-act season" disabled={!ed} onClick={() => A.newRun()}>
+              <b>{ed ? "New season" : u.editionError ? "Squad unavailable" : "Picking the squad..."}</b>
+              <small>{ROUNDS_R3} rounds · an {LEAGUE_CLUBS + 1}-club league · a final</small>
             </button>
-            <button class="btn" onClick={() => setUi({ overlay: "hall" })}>
-              Hall of goals
-            </button>
-            <button class="btn" onClick={() => setUi({ overlay: "table" })}>
-              Your table
-            </button>
-          </div>
-          <div class="row links">
-            {saved && ed && (
-              <button class="textlink" onClick={() => A.newRun()}>
-                New season instead
-              </button>
-            )}
-            <button class="textlink" onClick={() => setUi({ overlay: "more" })}>
-              More
-            </button>
-          </div>
+          )}
+          <button class="t3-act daily" disabled={!u.daily && !ed} onClick={() => A.dailyRun()} aria-label="Daily match day">
+            <b>Daily match day</b>
+            <small>
+              3 fixtures · {u.daily && u.daily.players ? plural(u.daily.players, "player") + " today" : "same for everybody"}
+              {streak > 1 ? ` · streak ${streak}` : ""}
+            </small>
+          </button>
+          <button class={"t3-act haunt" + (haunt ? "" : " past")} onClick={() => A.newRun("haunt")} aria-label="Haunted table">
+            <span class="t3-pumpkin" aria-hidden="true" />
+            <b>Haunted</b>
+            <small>{haunt ? `Ghost clubs, ${HAUNT_UNTIL}` : "The past event, still open"}</small>
+          </button>
         </div>
+        {saved && ed && (
+          <button class="textlink t3-instead" onClick={() => A.newRun()}>
+            Start a new season instead
+          </button>
+        )}
+        <nav class="t3-row" aria-label="More">
+          <button onClick={() => setUi({ overlay: "how" })}>How to play</button>
+          <button onClick={() => setUi({ overlay: "hall" })}>Hall of goals</button>
+          <button onClick={() => setUi({ overlay: "table" })}>Your table</button>
+          <button class="wide-only" disabled={!ed} onClick={() => setUi({ overlay: "pool" })}>
+            Transfer list
+          </button>
+          <button onClick={() => setUi({ overlay: "more" })}>More</button>
+        </nav>
         <footer class="title-foot">
           <nav class="foot-links" aria-label="Links">
             <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
@@ -773,10 +693,10 @@ function Title() {
               Source ↗
             </a>
             <a href={X_URL} target="_blank" rel="noopener">
-              @kyriektnrv on X ↗
+              @kyriektnrv ↗
             </a>
           </nav>
-          <p class="foot-note">Runs on Robinhood Chain testnet. Test tokens, no real value. No seed phrase, no key, no funds: KICKER has no use for them.</p>
+          <p class="foot-note">Robinhood Chain testnet. Test tokens, no real value. KICKER never asks for a seed phrase, a key or funds.</p>
         </footer>
       </div>
       <Parade rows={1} />
@@ -799,7 +719,7 @@ function More() {
           Team kits
         </button>
         <button class="btn" onClick={() => setUi({ overlay: "news" })}>
-          What's new in 2.1
+          What's new in 3.0
         </button>
       </div>
     </Modal>
@@ -810,190 +730,225 @@ function More() {
 function How() {
   return (
     <Modal title="How to play" wide>
-      <section>
-        <h3>The season</h3>
-        <p>
-          A season is {ROUNDS} rounds. Each round is a <b>friendly</b>, a <b>league match</b> and a <b>boss club</b>. A match goes to the first side to score{" "}
-          {GOALS_TO_WIN} (the final: 3), with {POSSESSIONS} possessions each. Level at the whistle, a friendly or a league match lets you through without the win
-          fans; a boss club has to be beaten. Lose a match and the season is over.
-        </p>
-      </section>
-      <section>
-        <h3>The table</h3>
-        <p>
-          Seen from above: four rods a side, interleaved like a real table. Keeper (1 figure), defence (2), midfield (5) and attack (3). The table is {LANES} lanes
-          wide and the goal mouth is the middle {MOUTH[1] - MOUTH[0] + 1}. A rod slides one lane at a time and its figures move together.
-        </p>
-      </section>
-      <section>
-        <h3>Your ball</h3>
-        <p>
-          You get {BASE_TOUCHES} <b>touches</b> a possession. One touch is either a <b>slide</b> of one of your rods by one lane (drag the rod, or press a button at its handle), or a{" "}
-          <b>kick</b> with the figure on the ball: a pass to a figure on one of your rods further up, or a shot. The ball runs straight, or one lane sideways for
-          every rod it crosses, and comes back off the side walls. Any of their figures standing in its lane blocks it and wins the ball. The gold lines show
-          your kicks; red ones are blocked.
-        </p>
-        <p>
-          After every touch they slide to cover the most dangerous lane. When you win the ball they set up first. Out of touches, the ball goes dead to their
-          keeper.
-        </p>
-      </section>
-      <section>
-        <h3>Their ball</h3>
-        <p>
-          They show where the ball can go: red lines for shots, amber for passes. You get {BASE_BLOCKS} <b>block slides</b> a possession. Slide into those lanes,
-          then press <b>Ready</b> and they take their touch. Early clubs call their kick before you move; later ones read your blocks and pick the lane you
-          left open.
-        </p>
-      </section>
-      <section>
-        <h3>Your figures are live launches</h3>
-        <p>Each of your 11 figures is a launch from today's cut. Its picture is the head, its ticker underneath. Three stats come from three numbers:</p>
-        <table class="map">
-          <tbody>
-            <tr>
-              <td style={{ color: "#ff3d7f" }}>Power</td>
-              <td>
-                {STAT.power.from} {STAT.power.at / 100}% or more: {STAT.power.text}. Power is an attacker's thing.
-              </td>
-            </tr>
-            <tr>
-              <td style={{ color: "#27c4e8" }}>Pace</td>
-              <td>
-                {STAT.pace.at}+ {STAT.pace.from}: {STAT.pace.text}.
-              </td>
-            </tr>
-            <tr>
-              <td style={{ color: "#ffc23d" }}>Grip</td>
-              <td>
-                {STAT.grip.at}+ {STAT.grip.from}: {STAT.grip.text}.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p>
-          Hover a figure (or hold it on a phone) for its data tag: holders, 24h trades, age, price direction, curve progress, and where each stat comes from.
-          Keep holding for its page on vibe/vibe. Your squad is placed by its numbers, and you can move anyone in the Line-up before a match.
-        </p>
-      </section>
-      <section>
-        <h3>Boss clubs</h3>
-        <ul class="bosses">
-          {[...BOSSES, FINAL_BOSS].map((b) => (
-            <li>
-              <b>{b.name}</b>: {b.text}
-              {b.id === "bell" ? ` (round ${ROUNDS} only)` : ""}
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section>
-        <h3>How clubs play</h3>
-        <ul class="bosses">
-          {(Object.keys(STYLES) as (keyof typeof STYLES)[]).map((k) => (
-            <li>
-              <b>{STYLES[k].name}</b>: {STYLES[k].text}.
-            </li>
-          ))}
-        </ul>
-        <p>Every club keeps its way of playing all season, and every club gets sharper by the round.</p>
-      </section>
-      <section>
-        <h3>Haunted table</h3>
-        <p>
-          A short event, {hauntOn() ? `live ${HAUNT_UNTIL}` : "now closed and still playable"}: three matches against ghost clubs whose figures are the
-          cut's quietest launches (each tag shows its 24h trade count). Win a Haunted match while it runs and your device keeps a <b>Haunted kit</b>{" "}
-          mark, for the look only. Three rules:
-        </p>
-        <ul class="bosses">
-          {Object.values(GHOST_RULES).map((g) => (
-            <li>
-              <b>{g.name}</b>: {g.text}
-            </li>
-          ))}
-        </ul>
-        <p class="note">An independent event mode for the spooky week on Robinhood Chain testnet, through {HAUNT.endLabel}. Its goals have their own board in the Hall.</p>
-      </section>
-      <section>
-        <h3>The dressing room</h3>
-        <p>
-          A win brings fans: {WIN_FANS.join(" / ")} for a friendly, a league match and a boss club, plus one for every goal. Fans are only good for the dressing
-          room, and every price is printed. The shelf is set by your seed; nothing on it is a surprise once you see it.
-        </p>
-        <ul class="bosses">
-          <li>
-            <b>Coaches</b> ({COACHES.length}, 5 seats): passive tactics, many of them reading the launches on your rods. Hover one to light the figures it
-            works on.
-          </li>
-          <li>
-            <b>Training</b>: {DRILLS.map((d) => d.name).join(", ")}. Levels stay for the season.
-          </li>
-          <li>
-            <b>Set pieces</b> ({PLAYS.length} kinds, 2 slots): one use each, from the bench.
-          </li>
-        </ul>
-      </section>
-      <section>
-        <h3>Goals are rated</h3>
-        <p>
-          A goal is worth more for every pass in the move, for an angle, for a shot off a side wall, for each blocker beaten with Power, from distance, and with
-          touches to spare. Later rounds and boss clubs count for more. Your best goal goes to the <b>Hall of goals</b>.
-        </p>
-      </section>
-      <section>
-        <h3>Seeds and challenges</h3>
-        <p>
-          A season is fixed by its <b>seed</b> and its <b>cut number</b>: the same pair always picks the same squad, the same clubs and the same shelf, and the
-          rivals play the same way. Send a seed link and a friend plays your exact season. When yours ends, make a challenge link: the server plays every touch
-          again to check it, then draws an image for X.
-        </p>
-      </section>
-      <section>
-        <h3>Daily Match</h3>
-        <p>
-          One seed a day on the first cut after 00:00 UTC, the same for everybody. Finish it and post it with a name to get on the Daily board: one line per
-          name, your best of the day counts.
-        </p>
-      </section>
-      <section>
-        <h3>Token and source</h3>
-        <p>
-          KICKER has its own launch on vibe/vibe:{" "}
-          <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
-            ${GAME_TOKEN.symbol} ↗
-          </a>
-          . It is cosmetic only: holders can pick a team kit and get a small mark by their name. It never changes a figure, a rival or a result. Source:{" "}
-          <a href={SOURCE_URL} target="_blank" rel="noopener">
-            github.com/sirkicker/kicker ↗
-          </a>
-          . News:{" "}
-          <a href={X_URL} target="_blank" rel="noopener">
-            @kyriektnrv on X ↗
-          </a>
-        </p>
-      </section>
-      <section>
-        <h3>Sign in</h3>
-        <p>
-          Optional. Sign in with email, Google, X, Discord or a wallet, through Para. One signed message a day claims your name (a ✓ in the Hall), keeps Your
-          table on any device, and checks ${GAME_TOKEN.symbol} for team kits. Everything plays the same without it.
-        </p>
-        <Privacy />
-      </section>
-      <section>
-        <h3>Where the figures come from</h3>
-        <p>
-          Every few hours the game reads the newest launches from the vibe/vibe v6 index. Farm bots (templated descriptions, generated names, numeric tickers,
-          never-traded tokens, more than two launches from one creator) are left out. Per pair kind, the 10 liveliest plus the newest make today's transfer list
-          of up to 30; your seed picks 11 of them. Desktop keys: H shows a good touch, Enter is Ready.
-        </p>
-        {ui.edition && (
-          <p class="note">
-            Current cut #{ui.edition.id}: {ago(ui.edition.at)} at block {ui.edition.block}, {ui.edition.scanned.toLocaleString("en-US")} launches read,{" "}
-            {ui.edition.dropped.toLocaleString("en-US")} left out as farm bots or dead tokens, {ui.edition.pool.reduce((n, p) => n + p.length, 0)} on the list.
+      <div class="how3">
+        <section class="how-lead">
+          <p>
+            Turn-based table football. You slide your rods and kick, one touch at a time, and the other side reacts to every touch. Every figure on your rods is
+            a live vibe/vibe launch, and its numbers decide how it plays.
           </p>
-        )}
-      </section>
+        </section>
+        <section>
+          <h3>The season and the league</h3>
+          <p>
+            A season is {ROUNDS_R3} rounds. Each round is two <b>league matches</b> and a <b>cup tie</b> against a boss club. The league has{" "}
+            {LEAGUE_CLUBS + 1} clubs, you and {LEAGUE_CLUBS} others, and you meet each of them twice: three points a win, one a draw.
+          </p>
+          <p>
+            A league loss does not end the season; the table does, once the top two are out of reach. A cup tie has to be won: a draw or a loss ends it there.
+            In the top two when a cup tie comes round, it is a <b>home tie</b>: +1 touch on your first ball. After round {ROUNDS_R3}'s league matches, the top
+            two meet in the <b>final</b> under the Closing Bell's rule, and the leader gets the extra touch.
+          </p>
+          <p>
+            A match goes to the first side to score {GOALS_TO_WIN} (the final: 3), with {POSSESSIONS} possessions each, a few more in a cup tie. Every league
+            match has one <b>table event</b>, shown at kickoff, and every match opens from one of its club's own kickoff shapes.
+          </p>
+        </section>
+        <section>
+          <h3>The table</h3>
+          <p>
+            Seen from above, four rods a side, interleaved like a real table: keeper (1), defence (2), midfield (5), attack (3). {LANES} lanes across, and the
+            goal mouth is the middle {MOUTH[1] - MOUTH[0] + 1}. A rod slides one lane at a time and its figures move together.
+          </p>
+        </section>
+        <section>
+          <h3>Your ball</h3>
+          <p>
+            {BASE_TOUCHES} <b>touches</b> a possession. A touch is a <b>slide</b> (drag a rod, or press a button at its handle) or a <b>kick</b> with the figure
+            on the ball: a pass to a figure further up, or a shot. The ball runs straight, or one lane sideways per rod it crosses, and comes back off the side
+            walls. A figure of theirs in its lane blocks it and wins the ball. Out of touches, the ball goes to their keeper.
+          </p>
+          <ul class="how-keys">
+            <li>
+              <i class="k-gold" /> A gold disc: a clear shot.
+            </li>
+            <li>
+              <i class="k-amber" /> An amber disc: a <b>tight lane</b> beside their keeper. The keeper reaches it as one more blocker, so it costs a point of
+              Power. A shot straight off a pass (one touch), or off a side wall, beats the reach for free.
+            </li>
+            <li>
+              <i class="k-red" /> A red line ending in a cross: blocked.
+            </li>
+            <li>
+              <i class="k-ghost" /> Hover a slide button (hold it on a phone) to <b>read the tape</b>: ghost rods show where they will be after they react.
+            </li>
+          </ul>
+        </section>
+        <section>
+          <h3>Build-up</h3>
+          <p>
+            Passes in one possession light their lanes on the felt. After two passes, the next shot gets <b>+1 Power</b>: the move opened them up, and a
+            goal off two passes or more is a <b>Team move</b>. Passing beats slide, slide, shoot, and it rates higher.
+          </p>
+        </section>
+        <section>
+          <h3>Their ball</h3>
+          <p>
+            Red lines are their shots, amber their passes. You get {BASE_BLOCKS} <b>block slides</b> a possession: slide into those lanes, then press{" "}
+            <b>Ready</b> and they take their touch. You are only asked when something threatens: until then they pass it around and play on by themselves.
+            Their own Power launches shoot through one more blocker, and clubs get sharper by the round: from mid-season they look a slide ahead and half-read
+            your blocks, later they read them fully.
+          </p>
+        </section>
+        <section class="how-stats">
+          <h3>Your figures are live launches</h3>
+          <p>Each of your 11 figures is a launch from today's cut, its picture the head. Three numbers make three stats:</p>
+          <table class="map">
+            <tbody>
+              <tr>
+                <td style={{ color: "#ff3d7f" }}>Power</td>
+                <td>
+                  {STAT.power.from} {STAT.power.at / 100}%+: {STAT.power.text}. It also beats a tight lane.
+                </td>
+              </tr>
+              <tr>
+                <td style={{ color: "#27c4e8" }}>Pace</td>
+                <td>
+                  {STAT.pace.at}+ {STAT.pace.from}: {STAT.pace.text}. A pass to a Pace figure gets no reaction: it shoots <b>first time</b>, before they move. Under
+                  Mempool Jam, a pass to it skips the queue.
+                </td>
+              </tr>
+              <tr>
+                <td style={{ color: "#ffc23d" }}>Grip</td>
+                <td>
+                  {STAT.grip.at}+ {STAT.grip.from}: {STAT.grip.text}. On their ball, a Grip figure in your defence or midfield is a <b>wide body</b>: it
+                  covers its own lane and one more toward the middle. A Grip keeper reaches the lanes on both sides. A Grip figure that wins the ball back with a
+                  block starts your possession with +1 touch.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="note">
+            Hover a figure (hold it on a phone) for its data tag: holders, trades, age, price, curve, and where each stat comes from. Move anyone in the
+            Line-up before a match.
+          </p>
+        </section>
+        <section>
+          <h3>Cup ties and the final</h3>
+          <p>Each boss club changes one rule for the match, and the rule shows on the table.</p>
+          <ul class="bosses">
+            {[...BOSSES, FINAL_BOSS].map((b) => (
+              <li>
+                <b>{b.name}</b>: {b.text}
+                {b.id === "bell" ? " (the final)" : ""}.
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <h3>Table events</h3>
+          <p>One a league match, named at kickoff and marked on the felt:</p>
+          <ul class="bosses">
+            {TABLE_EVENT_IDS.map((id) => (
+              <li>
+                <b>{TABLE_EVENTS[id].name}</b>: {TABLE_EVENTS[id].text}.
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <h3>How clubs play</h3>
+          <ul class="bosses">
+            {(Object.keys(STYLES) as (keyof typeof STYLES)[]).map((k) => (
+              <li>
+                <b>{STYLES[k].name}</b>: {STYLES[k].text}.
+              </li>
+            ))}
+          </ul>
+          <p>Every club keeps its way of playing all season and gets sharper by the round. Your record against each club stays on this device.</p>
+        </section>
+        <section>
+          <h3>The dressing room</h3>
+          <p>
+            A win brings fans: {WIN_FANS_R3[0]} for a league match and {WIN_FANS_R3[2]} for a cup tie, a league draw {DRAW_FANS_R3}, plus one a goal. Fans are
+            only good for the dressing room, and every price is printed. The shelf is set by your seed.
+          </p>
+          <ul class="bosses">
+            <li>
+              <b>Coaches</b> ({COACHES.length}, 5 seats): Academy, First team or Club legend. Many read the launches on your rods.
+            </li>
+            <li>
+              <b>Training</b>: {DRILLS.map((d) => d.name).join(", ")}. Levels stay for the season.
+            </li>
+            <li>
+              <b>Set pieces</b> ({PLAYS.length} kinds, 2 slots): one use each, from the bench.
+            </li>
+          </ul>
+        </section>
+        <section>
+          <h3>Daily match day</h3>
+          <p>
+            One seed a day, the same for everybody: one match day of three fixtures, a friendly, a league match and a boss club, under the same rules as a
+            season, about five minutes. A draw goes through in the first two; the boss club has to be beaten. Win {WIN_FANS.join(" / ")} fans. Post it with a
+            name for the Daily board (it does not go in the Hall of goals). One line per name, your best of the day counts.
+          </p>
+        </section>
+        <section>
+          <h3>Haunted table</h3>
+          <p>
+            {hauntOn() ? `Live ${HAUNT_UNTIL}` : "A past event, still open"}: three matches against ghost clubs made of the cut's quietest launches, easiest
+            first. A Haunted win while it runs keeps a <b>Haunted kit</b> mark on your device, for the look only.
+          </p>
+          <ul class="bosses">
+            {Object.values(GHOST_RULES).map((g) => (
+              <li>
+                <b>{g.name}</b>: {g.text}
+              </li>
+            ))}
+          </ul>
+          <p class="note">An event mode for the spooky week on Robinhood Chain testnet, through {HAUNT.endLabel}. Its goals have their own board in the Hall.</p>
+        </section>
+        <section>
+          <h3>Goals, seeds and challenges</h3>
+          <p>
+            A goal rates higher for passes, an angle, a wall, blockers beaten with Power, distance and touches to spare. A season is fixed by its <b>seed</b> and
+            its <b>cut</b>: send a seed link, and whoever opens it plays your exact season. At the end, the server plays every touch again before your challenge link
+            and image are made.
+          </p>
+        </section>
+        <section>
+          <h3>Token, source and sign-in</h3>
+          <p>
+            KICKER has its own launch on vibe/vibe:{" "}
+            <a href={GAME_TOKEN.url} target="_blank" rel="noopener">
+              ${GAME_TOKEN.symbol} ↗
+            </a>
+            . It is cosmetic only: holders pick a team kit and get a small mark by their name. Sign-in is optional, through Para: it claims your name and keeps
+            Your table on any device. Source:{" "}
+            <a href={SOURCE_URL} target="_blank" rel="noopener">
+              github.com/sirkicker/kicker ↗
+            </a>
+            . News:{" "}
+            <a href={X_URL} target="_blank" rel="noopener">
+              @kyriektnrv on X ↗
+            </a>
+          </p>
+          <Privacy />
+        </section>
+        <section>
+          <h3>Where the figures come from</h3>
+          <p>
+            Every few hours the game reads the newest launches from the vibe/vibe v6 index. Farm bots (templated descriptions, generated names, numeric tickers,
+            never-traded tokens, more than two launches from one creator) are left out. Per pair kind, the 10 liveliest plus the newest make today's transfer list
+            of up to 30; your seed picks 11. Desktop keys: H shows a good touch, Enter is Ready.
+          </p>
+          {ui.edition && (
+            <p class="note">
+              Current cut #{ui.edition.id}: {ago(ui.edition.at)} at block {ui.edition.block}, {ui.edition.scanned.toLocaleString("en-US")} launches read,{" "}
+              {ui.edition.dropped.toLocaleString("en-US")} left out, {ui.edition.pool.reduce((n, p) => n + p.length, 0)} on the list.
+            </p>
+          )}
+        </section>
+      </div>
     </Modal>
   );
 }
@@ -1211,41 +1166,6 @@ function Squad() {
   );
 }
 
-// ------------------------------------------------------------ boss intro
-function BossIntro() {
-  const u = useUi();
-  const run = u.run;
-  if (!run) return null;
-  const id = run.bossOf();
-  if (!id) return null;
-  const b = BOSS[id];
-  const m = (run as unknown as { s: { round: number } }).s;
-  return (
-    <div class="ov-backdrop boss-bg" onClick={(e) => e.target === e.currentTarget && setUi({ overlay: null })}>
-      <div class="ov-panel boss" role="dialog" aria-label={b.name}>
-        <p class="boss-kicker">{run.mode === "haunt" ? "Haunted table · the last ghost club" : `Round ${m.round} · boss club`}</p>
-        <div class="crest" aria-hidden="true">
-          <span>{b.name.replace(/^The /, "").slice(0, 1)}</span>
-        </div>
-        <h2>{b.name}</h2>
-        <p class="boss-rule">{b.text}.</p>
-        <p class="note">
-          {STYLES[run.styleOf()].name}: {STYLES[run.styleOf()].text}.
-        </p>
-        <p class="note">{id === "bell" ? "Win this and the season is yours." : id === "haunt" ? "Beat it to lay the Haunted table to rest. A draw is not enough." : "Lose this one and the season ends here. Against a boss club, a draw is not enough."}</p>
-        <div class="row">
-          <button class="btn" onClick={() => setUi({ overlay: "squad" })}>
-            Line-up
-          </button>
-          <button class="btn big gold" onClick={() => A.kickOff()}>
-            Kick off
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ------------------------------------------------------------ menu
 function Options() {
   const u = useUi();
@@ -1255,7 +1175,7 @@ function Options() {
     <Modal title="Menu">
       {run && (
         <p class="note">
-          Seed <b>{run.s.seed}</b> · cut #{run.s.edition} · round {Math.min(run.s.round, ROUNDS)}
+          Seed <b>{run.s.seed}</b> · cut #{run.s.edition} · {run.mode === "season" ? `round ${Math.min(run.s.round, run.rounds)} of ${run.rounds}` : run.mode === "daily" ? "Daily match day" : "Haunted table"}
         </p>
       )}
       <div class="menu">
@@ -1352,12 +1272,71 @@ function GoalFigs(props: { figs: FigInfo[] }) {
   );
 }
 
+/** A posted goal's move: read once from the posted season (a public, CDN-cached read) and played again here. */
+interface Move {
+  path: Step[][];
+  scorer: FigInfo | null;
+  haunt: boolean;
+}
+const moves = new Map<string, Promise<Move | null>>();
+function moveOf(id: string): Promise<Move | null> {
+  let p = moves.get(id);
+  if (!p) {
+    p = (async () => {
+      try {
+        const r = await fetch(`/api/result?id=${id}`);
+        if (!r.ok) return null;
+        const rec = (await r.json()) as { v?: number; seed: string; edition: number; trail: string };
+        if (rec.v !== 2) return null;
+        const t = parseTrail(rec.trail);
+        const ed = await A.edition(rec.edition);
+        const run = rerun(ed, rec.seed, t.actions, t.mode, t.rules);
+        const b = run.s.best;
+        if (!b || !b.path?.length) return null;
+        const l = run.s.squad[b.scorer];
+        return { path: b.path, scorer: l ? { t: l.t, s: l.s, c: l.c, u: l.u } : null, haunt: t.mode === "haunt" };
+      } catch {
+        return null;
+      }
+    })();
+    moves.set(id, p);
+  }
+  return p;
+}
+
+/** The mini felt for a Hall row. It reads the posted season only once the row scrolls into view. */
+function PathThumb(props: { id?: string; path?: Step[][]; scorer?: FigInfo | null; haunt?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mv, setMv] = useState<Move | null | undefined>(props.path ? { path: props.path, scorer: props.scorer || null, haunt: !!props.haunt } : undefined);
+  useEffect(() => {
+    if (mv !== undefined || !props.id || !ref.current) return;
+    const id = props.id;
+    let live = true;
+    const io = new IntersectionObserver((es) => {
+      if (!es.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      void moveOf(id).then((m) => live && setMv(m));
+    });
+    io.observe(ref.current);
+    return () => {
+      live = false;
+      io.disconnect();
+    };
+  }, [props.id]);
+  return (
+    <div class={"hthumb" + (mv === undefined ? " wait" : "")} ref={ref} aria-hidden="true">
+      {mv ? <PathFelt path={mv.path} scorer={mv.scorer} haunt={mv.haunt} thumb w={120} /> : <span class="hthumb-empty" />}
+    </div>
+  );
+}
+
 function HallRows(props: { entries: DayEntry[] }) {
   return (
     <ol class="hall">
       {props.entries.map((h, i) => (
         <li class="hrow">
           <div class="hpos">{i + 1}</div>
+          <PathThumb id={h.id} />
           <div class="hscore">{fmt(h.total)}</div>
           <div class="hmain">
             {h.house && <HouseMark />}
@@ -1461,6 +1440,7 @@ function Hall() {
           <div class="hall">
             {mine.map((h) => (
               <div class="hrow">
+                <PathThumb path={h.path} scorer={h.scorer} haunt={false} />
                 <div class="hscore">{fmt(h.total)}</div>
                 <div class="hmain">
                   <b>{h.style}</b> · round {h.round} · seed {h.seed}
@@ -1549,211 +1529,6 @@ function FigureDetail() {
         </div>
       </div>
     </div>
-  );
-}
-
-// ------------------------------------------------------------ the season is over
-/** Save the share image: the system share sheet where there is one, otherwise the picture in a tab of its own. */
-async function saveImage(id: string, seed: string) {
-  const url = `/api/felt?id=${id}`;
-  try {
-    const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
-    if (nav.canShare && nav.share) {
-      const blob = await (await fetch(url)).blob();
-      const file = new File([blob], `kicker-${seed}.png`, { type: "image/png" });
-      if (nav.canShare({ files: [file] })) {
-        await nav.share({ files: [file], title: "KICKER" });
-        return;
-      }
-    }
-  } catch {
-    /* fall through to the tab */
-  }
-  window.open(url, "_blank", "noopener");
-  toast("The image opened in a new tab: right-click or long-press it to keep it.");
-}
-
-function Over() {
-  const u = useUi();
-  const run = u.run;
-  const [name, setName] = useState(me.get()?.name || local.get<string>("kk.name", ""));
-  const [busy, setBusy] = useState(false);
-  const [link, setLink] = useState<Shared | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [nameErr, setNameErr] = useState("");
-  const [seedCopied, setSeedCopied] = useState(false);
-  if (!run) return null;
-  const s = run.s;
-  const won = s.phase === "won";
-  const ch = u.challenge;
-  const beat = ch && (s.cleared > ch.cleared || (s.cleared === ch.cleared && (s.best?.total || 0) > ch.best));
-  const full = link ? `${location.origin}${link.url}` : "";
-  const daily = A.isDaily();
-  const hs = house.get();
-  const marked = !!hs && !!name.trim() && cleanName(name).toLowerCase() === hs.name.toLowerCase();
-  const sess = me.get();
-  const verified = !!sess && !!name.trim() && cleanName(name).toLowerCase() === sess.name.toLowerCase();
-  const streak = streakNow();
-  const m = s.match;
-  const haunt = run.mode === "haunt";
-  const brag = haunt
-    ? `${won ? "Beat all three ghost clubs" : `Won ${s.cleared} of 3`} on the Haunted table at KICKER, turn-based table football with live vibe/vibe launches on my rods and the quietest ones on theirs. Best goal: ${fmt(s.best?.total || 0)}. Same seed, same ghosts:`
-    : daily
-    ? `Daily Match · ${dayLabel(daily)} · best goal ${fmt(s.best?.total || 0)} on KICKER, turn-based table football with live vibe/vibe launches on the rods. Same squad for everybody today. Beat it:`
-    : `${won ? "Won the whole season" : `Reached round ${s.round}`} on KICKER, turn-based table football with live vibe/vibe launches on the rods. Best goal: ${fmt(s.best?.total || 0)}${s.best ? ` (${s.best.style})` : ""}. Same seed, same season. Beat it:`;
-  return (
-    <Modal
-      title={haunt ? (won ? "Laid to rest" : "Haunted table over") : won ? "Champions" : "Season over"}
-      accent={haunt ? "#cfe3ee" : won ? "#ffc23d" : "#ff3d7f"}
-      onClose={() => setUi({ overlay: "over" })}
-    >
-      <div class="over">
-        <div class="ostats">
-          <div>
-            <small>{haunt ? "Match" : "Round"}</small>
-            <b>{haunt ? Math.min(s.kind + 1, 3) : Math.min(s.round, ROUNDS)}</b>
-          </div>
-          <div>
-            <small>Matches won</small>
-            <b>{s.cleared}</b>
-          </div>
-          <div>
-            <small>Best goal</small>
-            <b class="m">{fmt(s.best?.total || 0)}</b>
-          </div>
-        </div>
-        <p class="note">
-          {won
-            ? haunt
-              ? "You beat The Haunted XI."
-              : "You beat the Closing Bell."
-            : `Out to ${m?.club || "a boss club"} in round ${s.round}${m ? `, ${m.score[0]}:${m.score[1]}` : ""}. ${FIXTURE_NAME[s.kind]}.`}{" "}
-          {s.goalsFor} goals for, {s.goalsAgainst} against{s.best ? `. Best goal: ${s.best.style}.` : "."}
-        </p>
-        {haunt && s.cleared > 0 && hauntKit() && <p class="daily-tag haunt">Haunted kit: on this device since {hauntKit()}. For the look only.</p>}
-        {daily && (
-          <p class="daily-tag">
-            Daily Match · {dayLabel(daily)}
-            {streak > 0 ? ` · streak ${plural(streak, "day")}` : ""}
-          </p>
-        )}
-        <div class="seedline">
-          <span>
-            Seed <b>{s.seed}</b> · cut #{s.edition}
-          </span>
-          <button
-            class="pill"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(A.seedLink());
-                setSeedCopied(true);
-              } catch {
-                toast(A.seedLink());
-              }
-            }}
-          >
-            {seedCopied ? "Seed copied" : "Copy seed"}
-          </button>
-        </div>
-        {ch && <p class={"vs " + (beat ? "win" : "")}>{beat ? `You beat ${ch.name || "the challenger"}.` : `${ch.name || "The challenger"} still leads: round ${ch.round}, best goal ${fmt(ch.best)}.`}</p>}
-        {!link ? (
-          <form
-            class="share"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const problem = name.trim() ? nameProblem(name) : null;
-              if (problem) {
-                setNameErr(problem);
-                return;
-              }
-              setNameErr("");
-              setBusy(true);
-              local.set("kk.name", cleanName(name));
-              const r = await A.share(name);
-              setBusy(false);
-              if (r) setLink(r);
-            }}
-          >
-            <input
-              class="field"
-              maxLength={12}
-              value={name}
-              placeholder="Your name, 3-12 letters"
-              aria-label="Name"
-              onInput={(e) => {
-                setName((e.target as HTMLInputElement).value);
-                setNameErr("");
-              }}
-            />
-            <small class="hint">
-              {nameErr ? (
-                <span class="err">{nameErr}</span>
-              ) : haunt ? (
-                "With a name, your best goal enters today's Haunted board in the Hall."
-              ) : daily ? (
-                "With a name, this season enters the Daily board (your best of the day counts) and today's Hall of goals."
-              ) : (
-                "With a name, your best goal also enters today's Hall of goals."
-              )}
-              {!nameErr && verified ? " Signed in: your name is verified and the season goes to Your table." : ""}
-              {!nameErr && marked ? " Your house mark rides along." : ""}
-            </small>
-            <button class="btn gold" disabled={busy} type="submit">
-              {busy ? "Checking your season..." : "Make a challenge link"}
-            </button>
-          </form>
-        ) : (
-          <div class="shared">
-            <img
-              src={`/api/felt?id=${link.id}`}
-              alt={haunt ? "Challenge image: the best goal on the Haunted table" : "Challenge image: the figures of the best goal"}
-              width={600}
-              height={315}
-            />
-            {link.kit && <p class="note">Haunted kit saved to Your table.</p>}
-            {link.daily && <p class="note">Posted to the Daily board for {dayLabel(link.daily)}. The best 50 names of the day are shown.{link.house ? " House mark on." : ""}</p>}
-            <input class="field" readOnly value={full} onFocus={(e) => (e.target as HTMLInputElement).select()} aria-label="Challenge link" />
-            <div class="row">
-              <button
-                class="btn"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(full);
-                    setCopied(true);
-                  } catch {
-                    toast("Copy the link above");
-                  }
-                }}
-              >
-                {copied ? "Copied" : "Copy challenge link"}
-              </button>
-              <button class="btn" onClick={() => void saveImage(link.id, s.seed)}>
-                Save image
-              </button>
-              <a class="btn gold" target="_blank" rel="noopener" href={`https://x.com/intent/post?text=${encodeURIComponent(brag)}&url=${encodeURIComponent(full)}`}>
-                Post on X
-              </a>
-            </div>
-          </div>
-        )}
-        <div class="row">
-          <button class="btn teal" onClick={() => A.restartSeed()}>
-            Same seed again
-          </button>
-          <button class="btn pink" onClick={() => A.newRun(haunt ? "haunt" : "season")}>
-            {haunt ? "New Haunted table" : "New season"}
-          </button>
-        </div>
-        <div class="row">
-          <button class="btn" onClick={() => setUi({ overlay: "squad" })}>
-            See the squad
-          </button>
-          <button class="btn" onClick={() => setUi({ overlay: "title" })}>
-            Title
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -2050,55 +1825,57 @@ function News() {
   }, []);
   return (
     <Modal title={`What's new · ${VERSION.replace(/\.0$/, "")}`}>
-      <section>
-        <h3>2.1: Haunted table</h3>
-        <p>
-          For the spooky week on Robinhood Chain testnet, {HAUNT_UNTIL}: three ghost clubs made of the cut's quietest launches, a rod that phases, a
-          poltergeist that moves their rods, and the lights turned low. A Haunted board in the Hall, and a Haunted kit mark for a win while it runs.
-        </p>
-      </section>
-      <section>
-        <h3>2.1: a better table</h3>
-        <p>
-          The table fills the screen. Figures are proper table-football men with their launch as the head, theirs too. Drag a rod to slide it, or use the
-          handle at its end. Clubs have a style: one parks the bus, one presses, one shoots from distance. A short walkthrough in your first match.
-        </p>
-      </section>
-      <section>
-        <h3>Table football</h3>
-        <p>
-          Kicker is what the Germans call table football, and now the name means what it says. KICKER 2.0 is a turn-based table football season: four rods a
-          side, touches instead of a clock, and a rival that reacts to every one of them.
-        </p>
-      </section>
-      <section>
-        <h3>Your rods are live launches</h3>
-        <p>
-          Your eleven figures come from today's cut of vibe/vibe launches. Curve progress gives Power, trades give Pace, holders give Grip. The numbers are the
-          real ones, and the data tag shows exactly which one does what.
-        </p>
-      </section>
-      <section>
-        <h3>A season, not a table of luck</h3>
-        <p>
-          Eight rounds of friendlies, league matches and ten boss clubs. Fans from wins and goals buy coaches, training and set pieces at printed prices. Every
-          season is fixed by its seed, and the server replays it touch by touch.
-        </p>
-      </section>
-      <section>
-        <h3>Same table, same look</h3>
-        <p>The wine and teal, the felt, the vibers, the gold sign-in, the sound. Your $KICKER kit is still cosmetic only.</p>
-      </section>
-      <div class="row">
-        <button class="btn haunt-btn" onClick={() => A.newRun("haunt")}>
-          Haunted table
-        </button>
-        <button class="btn gold" onClick={() => A.dailyRun()}>
-          Play the Daily Match
-        </button>
-        <button class="btn" onClick={() => close()}>
-          Got it
-        </button>
+      <div class="news3">
+        <p class="news-lead">KICKER 3.0, Matchday. Same table, same vibers, more at stake in every match.</p>
+        <section>
+          <h3>A league, and a final to play for</h3>
+          <p>
+            A season is now {ROUNDS_R3} rounds of two league matches and a cup tie. The league has {LEAGUE_CLUBS + 1} clubs, you and {LEAGUE_CLUBS}, and you meet
+            each twice: three points a win, one a draw. A league loss no longer ends the season; the table does. The top two have their cup ties at home, +1
+            touch, and meet in the final under the Closing Bell's rule. Fans: {WIN_FANS_R3[0]} a league win, {WIN_FANS_R3[2]} a cup tie, {DRAW_FANS_R3} a
+            league draw.
+          </p>
+        </section>
+        <section>
+          <h3>Shots with a decision in them</h3>
+          <p>
+            A lane beside their keeper is tight: an amber disc, and the keeper reaches it as one more blocker. A one-touch shot straight off a pass, or a shot
+            off a side wall, beats it for free. Passes build up: two put +1 Power on the shot, and a goal off two or more is a Team move.
+          </p>
+        </section>
+        <section>
+          <h3>Every stat plays</h3>
+          <p>
+            Pace figures shoot first time off a pass, before they react. Grip figures are wide bodies on their ball, a Grip keeper reaches both sides, and a
+            Grip block wins you a touch. Their own Power launches shoot through one more blocker. Hold a slide button to read how they will react.
+          </p>
+        </section>
+        <section>
+          <h3>Every match its own</h3>
+          <p>
+            Clubs open from their own kickoff shapes, and each league match has a table event: Volatile walls, a Thin book lane, a Green candle touch, or a Halt
+            on the half. You are only asked to defend when something threatens.
+          </p>
+        </section>
+        <section>
+          <h3>Match day looks like one</h3>
+          <p>
+            Club kits, captains and chants on every fixture, your record against each club, a match report at full time, a locker wall for the dressing room, and a
+            match-day programme when the season ends, with your goal of the season drawn on the felt.
+          </p>
+        </section>
+        <section>
+          <h3>Daily match day</h3>
+          <p>The Daily Match is now one match day under the new rules: a friendly, a league match and a boss club, about five minutes, the same for everybody. It goes on the Daily board.</p>
+        </section>
+        <div class="row">
+          <button class="btn gold" onClick={() => A.dailyRun()}>
+            Daily match day
+          </button>
+          <button class="btn teal" onClick={() => close()}>
+            Got it
+          </button>
+        </div>
       </div>
     </Modal>
   );
@@ -2132,12 +1909,14 @@ function Tutorial() {
   );
 }
 
+/** The coach's tip: only on the screen it belongs to, one at a time, and never while the walkthrough talks. */
 function Coach() {
   const u = useUi();
-  if (!u.coach || u.overlay || u.tut !== null) return null;
-  const ph = u.run?.s.phase;
+  if (!u.coach || u.tut !== null) return null;
+  const at = screenNow(u);
+  if (at !== u.coach.screen || at === "title") return null;
   return (
-    <div class={"coach " + (ph === "attack" || ph === "defend" ? "in-round" : "in-menu")} role="status">
+    <div class={"coach " + (at === "table" ? "in-round" : "in-menu")} role="status">
       <p>{u.coach.text}</p>
       <div class="row">
         <button class="btn small" onClick={() => setUi({ coach: null })}>
@@ -2161,11 +1940,13 @@ function App() {
       {u.overlay === "how" && <How />}
       {u.overlay === "pool" && <Pool />}
       {u.overlay === "squad" && <Squad />}
+      <Stage />
       {u.overlay === "boss" && <BossIntro />}
+      {u.overlay === "league" && <LeagueTable onClose={() => setUi({ overlay: null })} />}
       {u.overlay === "options" && <Options />}
       {u.overlay === "seed" && <SeedEntry />}
       {u.overlay === "hall" && <Hall />}
-      {u.overlay === "over" && <Over />}
+      {u.overlay === "over" && <Programme />}
       {u.overlay === "house" && <House />}
       {u.overlay === "news" && <News />}
       {u.overlay === "table" && <Table />}
@@ -2186,5 +1967,6 @@ function App() {
 
 export function mountUi(el: HTMLElement, actions: UiActions) {
   A = actions;
+  bindScreens(actions);
   render(<App />, el);
 }

@@ -1,26 +1,27 @@
 // Boot: fonts, Pixi, the squad cut, URL seeds and challenges, the saved season, the Daily Match, and the coach's tips.
 import { Application } from "pixi.js";
 import type { Edition } from "../shared/data.js";
-import { encodeTrail, parseTrail, rerun, Run, type Action, type RunMode } from "../shared/engine.js";
+import { CURRENT_RULES, encodeTrail, parseTrail, rerun, Run, type Action, type Rules, type RunMode } from "../shared/engine.js";
 import { newSeed, normSeed } from "../shared/rng.js";
-import { bumpStreak, type Streak } from "../shared/daily.js";
+import { bumpStreak, utcDay, type Streak } from "../shared/daily.js";
 import { cleanName } from "../shared/names.js";
 import { sfx, unlock } from "./audio.js";
 import { Game } from "./game.js";
 import { attach, setSpeed } from "./tween.js";
 import { playSeason } from "../shared/bot.js";
-import { local, setUi, toast, ui, type Challenge, type Daily } from "./store.js";
+import { h2hAdd, local, setUi, settleTip, showTip, subscribe, toast, ui, type Challenge, type Daily, type TipScreen } from "./store.js";
 import { house } from "./house.js";
 import { rememberedAddress } from "./signin.js";
 import { me, receipts, refreshProfile } from "./me.js";
 import { mountUi, VERSION, type LocalGoal, type UiActions } from "./ui.js";
 import { gainHauntKit } from "./haunt.js";
+import { dailyDone } from "./screens.js";
 import "./style.css";
 
 interface Saved {
   seed: string;
   edition: number;
-  /** encodeTrail with the mode: a Haunted table trail starts with "H". */
+  /** encodeTrail with the rules and the mode: "R3" marks the 3.0 rules, "H" a Haunted table trail. */
   trail: string;
   challenge: Challenge | null;
 }
@@ -38,13 +39,21 @@ async function fetchEdition(id?: number): Promise<Edition> {
   return ed;
 }
 
+/**
+ * The Daily Match is one match day: friendly, league match and boss club under rules 3, played in its own run mode
+ * ("daily", trail token R3_D). The engine ends it after fixture 3 or at the first loss, and the server posts it to
+ * the Daily board only.
+ */
+const DAILY_MODE: RunMode = "daily";
+const dailyModeOf = (): RunMode => DAILY_MODE;
+
 let game: Game;
 let coachStep = local.get<number>("kk.tips", 0);
 
 function save(run: Run) {
-  const over = run.s.phase === "over" || run.s.phase === "won";
+  const over = run.s.phase === "over" || run.s.phase === "won" || (dailyOf(run) !== null && dailyDone(run));
   if (over) local.del(SAVE_KEY);
-  else local.set(SAVE_KEY, { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode), challenge: ui.challenge } satisfies Saved);
+  else local.set(SAVE_KEY, { seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode, run.rules), challenge: ui.challenge } satisfies Saved);
 }
 
 /** The address bar stays bare during play: a reload or a bookmark always lands on the title (with Continue). */
@@ -83,18 +92,20 @@ function tutorial(a: Action, run: Run) {
   if (t !== ui.tut) setUi({ tut: t });
 }
 
-function coach(step: number, text: string) {
+/** A first-time tip, shown once per device in the order of `step`, on the screen it is about. */
+function coach(step: number, screen: TipScreen, text: string) {
   if (coachStep > step) return;
   coachStep = step + 1;
   local.set("kk.tips", coachStep);
-  setUi({ coach: { step, text } });
+  showTip("first" + step, screen, text);
 }
 
-async function startRun(seed: string, edition: Edition, trail: Action[] = [], mode: RunMode = "season") {
+/** Starts a run, or carries one on from its trail. A run carried on keeps the rules it was started under. */
+async function startRun(seed: string, edition: Edition, trail: Action[] = [], mode: RunMode = "season", rules: Rules = CURRENT_RULES) {
   unlock();
   let run: Run;
   try {
-    run = rerun(edition, seed, trail, mode);
+    run = rerun(edition, seed, trail, mode, trail.length ? rules : CURRENT_RULES);
   } catch {
     run = new Run(edition, seed, mode);
   }
@@ -103,7 +114,7 @@ async function startRun(seed: string, edition: Edition, trail: Action[] = [], mo
   setUrl();
   save(run);
   if (run.s.phase === "fixture" && run.trail.length === 0)
-    coach(0, "Your eleven are live vibe/vibe launches. Curve progress gives a figure Power, trades give Pace, holders give Grip. Press Kick off.");
+    coach(0, "matchday", "Your eleven are live vibe/vibe launches. Curve progress gives a figure Power, trades give Pace, holders give Grip. Press Kick off.");
 }
 
 async function loadDaily(): Promise<Daily | null> {
@@ -119,13 +130,29 @@ async function loadDaily(): Promise<Daily | null> {
 }
 
 /** The day, when this season is today's Daily Match. */
-const dailyOf = (run: Run | null) => (run && ui.daily && ui.daily.seed === run.s.seed && ui.daily.edition === run.s.edition ? ui.daily.day : null);
+const dailyOf = (run: Run | null) => {
+  if (!run) return null;
+  const today = ui.daily && ui.daily.seed === run.s.seed && ui.daily.edition === run.s.edition ? ui.daily.day : null;
+  return run.mode === "daily" ? today || utcDay() : today;
+};
 
 function goalsAdd(run: Run) {
   const b = run.s.best;
   if (!b) return;
   const list = local.get<LocalGoal[]>("kk.goals", []);
-  list.push({ total: b.total, style: b.style, seed: run.s.seed, edition: run.s.edition, round: run.s.round, cleared: run.s.cleared, figs: b.figs, at: Date.now() });
+  const sc = run.s.squad[b.scorer];
+  list.push({
+    total: b.total,
+    style: b.style,
+    seed: run.s.seed,
+    edition: run.s.edition,
+    round: run.s.round,
+    cleared: run.s.cleared,
+    figs: b.figs,
+    at: Date.now(),
+    path: b.path,
+    ...(sc ? { scorer: { t: sc.t, s: sc.s, c: sc.c, u: sc.u } } : {}),
+  });
   list.sort((a, c) => c.total - a.total);
   local.set("kk.goals", list.slice(0, 12));
 }
@@ -145,17 +172,33 @@ async function boot() {
     document.fonts.load('32px "Jersey 10"').catch(() => null),
   ]);
   document.getElementById("stage")!.appendChild(app.canvas);
+  // any screen change (an overlay opening or closing, a new run) drops a tip that belonged to the old one, and the
+  // title gets a clear table behind it
+  subscribe(() => {
+    settleTip();
+    game?.cover(ui.overlay === "title");
+  });
   attach(app.ticker);
   game = new Game(app, {
     onAction(a, run) {
       save(run);
       setUi({});
+      // your record against each club, kept on this device
+      if (run.events.some((e) => e.e === "end")) {
+        const st = run.s.story[run.s.story.length - 1];
+        if (st && (st.key === "won" || st.key === "draw" || st.key === "lost")) h2hAdd(String(st.args.club), st.key);
+      }
+      if (dailyOf(run) && run.s.phase === "fulltime" && dailyDone(run)) dailyFinish(run);
       tutorial(a, run);
       if (run.mode === "haunt" && run.events.some((e) => e.e === "end" && e.won) && gainHauntKit()) toast("Haunted kit: yours, on this device. For the look only.");
-      if (a.t === "collect" && run.s.visit === 1) coach(3, "The dressing room. Coaches read the launches on your rods; training lasts the season; a set piece is used once. Prices are fixed.");
-      if (a.t === "next" && run.s.kind === 2 && run.s.round === 1) coach(4, "A boss club next: it changes one rule for the match. Read it before you kick off.");
+      // a tip lives on its screen only: the action may have moved on from it
+      settleTip(true);
+      if (a.t === "collect" && run.s.visit === 1) coach(3, "room", "The dressing room. Coaches read the launches on your rods; training lasts the season; a set piece is used once. Prices are fixed.");
+      if (a.t === "next" && run.s.kind === 2 && run.s.round === 1 && run.mode === "season") coach(4, "matchday", run.league ? "A cup tie next: the boss club changes one rule for the match, and a draw is not enough. Read the rule before you kick off." : "A boss club next: it changes one rule for the match. Read it before you kick off.");
     },
     onOver(run) {
+      if (finished === run) return;
+      finished = run;
       goalsAdd(run);
       const day = dailyOf(run);
       if (day) local.set("kk.streak", bumpStreak(local.get<Streak | null>("kk.streak", null), day));
@@ -166,6 +209,21 @@ async function boot() {
       setUi({ overlay: o });
     },
   });
+
+  /** Today's match day is done after its third fixture: the programme shows once the table has played full time. */
+  let finished: Run | null = null;
+  function dailyFinish(run: Run) {
+    if (finished === run) return;
+    finished = run;
+    goalsAdd(run);
+    const day = dailyOf(run);
+    if (day) local.set("kk.streak", bumpStreak(local.get<Streak | null>("kk.streak", null), day));
+    save(run);
+    const busy = () => (game as unknown as { busy?: boolean }).busy === true;
+    const t0 = Date.now();
+    const wait = () => (busy() && Date.now() - t0 < 8000 ? setTimeout(wait, 120) : setTimeout(() => ui.run === run && setUi({ overlay: "over", coach: null }), 700));
+    wait();
+  }
 
   // QA hook: lets the test bot drive the same code paths taps use
   (window as unknown as { kicker: unknown }).kicker = {
@@ -185,7 +243,7 @@ async function boot() {
       playSeason(run);
       save(run);
       game.refreshAll();
-      if (run.s.phase === "over" || run.s.phase === "won") {
+      if (run.s.phase === "over" || run.s.phase === "won" || (dailyOf(run) && dailyDone(run))) {
         goalsAdd(run);
         setUi({ overlay: "over", coach: null });
       }
@@ -213,8 +271,8 @@ async function boot() {
         const sv = local.get<Saved | null>(SAVE_KEY, null);
         setUi({ challenge: null });
         const p = sv ? parseSaved(sv) : null;
-        if (sv && p && p.mode === "season" && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, p.actions);
-        else await startRun(d.seed, ed);
+        if (sv && p && p.mode === dailyModeOf() && sv.seed === d.seed && sv.edition === d.edition) await startRun(sv.seed, ed, p.actions, p.mode, p.rules);
+        else await startRun(d.seed, ed, [], dailyModeOf());
       } catch (e) {
         toast("Could not load the daily squad: " + (e as Error).message);
       }
@@ -233,7 +291,7 @@ async function boot() {
           const ed = await fetchEdition(sv.edition);
           setUi({ challenge: sv.challenge });
           const p = parseSaved(sv);
-          await startRun(sv.seed, ed, p?.actions || [], p?.mode || "season");
+          await startRun(sv.seed, ed, p?.actions || [], p?.mode || "season", p?.rules);
         } catch {
           toast("That season's squad cut is gone");
           local.del(SAVE_KEY);
@@ -304,7 +362,7 @@ async function boot() {
         const claim = h && mine(h.name) ? h.claim : undefined;
         const s = me.get();
         const session = s && mine(s.name) ? s.session : undefined;
-        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode), mode: run.mode, name, house: claim, session });
+        const body = JSON.stringify({ seed: run.s.seed, edition: run.s.edition, trail: encodeTrail(run.trail, run.mode, run.rules), mode: run.mode, name, house: claim, session });
         const j = await postJson("/api/result", body);
         if (j.receipt && name) receipts.add(name, j.receipt);
         if (j.result?.verified) void refreshProfile();
@@ -332,7 +390,7 @@ async function boot() {
         try {
           const ed = await fetchEdition(h.edition);
           setUi({ challenge: { id: h.id, name: h.name, round: h.round, cleared: h.cleared, won: h.won, best: h.total, style: h.style } });
-          await startRun(h.seed, ed, [], h.mode === "haunt" ? "haunt" : "season");
+          await startRun(h.seed, ed, [], h.mode === "haunt" ? "haunt" : h.mode === "daily" && ui.daily?.seed === h.seed ? "daily" : "season");
         } catch {
           toast("That season's squad cut is gone");
         }
@@ -340,6 +398,23 @@ async function boot() {
     },
     hasSaved() {
       return !!local.get<Saved | null>(SAVE_KEY, null);
+    },
+    canReplay() {
+      const g = game as unknown as { playReplay?: unknown };
+      return typeof g.playReplay === "function" && !!ui.run?.s.best?.path?.length;
+    },
+    replay() {
+      const g = game as unknown as { playReplay?: (b: unknown) => Promise<void> };
+      const b = ui.run?.s.best;
+      if (typeof g.playReplay !== "function" || !b) return null;
+      try {
+        return Promise.resolve(g.playReplay(b)).catch(() => undefined);
+      } catch {
+        return null;
+      }
+    },
+    edition(id: number) {
+      return fetchEdition(id);
     },
     savedMode() {
       const sv = local.get<Saved | null>(SAVE_KEY, null);
@@ -355,7 +430,7 @@ async function boot() {
           const sp = sv ? parseSaved(sv) : null;
           setUi({ challenge: null });
           // the same season already under way on this device: carry on where it was
-          if (sv && sp && sv.seed === p.seed && sv.edition === ed.id && sp.mode === p.mode) await startRun(sv.seed, ed, sp.actions, sp.mode);
+          if (sv && sp && sv.seed === p.seed && sv.edition === ed.id && sp.mode === p.mode) await startRun(sv.seed, ed, sp.actions, sp.mode, sp.rules);
           else await startRun(p.seed, ed, [], p.mode);
         } catch {
           toast("That seed's squad cut is gone");
@@ -383,7 +458,7 @@ async function boot() {
       if (r.ok) {
         const rec = await r.json();
         if (rec.v === 2) {
-          pendingChallenge = { seed: rec.seed, edition: rec.edition, mode: rec.mode === "haunt" ? "haunt" : "season" };
+          pendingChallenge = { seed: rec.seed, edition: rec.edition, mode: rec.mode === "haunt" ? "haunt" : rec.mode === "daily" && ui.daily?.seed === rec.seed ? "daily" : "season" };
           setUi({ challenge: { id: rec.id, name: rec.name, round: rec.round, cleared: rec.cleared, won: rec.won, best: rec.best?.total || 0, style: rec.best?.style || "" } });
           const ed = await fetchEdition(rec.edition);
           setUi({ edition: ed });
@@ -399,7 +474,10 @@ async function boot() {
     }
     const ed = await fetchEdition();
     setUi({ edition: ed });
-    if (!sParam && ui.overlay === "title" && local.get<string>("kk.news", "") !== VERSION) setUi({ overlay: "news" });
+    // What's new is for returning players only: a first visit just notes the version, so the next update shows
+    const seen = local.get<string>("kk.news", "");
+    if (!seen) local.set("kk.news", VERSION);
+    else if (!sParam && ui.overlay === "title" && seen !== VERSION) setUi({ overlay: "news" });
   } catch (e) {
     setUi({ editionError: (e as Error).message });
   }
@@ -434,7 +512,7 @@ function postJson(url: string, body: string): Promise<Posted> {
 
 let pendingChallenge: { seed: string; edition: number; mode: RunMode } | null = null;
 
-function parseSaved(sv: Saved): { mode: RunMode; actions: Action[] } | null {
+function parseSaved(sv: Saved): { rules: Rules; mode: RunMode; actions: Action[] } | null {
   try {
     return parseTrail(sv.trail);
   } catch {

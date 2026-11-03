@@ -14,7 +14,7 @@ export interface ProfileRun {
   at: string;
   daily?: string;
   /** A Haunted table run. */
-  mode?: "haunt";
+  mode?: "haunt" | "daily";
   /** Won a Haunted table match during the event: the Haunted kit (cosmetic only). */
   kit?: boolean;
 }

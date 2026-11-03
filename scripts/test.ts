@@ -4,12 +4,14 @@
 // Add `--live` to also read $KICKER balances on Robinhood Chain testnet, `--anvil` to check a real ERC-1271 account on a local anvil.
 import assert from "node:assert/strict";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { STAT, buildSquad, deadList, ghostWhy, type Edition, type Launch, type Pair } from "../shared/data.js";
+import { STAT, TRAIT, buildSquad, deadList, ghostWhy, traitsOf, type Edition, type Launch, type Pair } from "../shared/data.js";
 import { figureFacts, roomHint, squadFacts } from "../shared/insight.js";
-import { Run, rerun, encodeTrail, decodeTrail, parseTrail, aiParams, reflect, resolveBlock, trace, laneOf, slotOf, type Action } from "../shared/engine.js";
+import { Run, rerun, encodeTrail, decodeTrail, parseTrail, aiParams, reflect, resolveBlock, trace, laneOf, slotOf, figAt, fixturesOf, sortTable, pathOf, R3, CURRENT_RULES, RULES_LEGACY, RULES_NEXT, type Action, type Ev, type RunMode } from "../shared/engine.js";
+import { lineFor, DESK_LINES, DESK_POOLS, recapOf } from "../shared/voice.js";
+import { readFileSync } from "node:fs";
 import { hudOf, hudStep } from "../src/hud.js";
 import { botStep, playSeason } from "../shared/bot.js";
-import { COACHES, MOUTH, RODS, START_FANS, WIN_FANS, drillCost } from "../shared/content.js";
+import { COACHES, MOUTH, RODS, START_FANS, WIN_FANS, drillCost, BOSSES, CAPTAIN_RULE, CLUBS, CLUB_ID, FINAL_BOSS, HAUNT, KICKOFFS, MATCHDAYS, ROUNDS_R3, START_OFF, STICKY_LANES, TABLE_EVENT_IDS, clubIdOf, fixtureName, type TableEventId } from "../shared/content.js";
 import { mulberry32, normSeed } from "../shared/rng.js";
 import { bumpStreak, dailySeed, dayLabel, dayStartHour, liveStreak, prevDay, utcDay } from "../shared/daily.js";
 import { houseMessage, signinMessage } from "../shared/house.js";
@@ -70,7 +72,7 @@ const putEdition = (ed: Edition) => save(`editions/${ed.id}.json`, ed);
 
 /** A finished season: the coach's bot, a bot that never buys anything, or a lazy one that shoots at once and never blocks. */
 function playOut(ed: Edition, seed: string, how: "bot" | "nobuy" | "lazy" = "bot") {
-  const run = new Run(ed, seed);
+  const run = new Run(ed, seed, "season", RULES_LEGACY);
   let n = 0;
   while (n++ < 40000) {
     const s = run.s;
@@ -93,12 +95,13 @@ function playOut(ed: Edition, seed: string, how: "bot" | "nobuy" | "lazy" = "bot
     if (!botStep(run)) break;
   }
   assert.ok(run.s.phase === "over" || run.s.phase === "won", "season did not finish");
-  return { trail: encodeTrail(run.trail), best: run.s.best?.total || 0, run };
+  return { trail: encodeTrail(run.trail, "season", RULES_LEGACY), best: run.s.best?.total || 0, run };
 }
 
 /** A fresh match against a given boss club (the boss is set by hand; the seed decides the rest). */
+/** A 2.1 boss match (the legacy rules: these tests pin 2.1's boss rules, which old trails replay by). */
 function bossMatch(ed: Edition, id: string, round = 1) {
-  const r = new Run(ed, "BOSS-0001");
+  const r = new Run(ed, "BOSS-0001", "season", RULES_LEGACY);
   r.s.round = round;
   r.s.kind = 2;
   r.s.bosses[round - 1] = id;
@@ -156,12 +159,12 @@ await test("a kick's path: straight, angled, off the wall; a pass needs a figure
 
 console.info("determinism");
 await test("same seed and cut: the same squad, clubs, bosses and shelf", () => {
-  const a = new Run(EDT, "SAME-0001");
-  const b = new Run(EDT, "SAME-0001");
+  const a = new Run(EDT, "SAME-0001", "season", RULES_LEGACY);
+  const b = new Run(EDT, "SAME-0001", "season", RULES_LEGACY);
   assert.deepEqual(a.s.squad.map((l) => l.t), b.s.squad.map((l) => l.t));
   assert.deepEqual(a.s.bosses, b.s.bosses);
   assert.deepEqual(a.s.clubs, b.s.clubs);
-  const c = new Run(EDT, "SAME-0002");
+  const c = new Run(EDT, "SAME-0002", "season", RULES_LEGACY);
   assert.notDeepEqual(c.s.squad.map((l) => l.t), a.s.squad.map((l) => l.t), "another seed picks another squad");
   assert.equal(a.s.bosses[7], "bell", "the final is always the Closing Bell");
   assert.equal(new Set(a.s.bosses.slice(0, 7)).size, 7, "seven different boss clubs before the final");
@@ -173,16 +176,16 @@ await test("a squad is placed by its numbers: the top three by curve play up fro
   for (const l of sq.slice(0, 8)) assert.ok(l.p <= Math.min(...att), "nobody further back is further along the curve");
 });
 await test("the bot plays the same season twice, touch for touch; the trail replays it exactly", () => {
-  const a = playSeason(new Run(EDT, "TWIN-0001"));
-  const b = playSeason(new Run(EDT, "TWIN-0001"));
-  assert.equal(encodeTrail(a.trail), encodeTrail(b.trail));
+  const a = playSeason(new Run(EDT, "TWIN-0001", "season", RULES_LEGACY));
+  const b = playSeason(new Run(EDT, "TWIN-0001", "season", RULES_LEGACY));
+  assert.equal(encodeTrail(a.trail, "season", RULES_LEGACY), encodeTrail(b.trail, "season", RULES_LEGACY));
   assert.deepEqual(a.s, b.s);
-  const c = rerun(EDT, "TWIN-0001", decodeTrail(encodeTrail(a.trail)));
+  const c = rerun(EDT, "TWIN-0001", decodeTrail(encodeTrail(a.trail, "season", RULES_LEGACY)), "season", RULES_LEGACY);
   assert.deepEqual(c.s, a.s);
   assert.ok(a.s.phase === "over" || a.s.phase === "won");
 });
 await test("the rival reacts the same way to the same position", () => {
-  const r = new Run(EDT, "REAC-0001");
+  const r = new Run(EDT, "REAC-0001", "season", RULES_LEGACY);
   r.apply({ t: "go" });
   const one = r.reactTo(r.m.off.map((o) => o.slice()));
   const two = r.reactTo(r.m.off.map((o) => o.slice()));
@@ -190,13 +193,13 @@ await test("the rival reacts the same way to the same position", () => {
 });
 await test("a trail decodes to what it encodes, and junk does not decode", () => {
   const acts: Action[] = [{ t: "go" }, { t: "slide", r: 3, d: -1 }, { t: "kick", r: 4, d: 1 }, { t: "hold" }, { t: "use", i: 0 }, { t: "swap", a: 8, b: 3 }, { t: "sell", i: 1 }, { t: "collect" }, { t: "buy", i: 2 }, { t: "next" }];
-  assert.deepEqual(decodeTrail(encodeTrail(acts)), acts);
+  assert.deepEqual(decodeTrail(encodeTrail(acts, "season", RULES_LEGACY)), acts);
   for (const junk of ["q", "s1.1", "s1", "k1.5", "g1", "w8", "b", "h2", "s-1.0"]) assert.throws(() => decodeTrail(junk), junk);
 });
 
 console.info("the rules");
 await test("touches: a slide or a kick costs one; out of touches, their keeper restarts", () => {
-  const r = new Run(EDT, "RULE-0001");
+  const r = new Run(EDT, "RULE-0001", "season", RULES_LEGACY);
   r.apply({ t: "go" });
   const m = r.m;
   m.free = [0, 0, 0, 0];
@@ -216,7 +219,7 @@ await test("touches: a slide or a kick costs one; out of touches, their keeper r
   assert.deepEqual([r.m.ball.side, r.m.ball.rod], [1, 0], "a dead ball goes to their keeper");
 });
 await test("Pace gives its rod a free slide; a free slide costs no touch", () => {
-  const r = new Run(EDT, "RULE-0002");
+  const r = new Run(EDT, "RULE-0002", "season", RULES_LEGACY);
   r.s.squad[0] = { ...r.s.squad[0], k: STAT.pace.at + 5 };
   r.apply({ t: "go" });
   assert.equal(r.m.free[0], 1);
@@ -225,7 +228,7 @@ await test("Pace gives its rod a free slide; a free slide costs no touch", () =>
   if (r.s.phase === "attack") assert.equal(r.m.touches, t);
 });
 await test("passes only go forward, to a figure of yours; illegal kicks are refused", () => {
-  const r = new Run(EDT, "RULE-0003");
+  const r = new Run(EDT, "RULE-0003", "season", RULES_LEGACY);
   r.apply({ t: "go" });
   assert.throws(() => r.apply({ t: "kick", r: 1, d: 0 }), /forward/);
   for (const k of r.myKicks()) assert.ok(k.kick.r > r.m.ball.rod);
@@ -233,7 +236,7 @@ await test("passes only go forward, to a figure of yours; illegal kicks are refu
 await test("a blocked pass goes to the blocker; Grip keeps the ball once a possession", () => {
   let found = false;
   for (let i = 0; i < 60 && !found; i++) {
-    const r = new Run(EDT, "GRIP-" + String(i).padStart(4, "0"));
+    const r = new Run(EDT, "GRIP-" + String(i).padStart(4, "0"), "season", RULES_LEGACY);
     r.apply({ t: "go" });
     const blocked = r.myKicks().find((k) => k.kick.r !== 4 && !k.open);
     if (!blocked) continue;
@@ -252,7 +255,7 @@ await test("a blocked pass goes to the blocker; Grip keeps the ball once a posse
 await test("a goal scores, rates the move, and the conceding side kicks off", () => {
   let scored = false;
   for (let i = 0; i < 40 && !scored; i++) {
-    const r = new Run(EDT, "GOAL-" + String(i).padStart(4, "0"));
+    const r = new Run(EDT, "GOAL-" + String(i).padStart(4, "0"), "season", RULES_LEGACY);
     let n = 0;
     while (n++ < 400 && !scored && (r.s.phase === "fixture" || r.s.phase === "attack" || r.s.phase === "defend")) {
       const before = r.s.goalsFor;
@@ -269,7 +272,7 @@ await test("a goal scores, rates the move, and the conceding side kicks off", ()
   assert.ok(scored);
 });
 await test("full time: win fans, and nothing to buy that you can't afford", () => {
-  const r = new Run(EDT, "FANS-0001");
+  const r = new Run(EDT, "FANS-0001", "season", RULES_LEGACY);
   let n = 0;
   while (n++ < 3000 && r.s.phase !== "fulltime" && r.s.phase !== "over" && r.s.phase !== "won") botStep(r);
   if (r.s.phase !== "fulltime") return;
@@ -289,7 +292,7 @@ await test("full time: win fans, and nothing to buy that you can't afford", () =
   assert.equal(START_FANS, 4);
 });
 await test("swaps only happen before a match", () => {
-  const r = new Run(EDT, "SWAP-0001");
+  const r = new Run(EDT, "SWAP-0001", "season", RULES_LEGACY);
   const a = r.s.squad[0].t;
   r.apply({ t: "swap", a: 0, b: 10 });
   assert.equal(r.s.squad[10].t, a);
@@ -301,7 +304,7 @@ console.info("the rival");
 await test("they cover the lane you threaten when they can", () => {
   let checked = 0;
   for (let i = 0; i < 30; i++) {
-    const r = new Run(EDT, "COVR-" + String(i).padStart(4, "0"));
+    const r = new Run(EDT, "COVR-" + String(i).padStart(4, "0"), "season", RULES_LEGACY);
     r.apply({ t: "go" });
     const off = r.m.off.map((o) => o.slice());
     const before = r.danger(off);
@@ -312,14 +315,14 @@ await test("they cover the lane you threaten when they can", () => {
   assert.ok(checked > 0);
 });
 await test("they show the lanes they threaten; an early club commits, a late one reads your blocks", () => {
-  const early = new Run(EDT, "READ-0001");
+  const early = new Run(EDT, "READ-0001", "season", RULES_LEGACY);
   assert.equal(early.ai().read, false);
   early.s.round = 5;
   early.s.kind = 1;
   assert.equal(early.ai().read, true);
 });
 await test("their touches run out: your keeper restarts", () => {
-  const r = new Run(EDT, "AITO-0001");
+  const r = new Run(EDT, "AITO-0001", "season", RULES_LEGACY);
   r.apply({ t: "go" });
   let n = 0;
   while (r.s.phase === "attack" && n++ < 30) botStep(r);
@@ -359,7 +362,7 @@ await test("Gas Spike: a paid slide costs two touches", () => {
   if (r.s.phase === "attack") assert.equal(r.m.touches, t - 2);
 });
 await test("Max Slippage: one touch fewer every possession", () => {
-  const plain = new Run(BED, "BOSS-0001");
+  const plain = new Run(BED, "BOSS-0001", "season", RULES_LEGACY);
   plain.apply({ t: "go" });
   const r = bossMatch(BED, "slip");
   assert.equal(r.m.touches, plain.m.touches - 1);
@@ -396,7 +399,7 @@ await test("Wash Trade: the rod facing yours copies your slide", () => {
   assert.ok(r.events.some((e) => e.e === "slide" && e.side === 1 && e.why === "mirror" && e.r === facing[mv!.r] && e.d === mv!.d));
 });
 await test("Vibe Check: a figure with no stat can't shoot", () => {
-  const r = new Run(BED, "BOSS-0001");
+  const r = new Run(BED, "BOSS-0001", "season", RULES_LEGACY);
   r.s.kind = 2;
   r.s.bosses[0] = "vcheck";
   for (let i = 0; i < 11; i++) r.s.squad[i] = { ...r.s.squad[i], p: 0, k: 0, h: 0, x: 0 };
@@ -413,7 +416,7 @@ await test("Closing Bell: first to 3, more possessions, their keeper takes two P
 });
 await test("a boss club has to be beaten: a draw is out; a friendly draw goes through", () => {
   const draw = (kind: number) => {
-    const r = new Run(BED, "DRAW-0001");
+    const r = new Run(BED, "DRAW-0001", "season", RULES_LEGACY);
     r.s.kind = kind;
     if (kind === 2) r.s.bosses[0] = "wash";
     r.apply({ t: "go" });
@@ -483,7 +486,7 @@ await test("a replayed post is the same record and one Hall line; numbers sent a
 await test("the same trail on another seed is that seed's season, or refused", async () => {
   try {
     const rec = await verifyAndStore({ seed: "GARD-0002", edition: GED.id, trail: honest.trail });
-    const own = rerun(GED, "GARD-0002", decodeTrail(honest.trail));
+    const own = rerun(GED, "GARD-0002", decodeTrail(honest.trail), "season", RULES_LEGACY);
     assert.equal(rec.best?.total || 0, own.s.best?.total || 0);
   } catch (e) {
     assert.ok(e instanceof Error);
@@ -492,7 +495,7 @@ await test("the same trail on another seed is that seed's season, or refused", a
 
 console.info("the figures are live");
 await test("a stat comes from its number, at the printed threshold", () => {
-  const r = new Run(EDT, "LIVE-0001");
+  const r = new Run(EDT, "LIVE-0001", "season", RULES_LEGACY);
   for (const l of EDT.pool.flat()) {
     const src = r.statSources(l);
     assert.equal(src.power.includes("base"), l.p >= STAT.power.at, l.s);
@@ -503,7 +506,7 @@ await test("a stat comes from its number, at the printed threshold", () => {
 await test("a reading coach lights exactly the figures it changes", () => {
   const reads = COACHES.filter((c) => c.reads).map((c) => c.id);
   for (let e = 0; e < 3; e++) {
-    const r = new Run(fakeEdition(496900 + e), "LITE-000" + e);
+    const r = new Run(fakeEdition(496900 + e), "LITE-000" + e, "season", RULES_LEGACY);
     for (const id of reads) {
       r.s.coaches = [{ id, v: 0, paid: 0 }];
       const lit = new Set(r.coachSlots(id));
@@ -516,7 +519,7 @@ await test("a reading coach lights exactly the figures it changes", () => {
   }
 });
 await test("Moonboy, Volume Guy and Whale Watcher lower the bars they name", () => {
-  const r = new Run(EDT, "LIVE-0002");
+  const r = new Run(EDT, "LIVE-0002", "season", RULES_LEGACY);
   const l: Launch = { ...EDT.pool[0][0], p: 500, k: 5, h: 3 };
   assert.deepEqual(r.stats(0) && [r.statSources(l).power.length, r.statSources(l).pace.length, r.statSources(l).grip.length].map((n) => n > 0), [false, false, false]);
   r.s.coaches = ["moonboy", "volume", "whale"].map((id) => ({ id, v: 0, paid: 0 }));
@@ -524,7 +527,7 @@ await test("Moonboy, Volume Guy and Whale Watcher lower the bars they name", () 
   assert.deepEqual([src.power, src.pace, src.grip], [["moonboy"], ["volume"], ["whale"]]);
 });
 await test("the data tag reads the same numbers the match uses", () => {
-  const r = new Run(EDT, "LIVE-0003");
+  const r = new Run(EDT, "LIVE-0003", "season", RULES_LEGACY);
   for (const l of r.s.squad) {
     const f = Object.fromEntries(figureFacts(l, r.ageHours(l), r.statSources(l)).lines);
     assert.equal(f["Holders"], l.h.toLocaleString("en-US"));
@@ -537,7 +540,7 @@ await test("the data tag reads the same numbers the match uses", () => {
 });
 await test("the dressing room's line only says true things, and prefers a coach on offer", () => {
   for (let e = 0; e < 6; e++) {
-    const r = new Run(fakeEdition(496800 + e), "ROOM-000" + e);
+    const r = new Run(fakeEdition(496800 + e), "ROOM-000" + e, "season", RULES_LEGACY);
     const ageOf = (l: Launch) => r.ageHours(l);
     const facts = squadFacts(r.s.squad, ageOf);
     for (const f of facts) assert.ok(f.count > 0 && f.count <= 11);
@@ -988,7 +991,7 @@ const EDH = fakeEdition(497300);
 await putEdition(EDH);
 /** A finished Haunted table run with the bot. */
 function playHaunt(ed: Edition, seed: string) {
-  const run = new Run(ed, seed, "haunt");
+  const run = new Run(ed, seed, "haunt", RULES_LEGACY);
   let n = 0;
   while (n++ < 20000 && botStep(run));
   assert.ok(run.s.phase === "over" || run.s.phase === "won", "haunted run did not finish");
@@ -999,19 +1002,19 @@ await test("a Haunted table run is three ghost matches, deterministic from the s
   const b = playHaunt(EDH, "HNT0-0001");
   assert.equal(a.rounds, 1);
   assert.deepEqual(a.s.bosses, ["haunt"]);
-  assert.equal(encodeTrail(a.trail, "haunt"), encodeTrail(b.trail, "haunt"));
+  assert.equal(encodeTrail(a.trail, "haunt", RULES_LEGACY), encodeTrail(b.trail, "haunt", RULES_LEGACY));
   assert.equal(a.s.best?.total, b.s.best?.total);
-  const p = parseTrail(encodeTrail(a.trail, "haunt"));
+  const p = parseTrail(encodeTrail(a.trail, "haunt", RULES_LEGACY));
   assert.equal(p.mode, "haunt");
-  const c = rerun(EDH, "HNT0-0001", p.actions, p.mode);
+  const c = rerun(EDH, "HNT0-0001", p.actions, p.mode, p.rules);
   assert.equal(c.s.phase, a.s.phase);
   assert.equal(c.s.cleared, a.s.cleared);
   assert.equal(c.s.best?.total, a.s.best?.total);
 });
 await test("ghost clubs are the deadest launches, the same for every replay, and never your own figures", () => {
-  const r = new Run(EDH, "HNT0-0002", "haunt");
+  const r = new Run(EDH, "HNT0-0002", "haunt", RULES_LEGACY);
   const g1 = r.rivals(0, 1);
-  const g2 = new Run(EDH, "HNT0-0002", "haunt").rivals(0, 1);
+  const g2 = new Run(EDH, "HNT0-0002", "haunt", RULES_LEGACY).rivals(0, 1);
   assert.deepEqual(g1.map((l) => l.t), g2.map((l) => l.t));
   assert.equal(g1.length, 11);
   const mine = new Set(r.s.squad.map((l) => l.t));
@@ -1027,7 +1030,7 @@ await test("ghost clubs are the deadest launches, the same for every replay, and
   assert.match(ghostWhy({ ...z, k: 2 }), /2 trades in 24h, among the quietest/);
 });
 await test("Phasing: their ghost rod blocks only on every other touch of yours", () => {
-  const r = new Run(EDH, "HNT0-0003", "haunt");
+  const r = new Run(EDH, "HNT0-0003", "haunt", RULES_LEGACY);
   r.apply({ t: "go" });
   const g = r.m.ghost!;
   assert.ok(g && [1, 2, 3].includes(g.rod));
@@ -1041,13 +1044,13 @@ await test("Phasing: their ghost rod blocks only on every other touch of yours",
     assert.ok(r.pulledArr()[1] === g.rod, "a faded rod lets the ball through");
   }
   // never faded while they have the ball
-  const s2 = new Run(EDH, "HNT0-0003", "haunt");
+  const s2 = new Run(EDH, "HNT0-0003", "haunt", RULES_LEGACY);
   s2.apply({ t: "go" });
   s2.s.phase = "defend";
   s2.m.ghost!.tick = 1;
   assert.equal(s2.fadedRod(), -1);
   // a season match has no ghost rules at all
-  const sea = new Run(EDH, "HNT0-0003");
+  const sea = new Run(EDH, "HNT0-0003", "season", RULES_LEGACY);
   sea.apply({ t: "go" });
   assert.equal(sea.m.ghost, null);
   assert.equal(sea.fadedRod(), -1);
@@ -1055,7 +1058,7 @@ await test("Phasing: their ghost rod blocks only on every other touch of yours",
 await test("Poltergeist: after a kick, the telegraphed rod drifts the telegraphed way, then the next drift is set", () => {
   let checked = 0;
   for (let i = 0; i < 30 && checked < 5; i++) {
-    const r = new Run(EDH, `HNT1-${String(i).padStart(4, "0")}`, "haunt");
+    const r = new Run(EDH, `HNT1-${String(i).padStart(4, "0")}`, "haunt", RULES_LEGACY);
     r.apply({ t: "go" });
     for (let step = 0; step < 40 && r.s.phase === "attack"; step++) {
       const tele = r.driftNow();
@@ -1079,8 +1082,8 @@ await test("Poltergeist: after a kick, the telegraphed rod drifts the telegraphe
   assert.ok(checked >= 3, "found kicks to check: " + checked);
 });
 await test("club styles are fixed by the club, and change how the rival plays", () => {
-  const r = new Run(EDT, "STYL-0001");
-  for (let k = 0; k < 3; k++) assert.equal(r.styleOf(k, 1), new Run(EDT, "STYL-0001").styleOf(k, 1));
+  const r = new Run(EDT, "STYL-0001", "season", RULES_LEGACY);
+  for (let k = 0; k < 3; k++) assert.equal(r.styleOf(k, 1), new Run(EDT, "STYL-0001", "season", RULES_LEGACY).styleOf(k, 1));
   const p = aiParams(1, "press");
   const b = aiParams(1, "bus");
   const l = aiParams(1, "long");
@@ -1090,7 +1093,7 @@ await test("club styles are fixed by the club, and change how the rival plays", 
   assert.equal(aiParams(3, "long").deep, 1, "from round 3 a long-range club shoots through one from deep");
 });
 await test("Dressing room from match day: back reopens the same shelf; not before the first match", () => {
-  const r = new Run(EDT, "BACK-0001");
+  const r = new Run(EDT, "BACK-0001", "season", RULES_LEGACY);
   assert.throws(() => r.apply({ t: "back" }));
   let n = 0;
   while (n++ < 4000 && r.s.phase !== "room") botStep(r);
@@ -1100,14 +1103,14 @@ await test("Dressing room from match day: back reopens the same shelf; not befor
   r.apply({ t: "back" });
   assert.equal(r.s.phase, "room");
   assert.equal(JSON.stringify(r.s.offers), shelf);
-  assert.deepEqual(decodeTrail(encodeTrail([{ t: "back" }])), [{ t: "back" }]);
+  assert.deepEqual(decodeTrail(encodeTrail([{ t: "back" }], "season", RULES_LEGACY)), [{ t: "back" }]);
 });
 
 console.info("2.1: the replay guard with the mode");
 const NOWH = Date.parse("2026-11-03T12:00:00Z");
 await test("a Haunted run posts with its mode, lands on the Haunted board, and gets the kit during the event", async () => {
   const run = playHaunt(EDH, "HNT2-0001");
-  const trail = encodeTrail(run.trail, "haunt");
+  const trail = encodeTrail(run.trail, "haunt", RULES_LEGACY);
   const rec = await verifyAndStore({ seed: "HNT2-0001", edition: EDH.id, trail, mode: "haunt", name: "Lantern" }, NOWH);
   assert.equal(rec.mode, "haunt");
   assert.equal(rec.kit, run.s.cleared > 0);
@@ -1124,7 +1127,7 @@ await test("a Haunted run posts with its mode, lands on the Haunted board, and g
 await test("a forged mode flag is refused: a season trail posted as Haunted, a Haunted trail posted as a season, a made-up mode", async () => {
   const season = playOut(EDH, "HNT3-0001");
   await assert.rejects(verifyAndStore({ seed: "HNT3-0001", edition: EDH.id, trail: season.trail, mode: "haunt", name: "Forger" }, NOWH), /mode/);
-  const haunt = encodeTrail(playHaunt(EDH, "HNT3-0002").trail, "haunt");
+  const haunt = encodeTrail(playHaunt(EDH, "HNT3-0002").trail, "haunt", RULES_LEGACY);
   await assert.rejects(verifyAndStore({ seed: "HNT3-0002", edition: EDH.id, trail: haunt, mode: "season", name: "Forger" }, NOWH), /mode/);
   await assert.rejects(verifyAndStore({ seed: "HNT3-0002", edition: EDH.id, trail: haunt, mode: "ghost", name: "Forger" }, NOWH), /mode/);
   // the "H" token anywhere but the front is a bad trail
@@ -1132,10 +1135,10 @@ await test("a forged mode flag is refused: a season trail posted as Haunted, a H
 });
 await test("a Haunted trail replayed under season rules does not come out the same", () => {
   const run = playHaunt(EDH, "HNT4-0001");
-  const acts = parseTrail(encodeTrail(run.trail, "haunt")).actions;
+  const acts = parseTrail(encodeTrail(run.trail, "haunt", RULES_LEGACY)).actions;
   let same = false;
   try {
-    const r2 = rerun(EDH, "HNT4-0001", acts, "season");
+    const r2 = rerun(EDH, "HNT4-0001", acts, "season", RULES_LEGACY);
     same = r2.s.phase === run.s.phase && r2.s.best?.total === run.s.best?.total && r2.s.cleared === run.s.cleared && r2.s.round === run.s.round;
   } catch {
     same = false;
@@ -1157,7 +1160,7 @@ await test("the HUD model stepped event by event ends where the engine is: score
     ["season", "HUD0-0001"],
     ["haunt", "HUD0-0002"],
   ] as const) {
-    const run = new Run(EDT, seed, mode);
+    const run = new Run(EDT, seed, mode, RULES_LEGACY);
     let n = 0;
     let goals = 0;
     while (n++ < 20000) {
@@ -1194,6 +1197,810 @@ await test("after a goal the HUD reads one more for the scorer and in Goals, at 
   assert.equal(h2.mode, "defend");
   const h3 = hudStep(h0, { e: "end", won: true, draw: false });
   assert.deepEqual([h3.wins, h3.mode], [2, "idle"]);
+});
+
+console.info("3.0 A.0: the rules token in the trail");
+const LEGACY = JSON.parse(readFileSync("scripts/fixtures/legacy-2.1.json", "utf8")) as {
+  now: number;
+  cases: { edition: number | "real"; seed: string; mode: "season" | "haunt"; trail: string; view: string; record: string }[];
+};
+const REAL_ED: Edition = JSON.parse(readFileSync("scripts/edition.json", "utf8"));
+const legacyEd = (e: number | "real") => (e === "real" ? REAL_ED : fakeEdition(e));
+const MATCH_KEYS = ["kind", "club", "boss", "level", "target", "limit", "score", "poss", "off", "ball", "touches", "free", "freeAny", "passes", "chain", "afterPass", "gripUsed", "echoUsed", "freekick", "longball", "dummy", "shots", "saves", "aiTouches", "blockSlides", "intent", "pulled", "frozen", "drift", "pref", "fans", "style", "ghost"] as const;
+/** The state as 2.1 had it: only the fields that existed then, in the order the fixture wrote them. */
+function legacyView(run: Run): string {
+  const s = run.s;
+  const m = s.match as unknown as Keyed<string, unknown> | null;
+  return JSON.stringify({
+    phase: s.phase,
+    round: s.round,
+    kind: s.kind,
+    fans: s.fans,
+    cleared: s.cleared,
+    draws: s.draws,
+    goalsFor: s.goalsFor,
+    goalsAgainst: s.goalsAgainst,
+    touchesTotal: s.touchesTotal,
+    coaches: s.coaches,
+    plays: s.plays,
+    drills: s.drills,
+    offers: s.offers,
+    visit: s.visit,
+    fulltime: s.fulltime,
+    bosses: s.bosses,
+    clubs: s.clubs,
+    squad: s.squad.map((l) => l.t),
+    best: s.best && { total: s.best.total, style: s.best.style, figs: s.best.figs },
+    match: m && Object.fromEntries(MATCH_KEYS.map((k) => [k, m[k]])),
+  });
+}
+for (const e of new Set(LEGACY.cases.map((c) => c.edition))) await putEdition(legacyEd(e)).catch(() => null);
+await test("legacy 2.1 trails (seasons and Haunted) parse as the legacy rules and replay byte for byte", () => {
+  assert.ok(LEGACY.cases.some((c) => c.mode === "season") && LEGACY.cases.some((c) => c.mode === "haunt"));
+  for (const c of LEGACY.cases) {
+    const p = parseTrail(c.trail);
+    assert.equal(p.rules, RULES_LEGACY, c.seed);
+    assert.equal(p.mode, c.mode, c.seed);
+    const run = rerun(legacyEd(c.edition), c.seed, p.actions, p.mode, p.rules);
+    assert.equal(run.rules, 2);
+    assert.equal(legacyView(run), c.view, `${c.seed}: the replayed state differs from 2.1`);
+    assert.equal(encodeTrail(run.trail, run.mode, run.rules), c.trail, `${c.seed}: the trail re-encodes differently`);
+  }
+});
+await test("legacy 2.1 trails verify through the api/result guard into the very same record", async () => {
+  for (const c of LEGACY.cases) {
+    const ed = legacyEd(c.edition);
+    const rec = await verifyAndStore({ seed: c.seed, edition: ed.id, trail: c.trail, mode: c.mode, name: "Legacy" }, LEGACY.now);
+    assert.equal(JSON.stringify(rec), c.record, `${c.seed}: the stored record differs from 2.1`);
+  }
+});
+await test("a forged or unknown rules token is refused, by the parser and by the guard", async () => {
+  for (const bad of ["R2_g", "R2", "R9_g", "R_g", "R", "R3x_g", "R03_g", "R3_", "R3__g", "RR3_g", "R3_R3_g", "H_R3_g", "g_R3"]) assert.throws(() => parseTrail(bad), bad);
+  const c = LEGACY.cases.find((x) => x.mode === "season")!;
+  const ed = legacyEd(c.edition);
+  // a real, finished legacy trail with a made-up token in front
+  await assert.rejects(verifyAndStore({ seed: c.seed, edition: ed.id, trail: "R9_" + c.trail, name: "Forger" }, LEGACY.now), /unknown rules/);
+  await assert.rejects(verifyAndStore({ seed: c.seed, edition: ed.id, trail: "R2_" + c.trail, name: "Forger" }, LEGACY.now), /unknown rules/);
+  // the same legacy touches posted as rules 3 do not replay as the record they came from
+  let forged: Awaited<ReturnType<typeof verifyAndStore>> | null = null;
+  try {
+    forged = await verifyAndStore({ seed: c.seed, edition: ed.id, trail: "R3_" + c.trail, name: "Forger" }, LEGACY.now);
+  } catch {
+    forged = null;
+  }
+  if (forged) assert.notEqual(JSON.stringify({ ...forged, id: "", trail: "", at: "" }), JSON.stringify({ ...JSON.parse(c.record), id: "", trail: "", at: "" }));
+  // a Haunted trail with a made-up token
+  const h = LEGACY.cases.find((x) => x.mode === "haunt")!;
+  await assert.rejects(verifyAndStore({ seed: h.seed, edition: legacyEd(h.edition).id, trail: "R9_" + h.trail, mode: "haunt", name: "Forger" }, LEGACY.now), /unknown rules/);
+});
+await test("the rules token: legacy trails encode exactly as in 2.1; rules 3 leads with R3, before the mode", () => {
+  const acts: Action[] = [{ t: "go" }, { t: "slide", r: 3, d: -1 }, { t: "kick", r: 4, d: 1 }, { t: "hold" }];
+  assert.equal(encodeTrail(acts, "season", 2), "g_s3.0_k4.2_h");
+  assert.equal(encodeTrail(acts, "haunt", 2), "H_g_s3.0_k4.2_h");
+  assert.equal(encodeTrail([], "season", 2), "");
+  assert.equal(encodeTrail([], "haunt", 2), "H");
+  assert.equal(encodeTrail(acts, "season", 3), "R3_g_s3.0_k4.2_h");
+  assert.equal(encodeTrail(acts, "haunt", 3), "R3_H_g_s3.0_k4.2_h");
+  assert.equal(encodeTrail([], "season", 3), "R3");
+  assert.equal(encodeTrail([], "haunt", 3), "R3_H");
+  for (const rules of [2, 3] as const)
+    for (const mode of ["season", "haunt"] as const)
+      for (const a of [acts, []]) assert.deepEqual(parseTrail(encodeTrail(a, mode, rules)), { rules, mode, actions: a });
+  assert.equal(CURRENT_RULES, RULES_NEXT, "3.0: new runs play the rules-3 game");
+});
+await test("a trail replayed under the other rules is told apart: the rules ride on the run and in its trail", () => {
+  const a = playSeason(new Run(EDT, "RVKE-0101", "season", 2));
+  const b = playSeason(new Run(EDT, "RVKE-0101", "season", 3));
+  assert.equal(a.s.rules, 2);
+  assert.equal(b.s.rules, 3);
+  assert.notEqual(encodeTrail(a.trail, "season", a.rules), encodeTrail(b.trail, "season", b.rules));
+  // 3.0: the rules differ, so the same seed plays out differently, and each trail replays only under its own rules
+  assert.notEqual(legacyView(b), legacyView(a));
+  assert.equal(b.rounds, 7);
+  assert.equal(a.rounds, 8);
+  assert.equal(JSON.stringify(rerun(EDT, "RVKE-0101", b.trail, "season", 3).s), JSON.stringify(b.s));
+  assert.equal(JSON.stringify(rerun(EDT, "RVKE-0101", a.trail, "season", 2).s), JSON.stringify(a.s));
+});
+
+console.info("3.0: the engine contract");
+/** A bot season with every event it produced, in order, each tagged with the action that made it. */
+function eventLog(ed: Edition, seed: string, mode: "season" | "haunt" = "season", rules: 2 | 3 = RULES_LEGACY) {
+  const run = new Run(ed, seed, mode, rules);
+  const log: { a: Action; evs: Ev[] }[] = [];
+  const apply = run.apply.bind(run);
+  run.apply = (a: Action) => {
+    apply(a);
+    log.push({ a, evs: run.events.slice() });
+  };
+  playSeason(run);
+  return { run, log };
+}
+await test("kick events carry the kicker's slot, the receiver's slot and the walls", () => {
+  const { log } = eventLog(EDT, "RVKE-0102");
+  let n = 0;
+  for (const { evs } of log)
+    for (const ev of evs) {
+      if (ev.e !== "kick") continue;
+      n++;
+      assert.equal(ev.slot, slotOf(ev.rod, ev.fig));
+      assert.equal(ev.toSlot, ev.result === "pass" ? slotOf(ev.kick.r, ev.to) : -1);
+      assert.ok(ev.bounces >= 0);
+      assert.equal(ev.tight, undefined, "no tight shots under the legacy rules");
+      assert.equal(ev.first, undefined);
+    }
+  assert.ok(n > 20, "saw kicks: " + n);
+});
+await test("react groups the rival's reaction: right before its slides, the same moves in the same order", () => {
+  const { log } = eventLog(EDT, "RVKE-0103");
+  let groups = 0;
+  for (const { evs } of log) {
+    for (let i = 0; i < evs.length; i++) {
+      const ev = evs[i];
+      if (ev.e === "react") {
+        groups++;
+        const next = evs.slice(i + 1, i + 1 + ev.moves.length);
+        assert.deepEqual(
+          next.map((x) => (x.e === "slide" ? { r: x.r, d: x.d, why: x.why, side: x.side } : null)),
+          ev.moves.map((mv) => ({ r: mv.r, d: mv.d, why: "react", side: 1 })),
+        );
+      }
+      if (ev.e === "slide" && ev.why === "react") {
+        let j = i - 1;
+        while (j >= 0 && evs[j].e === "slide" && (evs[j] as { why: string }).why === "react") j--;
+        assert.equal(evs[j]?.e, "react", "every reaction slide belongs to a group");
+      }
+    }
+  }
+  assert.ok(groups > 20, "saw reactions: " + groups);
+});
+await test("previewReact is a dry run: it tells exactly what the slide then does, and changes nothing", () => {
+  let checked = 0;
+  for (const seed of ["RVKE-0104", "RVKE-0105"]) {
+    const run = new Run(EDT, seed);
+    let steps = 0;
+    while (steps++ < 3000 && run.s.phase !== "over" && run.s.phase !== "won") {
+      if (run.s.phase === "attack") {
+        for (let r = 0; r < 4; r++)
+          for (const d of [-1, 1] as const) {
+            const before = JSON.stringify(run.s);
+            const pv = run.previewReact({ r, d });
+            assert.equal(JSON.stringify(run.s), before, "the preview left the run alone");
+            const legal = run.canMove(0, r, d) && run.slideCost(r) <= run.m.touches;
+            assert.equal(pv !== null, legal, `preview of an ${legal ? "" : "il"}legal slide`);
+            if (!pv) continue;
+            const twin = rerun(EDT, seed, run.trail);
+            twin.apply({ t: "slide", r, d });
+            assert.deepEqual(pv.moves, twin.events.flatMap((e) => (e.e === "slide" && e.side === 1 && e.why === "react" ? [{ r: e.r, d: e.d }] : [])));
+            assert.deepEqual(pv.off, twin.m.off);
+            checked++;
+          }
+        if (checked > 150) break;
+      }
+      if (!botStep(run)) break;
+    }
+  }
+  assert.ok(checked > 40, "previews checked: " + checked);
+  const fresh = new Run(EDT, "RVKE-0104");
+  assert.equal(fresh.previewReact({ r: 3, d: 1 }), null, "no preview before kickoff");
+});
+await test("whistle comes right before end, with the reason; a boss kickoff shows its rule first", () => {
+  const { log, run } = eventLog(EDT, "RVKE-0106");
+  let ends = 0;
+  let finals = 0;
+  for (const { evs } of log)
+    evs.forEach((ev, i) => {
+      if (ev.e !== "end") return;
+      ends++;
+      const w = evs[i - 1];
+      assert.equal(w?.e, "whistle");
+      if (w?.e !== "whistle") return;
+      if (!ev.won) assert.equal(w.reason, ev.draw ? "draw" : "lost");
+      else if (w.reason === "final") finals++;
+      else assert.equal(w.reason, "won");
+    });
+  assert.ok(ends >= 2);
+  assert.equal(finals, run.s.phase === "won" ? 1 : 0, "the final whistle only for the season won");
+  for (const id of ["rug", "halt", "vcheck", "depeg", "gasspike", "jam", "slip", "lockup", "wash", "bell"]) {
+    const r = bossMatch(EDT, id);
+    const ev = r.events.find((e) => e.e === "rule");
+    assert.ok(ev && ev.e === "rule" && ev.id === id, id);
+    assert.deepEqual(r.m.ruleView, ev.e === "rule" ? ev.view : null);
+    assert.ok(r.events.findIndex((e) => e.e === "rule") < r.events.findIndex((e) => e.e === "kickoff"));
+  }
+  assert.deepEqual(bossMatch(EDT, "rug").m.ruleView, { kind: "pulled", rod: 1 });
+  const fr = new Run(EDT, "RVKE-0106");
+  fr.apply({ t: "go" });
+  assert.equal(fr.m.ruleView, null);
+  assert.ok(!fr.events.some((e) => e.e === "rule"));
+});
+await test("scorers add up to your goals and follow the launch through a swap; the story has a line per match", () => {
+  const { run, log } = eventLog(EDT, "RVKE-0107");
+  const goals = Object.values(run.s.scorers).reduce((a, b) => a + b, 0);
+  assert.equal(goals, run.s.goalsFor);
+  const ended = log.reduce((n, x) => n + x.evs.filter((e) => e.e === "end").length, 0);
+  assert.equal(run.s.story.length, ended);
+  assert.ok(run.s.story.every((l) => ["won", "draw", "lost"].includes(l.key) && typeof l.args.club === "string"));
+  const r = new Run(EDT, "RVKE-0108");
+  r.s.scorers = { 8: 3, 3: 1 };
+  r.apply({ t: "swap", a: 8, b: 2 });
+  assert.deepEqual(r.s.scorers, { 2: 3, 3: 1 });
+});
+await test("the best goal keeps its move: one path segment per kick, ending in their goal mouth", () => {
+  for (const seed of ["RVKE-0109", "RVKE-0110", "RVKE-0111"]) {
+    const run = playSeason(new Run(EDT, seed));
+    const b = run.s.best;
+    if (!b) continue;
+    assert.equal(b.path.length, b.kicks.length);
+    assert.equal(b.kicks[b.kicks.length - 1].r, 4, "the last kick is the shot");
+    assert.ok(b.kicks.slice(0, -1).every((k) => k.r < 4), "the ones before are passes");
+    const last = b.path[b.path.length - 1];
+    const end = last[last.length - 1];
+    assert.ok(end.lane >= MOUTH[0] && end.lane <= MOUTH[1], "in the mouth");
+    for (const seg of b.path) for (let i = 1; i < seg.length; i++) assert.equal(seg[i].x, seg[i - 1].x + 1, "a segment runs up the table one column a step");
+    assert.ok(b.scorer >= 0 && b.scorer <= 10);
+  }
+});
+await test("under the legacy rules the 3.0 stubs stay neutral: no tight lanes, league, table events or seeded kickoffs", () => {
+  const { log, run } = eventLog(EDT, "RVKE-0112");
+  assert.equal(run.s.league, null);
+  assert.ok(!log.some((x) => x.evs.some((e) => e.e === "event" || e.e === "standings")));
+  const r = new Run(EDT, "RVKE-0112", "season", RULES_LEGACY);
+  r.apply({ t: "go" });
+  assert.deepEqual(r.tightLanes(), []);
+  assert.equal(r.m.event, null);
+  assert.equal(r.m.kickoffId, 0);
+  assert.equal(r.buildUpPower(), 0);
+  assert.equal(r.firstTime(9), false);
+  assert.equal(r.wideBody(3), false);
+});
+await test("traitsOf reads a launch's numbers, and only its numbers", () => {
+  const base: Launch = { ...EDT.pool[0][0], g: false, k: 5, h: 3, x: 0, a: 1000 };
+  const at = 1000 + 24 * 3600;
+  assert.deepEqual(traitsOf(base, at), []);
+  assert.deepEqual(traitsOf({ ...base, g: true, h: 20 }, at), ["flown", "whale"]);
+  assert.deepEqual(traitsOf({ ...base, k: 0 }, at), ["ghost"]);
+  assert.deepEqual(traitsOf({ ...base, k: 30, x: -800 }, at), ["degen", "dip"]);
+  assert.deepEqual(traitsOf(base, 1000 + 3600), ["fresh"]);
+  assert.deepEqual(traitsOf(base, at), traitsOf({ ...base }, at));
+});
+await test("the desk speaks plainly: no exclamation marks, no off-limits words, the same line for the same moment", () => {
+  const banned = /\b(card|deck|poker|hand|blind|ante|chip|mult|flush|jackpot|bet|odds|gamble|casino|cash-out|graduat|download|reward|official|partner|sponsor|prize|earn|guarantee|spin|roll|loot|payout)/i;
+  for (const l of DESK_LINES) {
+    assert.ok(!l.includes("!"), l);
+    assert.ok(!banned.test(l), l);
+  }
+  const { run, log } = eventLog(EDT, "RVKE-0113");
+  let said = 0;
+  log.forEach((x, n) =>
+    x.evs.forEach((ev) => {
+      const a = lineFor(ev, { run, n });
+      const b = lineFor(ev, { run, n });
+      assert.equal(a, b);
+      if (a) {
+        said++;
+        assert.ok(!/[{}]/.test(a), a);
+        assert.ok(a.length <= 72, a);
+      }
+    }),
+  );
+  assert.ok(said > 10, "the desk said " + said);
+});
+
+
+console.info("3.0: the rules-3 game");
+/** Plays a run with the bot, logging every action and its events, until `stop` says so or the run ends. */
+function botLog(ed: Edition, seed: string, mode: RunMode = "season", stop: (r: Run) => boolean = () => false) {
+  const run = new Run(ed, seed, mode, 3);
+  const log: { a: Action; evs: Ev[]; phase: string }[] = [];
+  const apply = run.apply.bind(run);
+  run.apply = (a: Action) => {
+    apply(a);
+    log.push({ a, evs: run.events.slice(), phase: run.s.phase });
+  };
+  let n = 0;
+  while (n++ < 40000 && !stop(run) && botStep(run));
+  return { run, log };
+}
+const R3SEEDS = ["RTRE-0001", "RTRE-0002", "RTRE-0003", "RTRE-0004"];
+const R3LOGS = R3SEEDS.map((sd) => botLog(EDT, sd));
+const allEvs = (logs: typeof R3LOGS) => logs.flatMap((x) => x.log.flatMap((l) => l.evs));
+
+await test("rules 3 is deterministic: the same seed and touches give the same run, in every mode", () => {
+  for (const mode of ["season", "haunt", "daily"] as RunMode[]) {
+    const { run } = botLog(EDT, "RDET-0001", mode);
+    const p = parseTrail(encodeTrail(run.trail, mode, 3));
+    assert.equal(p.rules, 3);
+    assert.equal(p.mode, mode);
+    const twin = rerun(EDT, "RDET-0001", p.actions, p.mode, p.rules);
+    assert.equal(JSON.stringify(twin.s), JSON.stringify(run.s), mode);
+    const again = botLog(EDT, "RDET-0001", mode).run;
+    assert.equal(JSON.stringify(again.trail), JSON.stringify(run.trail), mode);
+  }
+});
+await test("a rules-3 season verifies through the guard into a record, and replays from its trail", async () => {
+  await putEdition(EDT).catch(() => null);
+  const { run } = R3LOGS[0];
+  const trail = encodeTrail(run.trail, "season", 3);
+  assert.ok(trail.startsWith("R3_"));
+  const rec = await verifyAndStore({ seed: run.s.seed, edition: EDT.id, trail, name: "Rule Three" });
+  assert.equal(rec.cleared, run.s.cleared);
+  assert.equal(rec.best?.total, run.s.best?.total);
+  assert.equal(rec.won, run.s.phase === "won");
+  // the same touches posted without the token are a legacy trail: they don't come out the same, or don't replay at all
+  let same = false;
+  try {
+    const legacy = rerun(EDT, run.s.seed, run.trail, "season", 2);
+    same = JSON.stringify(legacy.summary()) === JSON.stringify(run.summary());
+  } catch {
+    same = false;
+  }
+  assert.ok(!same, "a rules-3 trail must not pass as a legacy one");
+});
+await test("pathOf replays any posted trail to its best goal, legacy ones included", () => {
+  const { run } = R3LOGS[1];
+  const b = pathOf(EDT, run.s.seed, encodeTrail(run.trail, "season", 3));
+  assert.deepEqual(b, run.s.best);
+  const c = LEGACY.cases.find((x) => x.mode === "season")!;
+  const lb = pathOf(legacyEd(c.edition), c.seed, c.trail);
+  assert.ok(lb && lb.path.length === lb.kicks.length);
+  assert.equal(pathOf(EDT, "RDET-0001", "R9_g"), null);
+  assert.equal(pathOf(EDT, "RDET-0001", "R3_k4.1"), null);
+});
+
+await test("keeper reach: a shot crossing the lane beside their keeper is tight, saved unless off a pass, off a wall, or with Power to spare", () => {
+  const r = new Run(EDT, "RTGT-0001", "season", 3);
+  r.apply({ t: "go" });
+  const kl = r.m.off[1][0];
+  assert.deepEqual(r.tightLanes(), [kl - 1, kl + 1].filter((l) => l >= 0 && l < 10));
+  const kx = 8;
+  const steps = (lane: number) => [
+    { x: 7, lane },
+    { x: kx, lane },
+    { x: 9, lane },
+  ];
+  const tr = { steps: steps(kl + 1), land: kl + 1, bounces: 0, legal: true, to: -1, blockers: [], walls: [] };
+  const plain = r.reachOf(r.m.off, tr, false);
+  assert.equal(plain.tight, true);
+  assert.equal(plain.blockers.length, 1);
+  assert.equal(plain.blockers[0].reach, true);
+  assert.equal(resolveBlock(plain.blockers, 0, false, 3).at?.reach, true, "no Power: the keeper reaches it");
+  assert.equal(resolveBlock(plain.blockers, 1, false, 3).at, null, "one Power beats the reach, even in the final");
+  assert.equal(r.reachOf(r.m.off, tr, true).blockers.length, 0, "straight off a pass: the keeper is wrong-footed");
+  assert.equal(r.reachOf(r.m.off, { ...tr, bounces: 1 }, false).blockers.length, 0, "off a wall");
+  const away = r.reachOf(r.m.off, { ...tr, steps: steps(kl + 3) }, false);
+  assert.equal(away.tight, false);
+  assert.equal(away.blockers.length, 0);
+  // in play: tight shots happen, some are saved by the reach and some still go in
+  const kicks = allEvs(R3LOGS).filter((e): e is Extract<Ev, { e: "kick" }> => e.e === "kick" && e.side === 0 && e.kick.r === 4);
+  assert.ok(kicks.some((k) => k.tight && k.result === "goal"), "a tight goal");
+  // legacy: never tight
+  const l = new Run(EDT, "RTGT-0001", "season", 2);
+  l.apply({ t: "go" });
+  assert.deepEqual(l.tightLanes(), []);
+  assert.equal(l.reachOf(l.m.off, tr, false).blockers.length, 0);
+});
+await test("Pace first time: a pass to a Pace figure arrives before they react, and its shot is marked first", () => {
+  let quick = 0;
+  let firsts = 0;
+  for (const { run, log } of R3LOGS)
+    for (const { evs } of log) {
+      evs.forEach((ev, i) => {
+        if (ev.e === "kick" && ev.side === 0 && ev.first) firsts++;
+        if (ev.e !== "kick" || ev.side !== 0 || ev.result !== "pass" || !run.firstTime(ev.toSlot)) return;
+        quick++;
+        // nothing reacts between the pass and the end of this touch, unless the possession ended
+        const after = evs.slice(i + 1);
+        if (!after.some((x) => x.e === "turnover" || x.e === "end")) assert.ok(!after.some((x) => x.e === "react"), "no reaction to a first-time pass");
+      });
+    }
+  assert.ok(quick > 3, "first-time passes seen: " + quick);
+  assert.ok(firsts > 0, "first-time shots seen: " + firsts);
+  const r = new Run(EDT, "RTGT-0002", "season", 3);
+  const pace = r.s.squad.findIndex((l, i) => i > 0 && r.stats(i).pace);
+  if (pace > 0) assert.equal(r.firstTime(pace), true);
+  assert.equal(r.firstTime(0), false, "a keeper never takes a pass");
+  assert.equal(new Run(EDT, "RTGT-0002", "season", 2).firstTime(pace), false);
+});
+await test("Grip wide body: on their ball a Grip figure at the back covers the next lane toward the middle; a Grip keeper both sides", () => {
+  const r = new Run(EDT, "RTGT-0003", "season", 3);
+  r.apply({ t: "go" });
+  const off = r.m.off;
+  r.m.wide = [0, 3];
+  const w = r.wideCover(off)!;
+  const kl = off[0][0];
+  assert.equal(w[0][kl - 1], 0);
+  assert.equal(w[0][kl + 1], 0);
+  const ml = laneOf(2, off[0][2], 0);
+  assert.equal(w[2][ml + (ml <= 4 ? 1 : -1)], 0, "the midfielder's lane beside it");
+  // a kick of theirs down that extra lane meets the wide body; the same kick from your side does not see it
+  const extra = ml + (ml <= 4 ? 1 : -1);
+  // a kick of theirs from midfield down that lane meets the wide body; without wide bodies it passes
+  const theirs = trace(off, [-1, -1], 1, 2, extra, { r: 4, d: 0 }, 0, { wide: w });
+  assert.ok(theirs.blockers.some((b) => b.rod === 2 && b.fig === 0 && b.lane === extra));
+  const bare = trace(off, [-1, -1], 1, 2, extra, { r: 4, d: 0 });
+  assert.equal(figAt(2, off[0][2], extra), -1);
+  assert.ok(!bare.blockers.some((b) => b.rod === 2 && b.lane === extra));
+  assert.equal(r.wideBody(8), false, "attackers are never wide bodies");
+});
+await test("build-up: +1 Power from the second pass of a possession, and team moves happen", () => {
+  const r = new Run(EDT, "RTGT-0004", "season", 3);
+  r.apply({ t: "go" });
+  assert.deepEqual([0, 1, 2, 3].map((n) => r.buildUpPower(n)), [0, 0, 1, 1]);
+  const tr = trace(r.m.off, [-1, -1], 0, 3, 4, { r: 4, d: 0 });
+  assert.equal(r.shotPower(9, 3, tr, 3, false, 2) - r.shotPower(9, 3, tr, 3, false, 1), 1);
+  const goals = allEvs(R3LOGS).filter((e) => e.e === "goal" && e.side === 0) as Extract<Ev, { e: "goal" }>[];
+  assert.ok(goals.some((g) => g.style === "Team move"), "a team move");
+  assert.ok(goals.every((g) => typeof g.slot === "number"), "goals name their scorer");
+});
+await test("seeded kickoffs: each match opens from one of its club style's formations, the same for the same seed", () => {
+  const seen = new Set<number>();
+  for (let i = 0; i < 12; i++) {
+    const r = new Run(EDT, `RKO${i % 10}-000${i % 10}`, "season", 3);
+    r.apply({ t: "go" });
+    const ko = KICKOFFS[r.m.kickoffId];
+    assert.equal(ko.style, r.m.style);
+    assert.deepEqual(r.m.off[0], ko.off[0], "your rods stand as the formation says");
+    assert.equal(r.m.ball.rod === 2 && r.m.ball.fig === ko.fig, true);
+    seen.add(ko.id);
+    const twin = new Run(EDT, `RKO${i % 10}-000${i % 10}`, "season", 3);
+    twin.apply({ t: "go" });
+    assert.equal(twin.m.kickoffId, r.m.kickoffId);
+  }
+  assert.ok(seen.size >= 3, "openings vary: " + [...seen].join(","));
+});
+await test("table events: one per league match, told before kickoff; none in a cup tie; each one does what it says", () => {
+  for (const { log } of R3LOGS)
+    for (const { a, evs } of log) {
+      if (a.t !== "go") continue;
+      const ki = evs.findIndex((e) => e.e === "kickoff");
+      const ei = evs.findIndex((e) => e.e === "event");
+      const ri = evs.findIndex((e) => e.e === "rule");
+      if (ri >= 0) assert.equal(ei, -1, "a cup tie has its rule, not a table event");
+      else assert.ok(ei >= 0 && ei < ki, "a league match tells its event before kickoff");
+    }
+  const at = (id: TableEventId) => {
+    for (let i = 0; i < 80; i++) {
+      const r = new Run(EDT, `REV${i % 10}-${1000 + i}`, "season", 3);
+      r.apply({ t: "go" });
+      if (r.m.event === id) return r;
+    }
+    throw new Error("no " + id);
+  };
+  const g = at("green");
+  assert.equal(g.baseTouches(true), g.baseTouches(false) + 1, "Green candle: a touch more on the first possession");
+  const h = at("halfhalt");
+  assert.equal(h.m.poss[0], 1);
+  assert.ok(!h.myKicks().some((k) => k.kick.r !== 4 && k.kick.r - h.m.ball.rod >= 2), "no pass over a rod on the first possession");
+  const t = at("thin");
+  assert.ok(t.m.sticky! >= 0 && !STICKY_LANES.every((l) => l !== t.m.sticky));
+  for (const k of t.myKicks()) assert.ok(!k.tr.steps.some((st) => st.lane === t.m.sticky && st.x >= 3 && st.x <= 6), "no kick runs along the sticky lane in midfield");
+  const v = trace(START_OFF, [-1, -1], 0, 2, 1, { r: 4, d: -1 }, 0, { volatile: true });
+  const n = trace(START_OFF, [-1, -1], 0, 2, 1, { r: 4, d: -1 });
+  assert.notDeepEqual(v.steps, n.steps, "Volatile: the walls kick back harder");
+  assert.ok(v.walls.length >= 1 && n.walls.length >= 1);
+});
+await test("Trading Halt lifts at the first goal; Mempool Jam lets a pass to a Pace figure through first", () => {
+  const b3 = new Run(EDT, "BOSS-0001", "season", 3);
+  b3.s.kind = 2;
+  b3.s.bosses[0] = "halt";
+  b3.apply({ t: "go" });
+  assert.ok(b3.m.frozen >= 1);
+  let n = 0;
+  while (n++ < 3000 && b3.s.match && b3.m.score[0] + b3.m.score[1] === 0 && botStep(b3));
+  if (b3.s.match && b3.s.match.score[0] + b3.s.match.score[1] > 0) {
+    assert.equal(b3.m.frozen, -1);
+    assert.deepEqual(b3.m.ruleView, { kind: "frozen", rod: -1 });
+  }
+  const legacy = bossMatch(EDT, "halt");
+  let k = 0;
+  while (k++ < 3000 && legacy.s.match && legacy.m.score[0] + legacy.m.score[1] === 0 && botStep(legacy));
+  if (legacy.s.match) assert.ok(legacy.m.frozen >= 1, "2.1: frozen all match");
+});
+await test("the rival's own Power: their launches past 10% of the curve shoot through one more blocker", () => {
+  const r = new Run(EDT, "RTGT-0006", "season", 3);
+  r.apply({ t: "go" });
+  const slots = r.rivalPowerSlots();
+  assert.deepEqual(slots, r.rivals().flatMap((l, i) => (l.p >= STAT.power.at ? [i] : [])));
+  assert.deepEqual(r.m.rivalPower, slots);
+  const pw = r.ai().power;
+  for (let slot = 1; slot <= 10; slot++) {
+    const rod = slot <= 2 ? 1 : slot <= 7 ? 2 : 3;
+    const fig = slot - [0, 1, 3, 8][rod];
+    assert.equal(r.theirPower(rod, fig) - (rod <= 1 ? r.ai().deep : 0), pw + (slots.includes(slot) ? 1 : 0));
+  }
+});
+await test("an empty defence turn plays itself: under rules 3 you are only asked to defend a threat", () => {
+  let asked = 0;
+  for (const { run, log } of R3LOGS) {
+    void run;
+    for (const { phase } of log) if (phase === "defend") asked++;
+  }
+  const r = new Run(EDT, "RTGT-0007", "season", 3);
+  let n = 0;
+  let states = 0;
+  while (n++ < 4000 && botStep(r)) {
+    if (r.s.phase === "defend") {
+      states++;
+      assert.ok(r.threats().length > 0, "a defend state always shows a threat");
+    }
+  }
+  assert.ok(asked > 0 && states > 0);
+});
+await test("the rival plays the plan its preview and its threats show: aiPlan is exactly what Ready does", () => {
+  let checked = 0;
+  for (const seed of ["RAIP-0001", "RAIP-0002"]) {
+    const r = new Run(EDT, seed, "season", 3);
+    let n = 0;
+    while (n++ < 3000 && r.s.phase !== "over" && r.s.phase !== "won") {
+      if (r.s.phase === "defend") {
+        const plan = r.aiPlan();
+        const twin = rerun(EDT, seed, r.trail, "season", 3);
+        twin.apply({ t: "hold" });
+        const first = twin.events[0];
+        if (plan.kind === "slide") assert.deepEqual(first && first.e === "slide" ? { r: first.r, d: first.d } : null, { r: plan.r, d: plan.d });
+        else assert.deepEqual(first && first.e === "kick" ? first.kick : null, plan.kick);
+        checked++;
+      }
+      if (!botStep(r)) break;
+    }
+  }
+  assert.ok(checked > 10, "plans checked: " + checked);
+});
+
+console.info("3.0: the league season");
+await test("a rules-3 season is seven rounds: two league matchdays and a cup tie each, the last cup tie the final", () => {
+  const r = new Run(EDT, "RLG0-0001", "season", 3);
+  assert.equal(r.rounds, ROUNDS_R3);
+  assert.equal(r.s.bosses.length, 7);
+  assert.equal(r.s.bosses[6], "bell");
+  assert.equal(new Set(r.s.bosses.slice(0, 6)).size, 6);
+  assert.equal(r.s.clubs.length, 14);
+  const t = r.s.league!;
+  assert.equal(t.length, 8);
+  assert.equal(t.filter((x) => x.you).length, 1);
+  assert.equal(t.find((x) => x.you)!.club, "You", "your row is named You");
+  // a double round robin: every club twice, never twice in a row
+  const count: Keyed<string, number> = {};
+  for (const c of r.s.clubs) count[c] = (count[c] || 0) + 1;
+  assert.ok(Object.values(count).every((n) => n === 2));
+  for (let i = 1; i < 14; i++) assert.notEqual(r.s.clubs[i], r.s.clubs[i - 1]);
+  for (let md = 0; md < 14; md++) {
+    const seen = fixturesOf(md).flat();
+    assert.equal(new Set(seen).size, 8, "every club plays once a matchday");
+  }
+  const pairs = new Set<string>();
+  for (let md = 0; md < 7; md++) for (const [a, b] of fixturesOf(md)) pairs.add([a, b].sort().join("-"));
+  assert.equal(pairs.size, 28, "each pair once in a half");
+  assert.equal(fixtureName(2, 3, true), "Final");
+  assert.equal(fixtureName(0, 3), "League match");
+  assert.equal(fixtureName(0, 2), "Friendly");
+  // the legacy season keeps its shape
+  const l = new Run(EDT, "RLG0-0001", "season", 2);
+  assert.equal(l.rounds, 8);
+  assert.equal(l.s.league, null);
+});
+await test("the table books every matchday: your result, the other three, points and goals; standings follow", () => {
+  for (const { run, log } of R3LOGS) {
+    const t = run.s.league!;
+    for (const row of t) {
+      assert.equal(row.pts, 3 * row.w + row.d);
+      assert.equal(row.p, row.w + row.d + row.l);
+    }
+    const ps = new Set(t.map((x) => x.p));
+    assert.equal(ps.size, 1, "everyone has played the same number of matchdays");
+    assert.equal(t.reduce((a, x) => a + x.gf, 0), t.reduce((a, x) => a + x.ga, 0), "goals balance");
+    assert.deepEqual(t, sortTable(t), "kept in table order");
+    for (const { evs } of log) {
+      const e = evs.findIndex((x) => x.e === "end");
+      const st = evs.findIndex((x) => x.e === "standings");
+      if (st >= 0) assert.ok(e >= 0 && st > e, "standings come after the whistle");
+    }
+    const league = run.s.story.filter((x) => x.kind < 2);
+    assert.equal(league.length, t[0].p);
+    assert.ok(league.every((x) => typeof x.args.pos === "number"));
+  }
+});
+await test("league end conditions: a league loss plays on; the table shuts you out once the top two is out of reach", () => {
+  // a league loss alone does not end a season
+  const lost = R3LOGS.flatMap((x) => x.run.s.story.filter((l, i, all) => l.kind < 2 && l.key === "lost" && i < all.length - 1));
+  // shut out: two clubs out of reach before a league match
+  const r = new Run(EDT, "RLG0-0002", "season", 3);
+  const others = r.s.league!.filter((x) => !x.you);
+  for (const o of others.slice(0, 2)) {
+    o.w = 33;
+    o.pts = 99;
+  }
+  assert.equal(r.leagueOut(), true);
+  let n = 0;
+  while (n++ < 4000 && r.s.phase !== "over" && botStep(r));
+  const last = r.s.story[r.s.story.length - 1];
+  assert.equal(r.s.phase, "over");
+  assert.equal(last.kind < 2, true);
+  assert.equal(last.args.out, 1);
+  // one club out of reach is not enough
+  const r2 = new Run(EDT, "RLG0-0003", "season", 3);
+  r2.s.league!.find((x) => !x.you)!.pts = 99;
+  assert.equal(r2.leagueOut(), false);
+  // with nothing left to play, the place decides
+  const r3 = new Run(EDT, "RLG0-0004", "season", 3);
+  for (const row of r3.s.league!) row.p = MATCHDAYS;
+  r3.s.league = sortTable(r3.s.league!.map((x) => (x.you ? { ...x, pts: 10 } : { ...x, pts: x.club < "M" ? 20 : 0 })));
+  assert.equal(r3.leagueOut(), r3.standing() > 2);
+  // a league loss alone does not end a season: find one in play
+  let played = lost.length;
+  for (let i = 0; i < 30 && !played; i++) played = botLog(EDT, `RLGL-${1000 + i}`).run.s.story.filter((l, j, all) => l.kind < 2 && l.key === "lost" && j < all.length - 1).length;
+  assert.ok(played > 0, "the bot lost a league match and played on");
+});
+await test("the final: only the top two reach it, against the other club of the top two, under the Closing Bell's terms", () => {
+  const r = new Run(EDT, "RLG0-0005", "season", 3);
+  assert.equal(r.clubName(2, 7), "Closing Bell", "before the league is done");
+  for (const row of r.s.league!) row.p = MATCHDAYS;
+  r.s.league!.find((x) => x.you)!.pts = 50;
+  const other = r.s.league!.find((x) => !x.you)!;
+  other.pts = 40;
+  r.s.league = sortTable(r.s.league!);
+  assert.equal(r.standing(), 1);
+  assert.equal(r.finalist(), other.club);
+  assert.equal(r.clubName(2, 7), other.club);
+  assert.equal(r.bossOf(2, 7), "bell");
+  assert.equal(r.homeTouches(2, 7), 1, "top of the table: a touch more to open the final");
+  assert.equal(r.homeTouches(2, 3), 1, "top two: a cup tie at home");
+  for (const row of r.s.league!) row.pts = row.you ? 0 : 30;
+  r.s.league = sortTable(r.s.league!);
+  assert.equal(r.finalist(), null);
+  assert.equal(r.homeTouches(2, 3), 0, "below the line: away");
+  // in play, a cup tie lost ends the season, and a season won ends on the final whistle
+  for (const { run, log } of R3LOGS) {
+    const last = run.s.story[run.s.story.length - 1];
+    if (run.s.phase === "won") {
+      assert.equal(last.args.final, 1);
+      assert.ok(log.some((x) => x.evs.some((e) => e.e === "whistle" && e.reason === "final")));
+    } else if (last.kind === 2) assert.notEqual(last.key, "won");
+  }
+});
+
+console.info("3.0: the Daily match day");
+const DAY = utcDay();
+const DH = dayStartHour(DAY);
+const DED = fakeEdition(DH);
+await putEdition(DED).catch(() => null);
+const DPIN = await dailyPin(DAY, Date.now(), async () => assert.fail("must not cut"));
+await test("the Daily is one match day: friendly, league match, boss club; finished after fixture 3 or the first loss", () => {
+  const r = new Run(DED, DPIN.seed, "daily", 3);
+  assert.equal(r.rounds, 1);
+  assert.equal(r.s.clubs.length, 2);
+  assert.notEqual(r.s.bosses[0], "bell");
+  assert.equal(r.s.league, null);
+  assert.equal(fixtureName(1, 3, false, "daily"), "League match");
+  assert.equal(fixtureName(0, 3, false, "daily"), "Friendly");
+  assert.throws(() => new Run(DED, DPIN.seed, "daily", 2), /rules 3/);
+  const { run } = botLog(DED, DPIN.seed, "daily");
+  assert.ok(run.s.phase === "won" || run.s.phase === "over");
+  if (run.s.phase === "won") assert.equal(run.s.story.length, 3);
+  else assert.notEqual(run.s.story[run.s.story.length - 1].key, "won");
+});
+await test("the Daily trail token: R3_D; a D without rules 3, or a stray token, is refused", () => {
+  const acts: Action[] = [{ t: "go" }, { t: "hold" }];
+  assert.equal(encodeTrail(acts, "daily", 3), "R3_D_g_h");
+  assert.equal(encodeTrail([], "daily", 3), "R3_D");
+  assert.deepEqual(parseTrail("R3_D_g_h"), { rules: 3, mode: "daily", actions: acts });
+  assert.deepEqual(parseTrail("R3_D"), { rules: 3, mode: "daily", actions: [] });
+  assert.throws(() => encodeTrail(acts, "daily", 2));
+  for (const bad of ["D_g", "D", "R3_D_", "R3_DD_g", "R3_D_H_g", "R3_H_D_g", "D_R3_g", "R4_D_g"]) assert.throws(() => parseTrail(bad), bad);
+  // the client finds the mode the way main.ts does
+  assert.equal(parseTrail(encodeTrail([{ t: "go" }], "daily" as RunMode)).mode, "daily");
+});
+await test("a Daily match day verifies when finished, early or after fixture 3, onto the Daily board only", async () => {
+  const done = botLog(DED, DPIN.seed, "daily").run;
+  const trail = encodeTrail(done.trail, "daily", 3);
+  const rec = await verifyAndStore({ seed: DPIN.seed, edition: DED.id, trail, name: "Daily Driver" });
+  assert.equal(rec.mode, "daily");
+  assert.equal(rec.daily, DAY);
+  assert.equal(rec.over, true);
+  const hall = await getHall(DAY);
+  assert.ok(!hall.entries.some((e) => e.id === rec.id), "not in the Hall of goals");
+  if (rec.best && rec.best.total > 0) assert.ok((await publicBoard(DAY)).entries.some((e) => e.name === "Daily Driver"), "on the Daily board");
+  // finished early: a lazy player who never blocks and loses the friendly
+  const lazy = new Run(DED, DPIN.seed, "daily", 3);
+  let n = 0;
+  while (n++ < 4000 && lazy.s.phase !== "over" && lazy.s.phase !== "won") {
+    if (lazy.s.phase === "defend") lazy.apply({ t: "hold" });
+    else if (lazy.s.phase === "attack") {
+      const k = lazy.myKicks();
+      const pass = k.find((x) => x.kick.r !== 4 && !x.open) || k.find((x) => x.kick.r === 4 && !x.open);
+      if (pass) lazy.apply({ t: "kick", r: pass.kick.r, d: pass.kick.d });
+      else botStep(lazy);
+    } else if (!botStep(lazy)) break;
+  }
+  if (lazy.s.phase === "over") {
+    const early = await verifyAndStore({ seed: DPIN.seed, edition: DED.id, trail: encodeTrail(lazy.trail, "daily", 3) });
+    assert.equal(early.over, true);
+    assert.ok(early.round === 1 && early.fixture <= 2);
+  }
+  // not finished: refused
+  const half = done.trail.slice(0, Math.max(1, Math.floor(done.trail.length / 3)));
+  await assert.rejects(verifyAndStore({ seed: DPIN.seed, edition: DED.id, trail: encodeTrail(half, "daily", 3) }), /not finished/);
+  // another seed in daily mode: refused
+  const other = botLog(DED, "RDAY-0002", "daily").run;
+  await assert.rejects(verifyAndStore({ seed: "RDAY-0002", edition: DED.id, trail: encodeTrail(other.trail, "daily", 3) }), /not today's Daily/);
+  // a mode flag that says otherwise
+  await assert.rejects(verifyAndStore({ seed: DPIN.seed, edition: DED.id, trail, mode: "season" }), /mode does not match/);
+});
+await test("legacy Daily seasons (2.1 rules, no token) still verify onto the board", async () => {
+  const run = new Run(DED, DPIN.seed, "season", 2);
+  let n = 0;
+  while (n++ < 40000 && botStep(run));
+  const trail = encodeTrail(run.trail, "season", 2);
+  assert.ok(!trail.startsWith("R"));
+  const rec = await verifyAndStore({ seed: DPIN.seed, edition: DED.id, trail, name: "Old Daily" });
+  assert.equal(rec.daily, DAY);
+  assert.equal(rec.mode, undefined);
+});
+
+console.info("3.0: content, voice and the programme");
+await test("Haunted under rules 3 runs easy to hard; every club the game can field has an identity", () => {
+  const r = new Run(EDT, "RHNT-0001", "haunt", 3);
+  assert.deepEqual([0, 1, 2].map((k) => r.levelOf(k)), R3.haunt);
+  for (const c of [...CLUBS, ...BOSSES.map((b) => b.name), FINAL_BOSS.name, ...HAUNT.clubs, HAUNT.boss.name]) {
+    const id = CLUB_ID[c];
+    assert.ok(id, c);
+    assert.ok(id.kit.length === 2 && id.kit.every((x) => x >= 0 && x <= 0xffffff), c);
+    assert.ok(id.chant.length <= 72 && !id.chant.includes("!"), c);
+    assert.ok(CAPTAIN_RULE[id.captain], c);
+  }
+  assert.equal(clubIdOf("Nobody FC").crest, "shield");
+  const run = new Run(EDT, "RHNT-0002", "season", 3);
+  const cap = run.captainOf(0, 1);
+  assert.ok(cap >= 0 && cap < 11);
+});
+await test("the desk: eight lines or more for every main event, none with an exclamation mark or an off-limits word", () => {
+  const banned = /\b(card|deck|poker|hand|blind|ante|chip|mult|flush|jackpot|bet|odds|gamble|casino|cash-out|graduat|download|reward|official|partner|sponsor|prize|earn|guarantee|spin|roll|loot|payout|rarity)/i;
+  const main = ["goalTap", "goalAngled", "goalOneTouch", "goalTeam", "goalLong", "goalBank", "goalPower", "goalUp", "goalDown", "blocked", "blockedKeeper", "tight", "kept", "saved", "wide", "conceded", "chain", "chainLong", "firstUp", "touches", "dead", "kickoff", "won", "draw", "lost", "final", "rule", "haunted", "ghost"];
+  for (const k of main) assert.ok((DESK_POOLS[k] || []).length >= 8, k + " has " + (DESK_POOLS[k] || []).length);
+  const ruleLines = Object.keys(DESK_POOLS).filter((k) => k.startsWith("rule_")).flatMap((k) => DESK_POOLS[k]);
+  assert.ok(ruleLines.length >= 8 && BOSSES.every((b) => DESK_POOLS["rule_" + b.id]));
+  const evLines = Object.keys(DESK_POOLS).filter((k) => k.startsWith("event_")).flatMap((k) => DESK_POOLS[k]);
+  assert.ok(evLines.length >= 8 && TABLE_EVENT_IDS.every((id) => DESK_POOLS["event_" + id]));
+  // a chant opens with the club's own name (2.1's names, which old trails keep); the words after it are new copy
+  for (const l of [...DESK_LINES, ...Object.entries(CLUB_ID).map(([name, c]) => c.chant.slice(name.length))]) {
+    assert.ok(!l.includes("!"), l);
+    assert.ok(!banned.test(l), l);
+  }
+  // filled, over real runs in every mode: short, no stray braces, the same line for the same moment
+  let said = 0;
+  for (const { run, log } of [...R3LOGS, botLog(EDT, "RVCE-0001", "haunt"), botLog(DED, DPIN.seed, "daily")])
+    log.forEach((x, n) =>
+      x.evs.forEach((ev) => {
+        const a = lineFor(ev, { run, n });
+        assert.equal(a, lineFor(ev, { run, n }));
+        if (!a) return;
+        said++;
+        assert.ok(!/[{}]/.test(a), a);
+        assert.ok(a.length <= 72, a);
+        assert.ok(!a.includes("!"), a);
+      }),
+    );
+  assert.ok(said > 100, "the desk said " + said);
+});
+await test("the programme: how it ended, launch of the season, rival of the season, three desk lines", () => {
+  for (const { run } of R3LOGS) {
+    const p = recapOf(run);
+    assert.ok(["won", "final", "cup", "table", "out"].includes(p.end), p.end);
+    assert.equal(p.lines.length, run.s.best ? 3 : 2);
+    for (const l of p.lines) assert.ok(l.length <= 72 && !/[{}!]/.test(l), l);
+    if (p.launch) assert.equal(p.launch.goals, Math.max(...Object.values(run.s.scorers)));
+    assert.ok(p.rival && typeof p.rival.club === "string");
+    assert.ok(p.table && p.table.pos >= 1 && p.table.pos <= 8);
+    assert.deepEqual(recapOf(run), p);
+  }
+  const story = R3LOGS[0].run.s.story;
+  assert.ok(story.some((l) => typeof l.args.scorers === "string"), "the story names its scorers");
+});
+await test("traits read only a launch's numbers, pump included", () => {
+  const base: Launch = { ...EDT.pool[0][0], g: false, k: 5, h: 3, x: 0, a: 1000 };
+  const at = 1000 + 24 * 3600;
+  assert.deepEqual(traitsOf({ ...base, x: 2000 }, at), ["pump"]);
+  assert.ok(TRAIT.pump.name.length > 0);
 });
 
 if (process.argv.includes("--live")) {

@@ -1,20 +1,23 @@
 // A plain, decent player: looks one touch ahead, expects the rival's reaction, and blocks what it can.
 // Used for balance sims, tests, QA and the in-game "Show me a good touch" button.
 import type { Ball, Dir, Run } from "./engine.js";
-import { laneOf, slotOf, trace } from "./engine.js";
+import { laneOf, slotOf } from "./engine.js";
 import { COACH, DRILLS, MAX_COACHES, MAX_PLAYS, PLAY, RODS } from "./content.js";
 
-/** How promising your ball is with `touches` left. */
-function value(run: Run, off: number[][], ball: Ball, touches: number, afterPass: boolean): number {
+/** How promising your ball is with `touches` left (`passes` so far this possession: the build-up). */
+function value(run: Run, off: number[][], ball: Ball, touches: number, afterPass: boolean, passes: number): number {
   if (touches <= 0) return -300;
-  const ks = run.myKicks(off, ball, touches, afterPass);
+  const ks = run.myKicks(off, ball, touches, afterPass, passes);
   const shots = ks.filter((k) => k.open && k.kick.r === 4).length;
   if (shots) return 1000 + 50 * shots;
   let v = 0;
   for (const k of ks) {
     if (!k.open || k.kick.r === 4) continue;
     let pv = 200 + 40 * (k.kick.r - ball.rod);
-    if (touches >= 2 && run.myKicks(off, { side: 0, rod: k.kick.r, fig: k.tr.to }, touches - 1, true).some((x) => x.open && x.kick.r === 4)) pv += 500;
+    if (touches >= 2 && run.myKicks(off, { side: 0, rod: k.kick.r, fig: k.tr.to }, touches - 1, true, passes + 1).some((x) => x.open && x.kick.r === 4)) {
+      // rules 3: a Pace receiver shoots before they react, so that shot is as good as taken
+      pv += run.firstTime(slotOf(k.kick.r, k.tr.to)) ? 650 : 500;
+    }
     v = Math.max(v, pv);
   }
   if (touches >= 2) {
@@ -22,7 +25,7 @@ function value(run: Run, off: number[][], ball: Ball, touches: number, afterPass
       if (!run.canMove(0, ball.rod, d, off)) continue;
       const o2 = [off[0].slice(), off[1]];
       o2[0][ball.rod] += d;
-      if (run.myKicks(o2, ball, touches - 1, false).some((x) => x.open && x.kick.r === 4)) v = Math.max(v, 300);
+      if (run.myKicks(o2, ball, touches - 1, false, passes).some((x) => x.open && x.kick.r === 4)) v = Math.max(v, 300);
     }
   }
   return v + 10 * ks.filter((k) => k.kick.r === 4).length + 3 * ball.rod;
@@ -41,39 +44,50 @@ interface Node {
   ball: Ball;
   touches: number;
   afterPass: boolean;
+  passes: number;
   terminal: number | null;
 }
 
 /** Every touch from a position, each with where the rival's rods end up after it reacts. */
-function expand(run: Run, off: number[][], ball: Ball, touches: number, afterPass: boolean, dummy: boolean): Node[] {
+function expand(run: Run, off: number[][], ball: Ball, touches: number, afterPass: boolean, dummy: boolean, passes: number): Node[] {
   const m = run.m;
   const jam = m.boss === "jam";
   const react = (o: number[][], b: Ball) => (dummy ? o : run.reactTo(o, b).off);
   const out: Node[] = [];
-  for (const k of run.myKicks(off, ball, touches, afterPass)) {
+  for (const k of run.myKicks(off, ball, touches, afterPass, passes)) {
     const pick: Pick = { t: "kick", r: k.kick.r, d: k.kick.d, score: 0 };
     if (k.kick.r === 4) {
+      const slot = slotOf(ball.rod, ball.fig);
+      // rules 3: a Grip figure keeps its blocked shot once a possession; a long shot at it is then a free look
+      if (!k.open && run.gripKeepsShot(slot) && touches > 1) {
+        out.push({ pick, off: react(off, ball), ball, touches: touches - 1, afterPass: false, passes, terminal: null });
+        continue;
+      }
       // a blocked shot still ends the possession at their figure, far from your goal
-      out.push({ pick, off, ball, touches, afterPass, terminal: k.open ? 100000 + k.beaten * 10 + k.tr.bounces : -350 });
+      out.push({ pick, off, ball, touches, afterPass, passes, terminal: k.open ? 100000 + k.beaten * 10 + k.tr.bounces + 20 * Math.min(passes, 3) : -350 });
       continue;
     }
     const left = touches - 1;
     let open = k.open;
     let off2 = off;
-    if (jam) {
+    const queued = jam && !run.firstTime(slotOf(k.kick.r, k.tr.to));
+    if (queued) {
       off2 = react(off, ball);
       const lane = laneOf(ball.rod, off2[0][ball.rod], ball.fig);
-      open = m.longball || trace(off2, run.pulledArr(), 0, ball.rod, lane, k.kick, 0).blockers.length === 0;
+      const tr = run.traceAt(off2, 0, ball.rod, lane, k.kick, 0);
+      open = tr.legal && (m.longball || tr.blockers.length === 0);
     }
     if (!open) {
       const slot = slotOf(ball.rod, ball.fig);
       const keeps = (run.stats(slot).grip && !m.gripUsed.includes(slot)) || m.saves < run.s.drills.pass;
-      if (keeps) out.push({ pick, off: react(off, ball), ball, touches: left, afterPass: false, terminal: left <= 0 ? -300 : null });
-      else out.push({ pick, off, ball, touches: left, afterPass, terminal: -400 });
+      if (keeps) out.push({ pick, off: react(off, ball), ball, touches: left, afterPass: false, passes, terminal: left <= 0 ? -300 : null });
+      else out.push({ pick, off, ball, touches: left, afterPass, passes, terminal: -400 });
       continue;
     }
     const nb: Ball = { side: 0, rod: k.kick.r, fig: k.tr.to };
-    out.push({ pick, off: jam ? off2 : react(off, nb), ball: nb, touches: left, afterPass: true, terminal: left <= 0 ? -300 : null });
+    // rules 3: a Pace receiver takes it first time, so they don't react to the pass
+    const quick = !queued && run.firstTime(slotOf(nb.rod, nb.fig));
+    out.push({ pick, off: queued ? off2 : quick ? off : react(off, nb), ball: nb, touches: left, afterPass: true, passes: passes + 1, terminal: left <= 0 ? -300 : null });
   }
   for (let r = 0; r < 4; r++) {
     for (const d of [-1, 1] as Dir[]) {
@@ -90,7 +104,7 @@ function expand(run: Run, off: number[][], ball: Ball, touches: number, afterPas
         }
       }
       const left = touches - cost;
-      out.push({ pick: { t: "slide", r, d, score: 0 }, off: left <= 0 ? o2 : react(o2, ball), ball, touches: left, afterPass: false, terminal: left <= 0 ? -300 : null });
+      out.push({ pick: { t: "slide", r, d, score: 0 }, off: left <= 0 ? o2 : react(o2, ball), ball, touches: left, afterPass: false, passes, terminal: left <= 0 ? -300 : null });
     }
   }
   return out;
@@ -100,14 +114,14 @@ function expand(run: Run, off: number[][], ball: Ball, touches: number, afterPas
 export function bestTouch(run: Run): Pick | null {
   const m = run.m;
   let best: Pick | null = null;
-  for (const n of expand(run, m.off, m.ball, m.touches, m.afterPass, m.dummy > 0)) {
+  for (const n of expand(run, m.off, m.ball, m.touches, m.afterPass, m.dummy > 0, m.passes)) {
     let score: number;
     if (n.terminal !== null) score = n.terminal;
     else {
-      let deep = value(run, n.off, n.ball, n.touches, n.afterPass);
+      let deep = value(run, n.off, n.ball, n.touches, n.afterPass, n.passes);
       if (n.touches >= 1) {
-        for (const n2 of expand(run, n.off, n.ball, n.touches, n.afterPass, m.dummy > 1)) {
-          const v2 = n2.terminal !== null ? (n2.terminal > 0 ? 1500 : n2.terminal) : value(run, n2.off, n2.ball, n2.touches, n2.afterPass);
+        for (const n2 of expand(run, n.off, n.ball, n.touches, n.afterPass, m.dummy > 1, n.passes)) {
+          const v2 = n2.terminal !== null ? (n2.terminal > 0 ? 1500 : n2.terminal) : value(run, n2.off, n2.ball, n2.touches, n2.afterPass, n2.passes);
           deep = Math.max(deep, v2 * 0.9);
         }
       }
@@ -122,9 +136,8 @@ export function bestTouch(run: Run): Pick | null {
 /** The block slide this player would make now, or null to let them play. */
 export function bestBlock(run: Run): { r: number; d: Dir } | null {
   const m = run.m;
-  const read = run.ai().read;
   const outcome = (off: number[][]) => {
-    const plan = read ? run.aiChoose(off) : m.intent;
+    const plan = run.aiPlan(off);
     if (!plan || plan.kind === "slide") return 5;
     const k = run.theirKicks(off).find((x) => x.kick.r === plan.kick.r && x.kick.d === plan.kick.d);
     if (!k || !k.open) return -100;

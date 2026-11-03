@@ -1,15 +1,16 @@
-// GET /api/felt?id=<id>            -> 1200x630 PNG challenge image for X (CDN-cached for good)
+// GET /api/felt?id=<id>            -> 1200x630 PNG challenge image for X (CDN-cached for good). Since 3.0 it also
+//                                     draws the best goal's move, played again from the posted trail: nothing new is stored
 // GET /api/felt?id=<id>&view=page  -> /c/<id>: tiny page whose og:image is that image, then into the game
 import { readFile } from "node:fs/promises";
 import { Resvg } from "@resvg/resvg-js";
 import satori from "satori";
 import sharp from "sharp";
-import { FIXTURE_NAME, ROUNDS } from "../shared/content.js";
+import { FIXTURE_NAME, MOUTH, ROUNDS, ROUNDS_R3 } from "../shared/content.js";
 import { dayLabel } from "../shared/daily.js";
-import type { FigInfo } from "../shared/engine.js";
+import { parseTrail, rerun, type FigInfo, type Step } from "../shared/engine.js";
 import { getResult, type Result } from "./_runs.js";
 import { getEdition } from "./_cut.js";
-import { buildSquad, ghostSquad, type Launch } from "../shared/data.js";
+import { buildSquad, ghostSquad, type Edition, type Launch } from "../shared/data.js";
 
 const SITE = "https://kickerhq.vercel.app";
 const C = {
@@ -91,6 +92,95 @@ function houseMark(size: number): Node {
   );
 }
 
+// ------------------------------------------------------------ the best goal's move, drawn on the felt (3.0)
+/** The move of a posted season's best goal, played again from its trail (the post already stores it; nothing new is kept). */
+interface Move {
+  path: Step[][];
+  scorer: FigInfo | null;
+}
+async function moveOf(rec: Result, ed: Edition | null): Promise<Move | null> {
+  if (!ed || !rec.best) return null;
+  try {
+    const t = parseTrail(rec.trail);
+    const run = rerun(ed, rec.seed, t.actions, t.mode, t.rules);
+    const b = run.s.best;
+    if (!b || !b.path || !b.path.length) return null;
+    const l = run.s.squad[b.scorer];
+    return { path: b.path.filter((s) => s.length > 1), scorer: l ? { t: l.t, s: l.s, c: l.c, u: l.u } : null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The move as an SVG picture: the felt seen from above (your goal left, theirs right), the passes dashed in cream,
+ * the shot in gold, a ring where the ball came off a wall. Returns where the move ends, for the scorer's head.
+ */
+function moveSvg(path: Step[][], W: number, H: number, haunt: boolean): { uri: string; end: { x: number; y: number } | null } {
+  const pad = 22;
+  const cx = (x: number) => pad + ((x + 0.5) * (W - 2 * pad)) / 10;
+  const cy = (l: number) => pad + ((l + 0.5) * (H - 2 * pad)) / 10;
+  const felt = haunt ? "#0a1d22" : C.felt;
+  const line = haunt ? "#cfe3ee" : C.cream;
+  const gold = haunt ? "#ffb35c" : C.gold;
+  const laneH = (H - 2 * pad) / 10;
+  const out: string[] = [];
+  out.push(`<rect x="0" y="0" width="${W}" height="${H}" rx="18" fill="${haunt ? "#1c0b18" : "#4a1a3a"}"/>`);
+  out.push(`<rect x="${pad / 2}" y="${pad / 2}" width="${W - pad}" height="${H - pad}" rx="10" fill="${felt}"/>`);
+  for (let i = 0; i < 5; i++) out.push(`<rect x="${pad / 2 + ((W - pad) / 5) * i}" y="${pad / 2}" width="${(W - pad) / 10}" height="${H - pad}" fill="#ffffff" fill-opacity="0.03"/>`);
+  out.push(`<line x1="${W / 2}" y1="${pad / 2}" x2="${W / 2}" y2="${H - pad / 2}" stroke="${line}" stroke-opacity="0.2" stroke-width="3"/>`);
+  out.push(`<circle cx="${W / 2}" cy="${H / 2}" r="${H * 0.14}" fill="none" stroke="${line}" stroke-opacity="0.2" stroke-width="3"/>`);
+  for (const x of [1, 2, 4, 6, 8, 7, 5, 3]) out.push(`<line x1="${cx(x)}" y1="${pad / 2}" x2="${cx(x)}" y2="${H - pad / 2}" stroke="${C.brass}" stroke-opacity="0.22" stroke-width="4"/>`);
+  out.push(`<rect x="${pad / 2 - 8}" y="${cy(MOUTH[0]) - laneH / 2}" width="10" height="${laneH * (MOUTH[1] - MOUTH[0] + 1)}" fill="${line}" fill-opacity="0.5"/>`);
+  out.push(`<rect x="${W - pad / 2 - 2}" y="${cy(MOUTH[0]) - laneH / 2}" width="10" height="${laneH * (MOUTH[1] - MOUTH[0] + 1)}" fill="${gold}"/>`);
+  let end: { x: number; y: number } | null = null;
+  for (let i = 0; i < path.length; i++) {
+    const seg = path[i];
+    const shot = i === path.length - 1;
+    const d = seg.map((p, j) => `${j ? "L" : "M"}${cx(p.x).toFixed(1)} ${cy(p.lane).toFixed(1)}`).join(" ");
+    out.push(`<path d="${d}" fill="none" stroke="${C.ink}" stroke-opacity="0.75" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>`);
+    out.push(`<path d="${d}" fill="none" stroke="${shot ? gold : line}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"${shot ? "" : ' stroke-dasharray="12 9"'}/>`);
+    out.push(`<circle cx="${cx(seg[0].x)}" cy="${cy(seg[0].lane)}" r="8" fill="${line}" stroke="${C.ink}" stroke-width="3"/>`);
+    for (let k = 1; k < seg.length - 1; k++) {
+      const a = seg[k - 1];
+      const b = seg[k];
+      const c = seg[k + 1];
+      const turn = (b.lane - a.lane) * (c.lane - b.lane) < 0;
+      const wall = (b.lane === 0 || b.lane === 9) && a.lane !== b.lane;
+      if (turn || wall) out.push(`<circle cx="${cx(b.x)}" cy="${cy(b.lane)}" r="12" fill="none" stroke="${gold}" stroke-width="4"/>`);
+    }
+    const last = seg[seg.length - 1];
+    end = { x: cx(last.x), y: cy(last.lane) };
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${out.join("")}</svg>`;
+  return { uri: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, end };
+}
+
+/** The move on its felt, with the scorer's head waiting in the net and a small label. */
+function movePanel(mv: Move | null, pic: string | null, style: string, box: { right: number; top: number; w: number; h: number }, haunt: boolean): Node | null {
+  if (!mv || !mv.path.length) return null;
+  const { uri, end } = moveSvg(mv.path, box.w, box.h, haunt);
+  const R = 30;
+  const ring = haunt ? "#ffb35c" : C.gold;
+  return h(
+    "div",
+    { position: "absolute", right: box.right, top: box.top, width: box.w, height: box.h },
+    img(uri, { position: "absolute", left: 0, top: 0, width: box.w, height: box.h }),
+    end
+      ? h(
+          "div",
+          { position: "absolute", left: end.x - R, top: end.y - R, width: R * 2, height: R * 2, borderRadius: R, background: C.ink, border: `5px solid ${ring}`, alignItems: "center", justifyContent: "center" },
+          pic ? img(pic, { width: R * 2 - 14, height: R * 2 - 14, borderRadius: R }) : null,
+        )
+      : null,
+    h(
+      "div",
+      { position: "absolute", left: 18, top: -18, background: C.ink, border: `3px solid ${ring}`, borderRadius: 8, padding: "2px 12px", fontSize: 22, color: ring },
+      `The move · ${style}${mv.scorer ? ` · $${mv.scorer.s.slice(0, 8)}` : ""}`,
+    ),
+  );
+}
+
 const isNew = (rec: unknown): rec is Result => !!rec && (rec as { v?: number }).v === 2;
 
 /** "Daily Match · Nov 1 · 2,140" */
@@ -111,7 +201,7 @@ function frame(...children: (Node | null)[]): Node {
     h("div", { position: "absolute", left: -200, top: 400, width: 1700, height: 110, background: C.teal, transform: "rotate(-10deg)", opacity: 0.85 }),
     h("div", { position: "absolute", left: -200, top: 530, width: 1700, height: 36, background: C.pink, transform: "rotate(-10deg)", opacity: 0.45 }),
     ...children.filter((c): c is Node => !!c),
-    h("div", { position: "absolute", right: 64, bottom: 36, fontSize: 26, color: C.cream }, "kickerhq.vercel.app"),
+    h("div", { position: "absolute", left: 64, bottom: 30, fontSize: 26, color: C.cream }, "kickerhq.vercel.app"),
   );
 }
 
@@ -145,7 +235,10 @@ async function hauntPng(rec: Result): Promise<Node> {
   const figs = (rec.best?.figs || []).slice(0, 5);
   const ed = await getEdition(rec.edition);
   const ghosts = ed ? ghostSquad(ed, rec.seed, buildSquad(ed, rec.seed), 1, Math.min(2, rec.fixture)).slice(8, 11) : [];
-  const [pics, gpics] = await Promise.all([Promise.all(figs.map((f) => art(f.c))), Promise.all(ghosts.map((g) => art(g.c)))]);
+  const mv = await moveOf(rec, ed);
+  const [pics, gpics, spic] = await Promise.all([Promise.all(figs.map((f) => art(f.c))), Promise.all(ghosts.map((g) => art(g.c))), mv?.scorer ? art(mv.scorer.c) : Promise.resolve(null)]);
+  // with the move to draw, the ghosts, the figures and the felt each move up to make room for it
+  const top = mv ? { ghosts: 14, gsize: 64, felt: 112, rod: 196, figs: 140 } : { ghosts: 40, gsize: 86, felt: 200, rod: 296, figs: 237 };
   const reached = rec.won ? "Beat all three ghost clubs" : `Won ${rec.cleared} of 3 ghost matches`;
   return h(
     "div",
@@ -185,20 +278,36 @@ async function hauntPng(rec: Result): Promise<Node> {
         : null,
     ),
     // the ghost club hangs back over the felt
-    h("div", { position: "absolute", right: 40, top: 40, alignItems: "flex-start", justifyContent: "flex-end", width: 520 }, ...ghosts.map((g, i) => ghostFig(g, gpics[i], 86))),
-    h("div", { position: "absolute", right: 30, top: 200, width: 620, height: 270, background: "#071a1e", borderRadius: 26, border: "10px solid #1c0b18" }),
-    h("div", { position: "absolute", right: 0, top: 296, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
-    h("div", { position: "absolute", right: 40, top: 237, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
-    // the pumpkin ball, with a short ember trail
-    h("div", { position: "absolute", right: 80, top: 466, width: 120, height: 10, background: "#ff7a1c", opacity: 0.35, borderRadius: 5 }),
-    h("div", { position: "absolute", right: 150, top: 470, width: 60, height: 6, background: "#ffb35c", opacity: 0.4, borderRadius: 3 }),
+    h("div", { position: "absolute", right: 40, top: top.ghosts, alignItems: "flex-start", justifyContent: "flex-end", width: 520 }, ...ghosts.map((g, i) => ghostFig(g, gpics[i], top.gsize))),
+    h("div", { position: "absolute", right: 30, top: top.felt, width: 620, height: mv ? 210 : 270, background: "#071a1e", borderRadius: 26, border: "10px solid #1c0b18" }),
+    h("div", { position: "absolute", right: 0, top: top.rod, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
+    h("div", { position: "absolute", right: 40, top: top.figs, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
+    mv
+      ? movePanel(mv, spic, rec.best?.style || "", { right: 30, top: 352, w: 620, h: 236 }, true)
+      : h("div", { position: "absolute", right: 80, top: 466, width: 120, height: 10, background: "#ff7a1c", opacity: 0.35, borderRadius: 5 }),
+    // the pumpkin ball
     h(
       "div",
-      { position: "absolute", right: 32, top: 444, width: 58, height: 52, borderRadius: 29, background: "radial-gradient(circle at 35% 35%, #ffb35c, #f07a12 60%, #a84a06)", border: `4px solid ${C.ink}` },
+      { position: "absolute", right: mv ? 44 : 32, top: mv ? 326 : 444, width: 58, height: 52, borderRadius: 29, background: "radial-gradient(circle at 35% 35%, #ffb35c, #f07a12 60%, #a84a06)", border: `4px solid ${C.ink}` },
       h("div", { position: "absolute", left: 23, top: -14, width: 7, height: 13, background: "#3d7a2a" }),
     ),
-    h("div", { position: "absolute", right: 64, bottom: 30, fontSize: 26, color: "#cfe3ee" }, "kickerhq.vercel.app"),
+    h("div", { position: "absolute", left: 64, bottom: 30, fontSize: 26, color: "#cfe3ee" }, "kickerhq.vercel.app"),
   );
+}
+
+/** How far a posted run got, in the words of the rules it was played under. */
+function reachedOf(rec: Result): string {
+  let rules = 2;
+  try {
+    rules = parseTrail(rec.trail).rules;
+  } catch {
+    /* a legacy trail */
+  }
+  if (rec.mode === "daily") return rec.won ? "Won the match day" : `Out in fixture ${rec.fixture + 1} of 3`;
+  if (rules < 3) return rec.won ? `Won all ${ROUNDS} rounds` : `Out in round ${rec.round} · ${FIXTURE_NAME[rec.fixture] || ""}`;
+  if (rec.won) return "Won the final";
+  if (rec.fixture === 2) return rec.round >= ROUNDS_R3 ? "Lost the final" : `Out in round ${rec.round} · Cup tie`;
+  return `Out on the table in round ${rec.round}`;
 }
 
 async function imagePng(rec: Result | null): Promise<Buffer> {
@@ -217,8 +326,10 @@ async function imagePng(rec: Result | null): Promise<Buffer> {
     );
   } else {
     const figs = (rec.best?.figs || []).slice(0, 5);
-    const pics = await Promise.all(figs.map((f) => art(f.c)));
-    const reached = rec.won ? `Won all ${ROUNDS} rounds` : `Out in round ${rec.round} · ${FIXTURE_NAME[rec.fixture] || ""}`;
+    const mv = await moveOf(rec, await getEdition(rec.edition));
+    const [pics, spic] = await Promise.all([Promise.all(figs.map((f) => art(f.c))), mv?.scorer ? art(mv.scorer.c) : Promise.resolve(null)]);
+    const top = mv ? { felt: 62, rod: 146, figs: 88 } : { felt: 160, rod: 260, figs: 201 };
+    const reached = reachedOf(rec);
     tree = frame(
       h(
         "div",
@@ -246,9 +357,10 @@ async function imagePng(rec: Result | null): Promise<Buffer> {
           : null,
       ),
       // the five figures of the best goal on a brass rod, over a strip of felt
-      h("div", { position: "absolute", right: 30, top: 160, width: 620, height: 280, background: C.felt, borderRadius: 26, border: `10px solid #4a1a3a` }),
-      h("div", { position: "absolute", right: 0, top: 260, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
-      h("div", { position: "absolute", right: 40, top: 201, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
+      h("div", { position: "absolute", right: 30, top: top.felt, width: 620, height: mv ? 226 : 280, background: C.felt, borderRadius: 26, border: `10px solid #4a1a3a` }),
+      h("div", { position: "absolute", right: 0, top: top.rod, width: 680, height: 14, background: C.brass, borderRadius: 7 }),
+      h("div", { position: "absolute", right: 40, top: top.figs, width: 600, alignItems: "flex-start", justifyContent: "center" }, ...figs.map((f, i) => figure(f, pics[i]))),
+      movePanel(mv, spic, rec.best?.style || "", { right: 30, top: 340, w: 620, h: 240 }, false),
     );
   }
   const svg = await satori(tree as unknown as Parameters<typeof satori>[0], { width: 1200, height: 630, fonts: await loadFonts() });

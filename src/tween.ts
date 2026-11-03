@@ -30,6 +30,20 @@ interface Job {
 let jobs: Job[] = [];
 let now = 0;
 let speed = 1;
+/** Slow motion for the goal moment: the animation clock runs at this rate (1 = normal). */
+let scale = 1;
+/** Hit-stop: the animation clock stands still until this much real time has passed. */
+let stopLeft = 0;
+
+/** Sets the animation clock's rate: 0.35 for the last steps of a goal, 1 again after. Reduced motion ignores it. */
+export function setTimeScale(k: number) {
+  scale = reduced() ? 1 : Math.max(0.05, k);
+}
+/** Freezes every tween for `ms` of real time: the weight of a contact. Nothing under reduced motion. */
+export function hitStop(ms: number) {
+  if (reduced()) return;
+  stopLeft = Math.max(stopLeft, ms);
+}
 
 export function setSpeed(x: number) {
   speed = x;
@@ -37,7 +51,11 @@ export function setSpeed(x: number) {
 
 export function attach(ticker: Ticker) {
   ticker.add((tk) => {
-    now += tk.deltaMS;
+    if (stopLeft > 0) {
+      stopLeft -= tk.deltaMS;
+      return;
+    }
+    now += tk.deltaMS * scale;
     const live = jobs;
     jobs = [];
     for (const j of live) {

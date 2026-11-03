@@ -1,5 +1,58 @@
 # Changelog
 
+## 3.0.0 · Matchday (2026-11-03)
+
+### The season (rules 3)
+- A season is seven rounds: two league matches and a cup tie each, 21 matches.
+- An eight-club league, you and seven: a double round robin over 14 matchdays, three points a win, one a draw. Every club has a seeded form, and the other results of each matchday are played out from the seed.
+- A league loss no longer ends the season; the table does, once the top two are out of reach or you finish below second.
+- A cup tie against a boss club has to be won. In the top two when it comes round, it is a home tie: +1 touch on your first ball.
+- The top two meet in the final under the Closing Bell's rule; top of the league gets the extra touch.
+- Fans: 3 a league win, 4 a cup tie, 1 a league draw, plus goals.
+- Old trails still replay under the 2.1 rules; new runs carry the `R3` rules token, and the server refuses a token it does not know.
+
+### On the table (rules 3)
+- Tight lanes: a shot into a lane beside their keeper meets the keeper's reach as one more blocker. A one-touch shot straight off a pass, or a shot off a side wall, beats it for free. Amber disc, a glove when it is saved, "past the glove" when it goes in.
+- Pace plays: a pass to a Pace figure gets no reaction, so it shoots first time (and skips the Mempool Jam queue).
+- Grip plays: on their ball a Grip figure in defence or midfield is a wide body, a Grip keeper reaches both sides, and a Grip block that wins the ball back is worth a touch. The covered cells show on the felt.
+- Build-up: two passes put +1 Power on the shot, and a goal off two or more is a Team move.
+- Seeded kickoffs: each club opens from one of its style's formations.
+- Table events, one per league match: Volatile, Thin book (its sticky lane drawn through midfield), Green candle, Halt on the half.
+- Their own Power launches shoot through one more blocker; in the final and on the Haunted table, all of them do. The rival gets sharper a step at a time and only half-reads you before it reads you fully.
+- Trading Halt thaws at the first goal: the tape comes off the rod.
+- Defence turns with nothing to block play themselves; you are only asked to defend a threat.
+
+### The title
+- Three plays up front: **New season** (or Continue season), **Daily match day** and **Haunted**. Everything else sits in one row: How to play, Hall of goals, Your table, Transfer list, More.
+- The five launches on the title rod pass a ball along the line and into the net. Reduced motion keeps them still.
+- Today's transfer list on the wide title is three launches with big heads, one for each stat: furthest up the curve, the busiest, the most held. The full list is one tap away.
+- What's new shows only to returning players; a first visit goes straight to the title.
+
+### Match day
+- Fixture tiles carry each club's kit and crest, its chant, its captain (a real launch from the cut, picked by how the club plays, with a temperament tag) and your record against it, kept on this device.
+- The league table (eight clubs, each club's form, the top-two line) shows after every match and from match day. League tiles carry the matchday; a cup tie in the top two says it is a home tie.
+- Your eleven on four brass rods with their heads; tap one for its launch.
+
+### Full time, the dressing room, the boss
+- Full time is a match report: the score with both crests, the desk's line, your scorers with their launch heads, the goal of the match drawn on the felt, the fans counted in, the next fixture and the league table.
+- The dressing room is a locker wall: coaches in their lockers on Academy, First team or Club legend plates, training kit and set pieces beside them, every description printed, the price on the door. On a phone it is a 2×2 wall.
+- A boss club walks out: the crest slams down, the rule gets its own banner, their captain and their chant come with it.
+- The screens between matches are HTML now, so the type stays sharp and readable on a phone.
+
+### The season ends with a programme
+- A match-day programme: a cover in your kit with the figures of your best goal, the launch of the season, the goal of the season drawn on a mini felt, the rival of the season and three lines from the desk.
+- One Save image, then Challenge link, New season, Title. A name is optional.
+
+### Sharing and the Hall
+- The share image draws the best goal's move under the five figures: a gold line, a ring where it came off a wall, the scorer's head in the net. Seasons and Haunted runs both. The move is played again from the posted trail; nothing new is stored.
+- Hall rows show each goal's move on a mini felt, read once the row scrolls into view.
+
+### Daily match day
+- The Daily Match is one match day under rules 3 (trail token `R3_D`): a friendly, a league match and a boss club, the same for everybody, about five minutes. It goes to the Daily board only. Same daily seed, same streak.
+
+### Copy
+- How to play and What's new cover the 3.0 season, tight lanes, first-time shots, wide bodies, the build-up, table events and the league. README and docs images refreshed.
+
 ## 2.1.0 · Haunted table (2026-11-02)
 
 ### Haunted table, through 6 Nov
