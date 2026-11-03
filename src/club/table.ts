@@ -669,8 +669,10 @@ export class ClubTable {
     const apply = () => {
       for (const side of [0, 1] as SideId[]) for (let r = 0; r < 4; r++) {
         const rv = this.rods[side][r];
-        if (rv) rv.c.y = this.rodY(side, r);
+        if (rv && !rv.c.destroyed) rv.c.y = this.rodY(side, r);
+        if (rv?.c.destroyed) continue;
         for (const f of rv?.figs || []) {
+          if (f.destroyed) continue;
           f.scale.set(1);
           f.rotation = 0;
           f.foot.x = 0;

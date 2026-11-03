@@ -720,7 +720,7 @@ function Match(props: { slot: number | null }) {
       const m = ms[i];
       setMin(m.min);
       table.say(lineFor(m, v.home, v.away, i), m.out === "goal" ? (m.side === 0 ? "up" : "down") : "flat");
-      await table.play(m, { ...v.home, xi: v.state.live.xi[0] }, { ...v.away, xi: v.state.live.xi[1] });
+      await table.play(m, v.home, v.away);
       await new Promise((r) => setTimeout(r, 60));
       if (m.out === "goal") table.crowd(0.6 + club.mood * 0.1, m.side === 0 ? "cheer" : "quiet");
       setScore([m.score[0], m.score[1]]);
@@ -793,6 +793,9 @@ function Match(props: { slot: number | null }) {
         fr.current!.choices.push(i);
         v = friendlyView(fr.current!.choices);
       } else v = await api.decide(props.slot!, i);
+      if (view) {
+        v = { ...v, home: view.home, away: view.away };
+      }
       setView(v);
       table.setXi(0, v.state.live.xi[0]);
       table.setXi(1, v.state.live.xi[1]);
