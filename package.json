@@ -1,14 +1,14 @@
 {
   "name": "kicker",
   "private": true,
-  "version": "3.0.1",
+  "version": "4.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json && vite build",
     "preview": "vite preview",
-    "test": "tsx scripts/test.ts",
+    "test": "tsx scripts/test.ts && tsx scripts/club-test.ts && tsx scripts/club-api-test.ts",
     "vibers": "node scripts/vibers.mjs"
   },
   "dependencies": {

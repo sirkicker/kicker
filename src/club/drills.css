@@ -1,0 +1,655 @@
+/* KICKER Club drills: the wall, the press room, penalties. Wine panels, felt boards, brass rods. */
+.drill {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: linear-gradient(180deg, #2a0f24, #22091c 40%);
+  border: 3px solid var(--edge);
+  border-radius: 18px;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 16px 16px 20px;
+  font-family: var(--font);
+  color: var(--linen);
+  text-align: center;
+}
+.drill h2 {
+  margin: 0 0 4px;
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--money);
+  text-shadow: 2px 2px 0 var(--night);
+}
+.drill-lead {
+  margin: 0 auto 12px;
+  max-width: 520px;
+  font-size: 19px;
+  line-height: 1.15;
+  color: var(--dim);
+}
+.drill-x {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--night);
+  color: var(--dim);
+  font: 30px/1 var(--font);
+  cursor: pointer;
+}
+.drill-x:hover {
+  color: var(--linen);
+}
+.drill-result {
+  margin-top: 14px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+.drill-result p {
+  margin: 0;
+  font-size: 20px;
+  color: var(--dim);
+}
+.drill-result .big-n {
+  font-size: 32px;
+  color: var(--money);
+}
+.drill-result .btn {
+  margin-top: 8px;
+  min-width: 200px;
+}
+
+/* ---------------------------------------------------------- the wall */
+.wall-board {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  aspect-ratio: 1 / 0.86;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 calc(10% - 1px), rgba(255, 241, 220, 0.07) calc(10% - 1px) 10%),
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 9px),
+    radial-gradient(ellipse at 50% 50%, #14494e, #0c3438 75%);
+  border: 10px solid #4a1a3a;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35), 0 6px 0 rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.wall-board::before {
+  /* the halfway line and the box, faint */
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 20%;
+  width: 14%;
+  height: 60%;
+  border: 2px solid rgba(255, 241, 220, 0.18);
+  border-left: 0;
+}
+.wall-board::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid rgba(255, 241, 220, 0.14);
+}
+.wall-goal {
+  position: absolute;
+  left: 0;
+  top: 20%;
+  height: 60%;
+  width: 3.5%;
+  background: repeating-linear-gradient(0deg, rgba(255, 241, 220, 0.25) 0 1px, #08030a 1px 6px);
+  border-right: 3px solid var(--linen);
+}
+.wall-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+.wall-lines .shot {
+  stroke: #ff5a4f;
+  stroke-width: 3;
+  stroke-dasharray: 8 6;
+  stroke-linecap: round;
+  animation: shotflow 1s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(255, 90, 79, 0.6));
+}
+.wall-lines .shot.stopped {
+  stroke: var(--money);
+  stroke-dasharray: none;
+  animation: none;
+  filter: drop-shadow(0 0 5px rgba(255, 194, 61, 0.8));
+}
+.wall-lines .shot.through {
+  stroke-width: 4;
+  animation: shotflow 0.4s linear infinite;
+}
+@keyframes shotflow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+.wall-rod {
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  width: 10px;
+  margin-left: -5px;
+  background: linear-gradient(90deg, #f2d98c, #c9a24a 45%, #7a5a1c);
+  box-shadow: 2px 0 3px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+.wall-rod.them {
+  opacity: 0.85;
+}
+.wall-fig,
+.wall-att {
+  position: absolute;
+  left: 50%;
+  translate: -50% -50%;
+  transition: top 0.18s ease-out;
+}
+.wall-fig::before {
+  /* shoulders across the rod, in your kit */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 46px;
+  translate: -50% -50%;
+  background: linear-gradient(90deg, var(--kithi) 0 30%, var(--kit) 30%);
+  border: 3px solid var(--night);
+  border-radius: 8px;
+}
+.wall-fig .head,
+.wall-fig .head.blank {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid;
+  background: var(--night);
+  image-rendering: pixelated;
+  object-fit: cover;
+}
+.wall-fig.hit .head {
+  box-shadow: 0 0 0 3px var(--money), 0 0 14px var(--money);
+}
+.wall-att {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff9a8a, #d8336d 60%);
+  border: 3px solid var(--night);
+  box-shadow: -6px 0 0 -2px #ff5a4f;
+}
+.wall-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 14px;
+}
+.rod-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--night);
+  border: 2px solid var(--edge);
+  border-radius: 12px;
+  padding: 6px 8px 6px 12px;
+}
+.rod-ctrl span {
+  font-size: 21px;
+  min-width: 70px;
+  text-align: left;
+}
+.rod-ctrl .btn {
+  width: 52px;
+  min-height: 48px;
+  padding: 0;
+  font-size: 22px;
+}
+.wall-set {
+  flex-basis: 100%;
+  max-width: 340px;
+}
+
+/* ---------------------------------------------------------- the press room */
+.wire-box {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 4px auto 14px;
+  max-width: 620px;
+  background: #2a0f24;
+  border-radius: 10px;
+  border: 3px solid #14060f;
+  box-shadow: inset 0 3px 0 rgba(0, 0, 0, 0.35), 0 4px 0 rgba(0, 0, 0, 0.35);
+  text-align: left;
+  overflow: hidden;
+}
+.wire-box::before,
+.wire-box::after {
+  /* brass collars on the rail */
+  content: "";
+  position: absolute;
+  top: -2px;
+  width: 18px;
+  height: 8px;
+  border-radius: 3px;
+  background: #7a5a1c;
+  border: 2px solid rgba(242, 217, 140, 0.6);
+}
+.wire-box::before {
+  left: 24%;
+}
+.wire-box::after {
+  right: 12%;
+}
+.wire-tag {
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+  background: var(--money);
+  color: var(--night);
+  font-size: 22px;
+  letter-spacing: 0.1em;
+}
+.wire-q {
+  padding: 12px 14px;
+  font-size: 23px;
+  line-height: 1.12;
+  color: #7fe3f5;
+  text-shadow: 0 0 6px rgba(39, 196, 232, 0.45);
+  animation: wirein 0.5s ease-out both;
+}
+@keyframes wirein {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.press-answers {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.btn.press-a {
+  display: grid;
+  justify-items: start;
+  justify-content: stretch;
+  width: 100%;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 16px;
+  background: #4a1a3a;
+  border: 2px solid var(--edge);
+  font-weight: 400;
+}
+.press-a .pa-text {
+  font-size: 22px;
+  line-height: 1.1;
+}
+.press-a .pa-eff {
+  font-size: 17px;
+  color: var(--money);
+}
+.press-stands {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  height: 78px;
+  align-items: flex-end;
+}
+.press-stands img {
+  width: 44px;
+  height: auto;
+  image-rendering: pixelated;
+  animation: cheer 0.7s ease-in-out infinite alternate;
+  animation-delay: calc(var(--i) * 0.09s);
+}
+.press-stands.m1 img {
+  animation-duration: 1.6s;
+}
+.press-stands.m3 img {
+  animation-duration: 0.4s;
+}
+@keyframes cheer {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 0 -12px;
+  }
+}
+.press-said {
+  font-size: 22px !important;
+  color: var(--linen) !important;
+}
+.press-react {
+  color: #7fe3f5 !important;
+}
+
+/* ---------------------------------------------------------- penalties */
+.pen-tally {
+  display: grid;
+  gap: 6px;
+  max-width: 460px;
+  margin: 0 auto 12px;
+}
+.tally {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--night);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+.t-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  border-left: 6px solid;
+  padding-left: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.t-dots {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.t-dots i {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--edge);
+  background: transparent;
+}
+.t-dots i.in {
+  background: var(--good);
+  border-color: var(--good);
+}
+.t-dots i.out {
+  background: var(--bad, #ff5a4f);
+  border-color: #ff5a4f;
+}
+.pen-stage {
+  position: relative;
+  max-width: 520px;
+  margin: 0 auto;
+  padding-bottom: 92px;
+  background: radial-gradient(ellipse at 50% 100%, #14494e, #0c3438 70%);
+  border: 10px solid #4a1a3a;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.pen-goal {
+  position: relative;
+  margin: 18px 6% 0;
+  aspect-ratio: 3 / 1.15;
+  border: 7px solid var(--linen);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.pen-net {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 241, 220, 0.18) 0 1px, transparent 1px 10px),
+    repeating-linear-gradient(90deg, rgba(255, 241, 220, 0.18) 0 1px, transparent 1px 10px),
+    #08030a;
+}
+.pen-zone {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 2px 0;
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-left: 2px dashed rgba(255, 241, 220, 0.12);
+  background: transparent;
+  color: var(--linen);
+  font: 22px var(--font);
+  cursor: pointer;
+  min-height: 44px;
+}
+.pen-zone.z0 {
+  border-left: 0;
+}
+.pen-zone:not(:disabled):hover,
+.pen-zone:not(:disabled):focus-visible {
+  background: rgba(255, 194, 61, 0.18);
+  outline: none;
+}
+.pen-zone:disabled {
+  cursor: default;
+}
+.pen-zone span {
+  background: rgba(26, 8, 22, 0.75);
+  border: 2px solid var(--money);
+  border-radius: 8px;
+  padding: 2px 10px;
+}
+.pen-keeper {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 4px;
+  translate: -50% 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transition: left 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2), rotate 0.35s;
+}
+.pen-keeper .arms {
+  position: absolute;
+  width: 92px;
+  height: 18px;
+  top: 50%;
+  margin-top: -9px;
+  background: linear-gradient(var(--kithi) 0 35%, var(--kit) 35%);
+  border: 3px solid var(--night);
+  border-radius: 9px;
+  z-index: -1;
+}
+.pen-keeper .head {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid;
+  background: var(--night);
+  image-rendering: pixelated;
+}
+.pen-keeper.d0 {
+  left: 17%;
+  rotate: -50deg;
+}
+.pen-keeper.d1 {
+  left: 50%;
+  translate: -50% -20%;
+}
+.pen-keeper.d2 {
+  left: 83%;
+  rotate: 50deg;
+}
+.pen-ball {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: calc(100% + 58px);
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #fff6e6 40%, #e8d6bc);
+  border: 2.5px solid var(--night);
+  transition: left 0.38s ease-out, top 0.38s ease-out, scale 0.38s;
+  pointer-events: none;
+}
+.pen-ball.go {
+  top: 45%;
+  scale: 0.75;
+}
+.pen-ball.go.b0 {
+  left: 17%;
+}
+.pen-ball.go.b2 {
+  left: 83%;
+}
+.pen-ball.stopped {
+  top: 72%;
+}
+.pen-taker {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  translate: -50% 0;
+  pointer-events: none;
+}
+.pen-taker .lfig {
+  animation: none;
+}
+.pen-call {
+  margin-top: 12px;
+  min-height: 116px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 6px;
+}
+.pen-call p {
+  margin: 0;
+  font-size: 20px;
+  color: var(--dim);
+  max-width: 520px;
+}
+.pen-call .pen-h {
+  font-size: 30px;
+  color: var(--linen);
+}
+.pen-call .pen-h.good {
+  color: var(--good);
+}
+.pen-call .pen-h.bad {
+  color: #ff5a4f;
+}
+.pen-call .likes {
+  font-weight: 400;
+  color: var(--money);
+}
+.pen-call .btn {
+  min-width: 220px;
+}
+
+@media (max-width: 480px) {
+  .drill {
+    padding: 12px 10px 16px;
+    border-radius: 14px;
+  }
+  .drill h2 {
+    font-size: 27px;
+    padding: 0 40px;
+    white-space: nowrap;
+  }
+  .drill-lead {
+    font-size: 17px;
+  }
+  .wall-board {
+    border-width: 7px;
+  }
+  .wall-fig .head,
+  .wall-fig .head.blank {
+    width: 28px;
+    height: 28px;
+  }
+  .wall-fig::before {
+    width: 22px;
+    height: 38px;
+  }
+  .wall-att {
+    width: 24px;
+    height: 24px;
+  }
+  .rod-ctrl span {
+    min-width: 60px;
+    font-size: 19px;
+  }
+  .wire-q {
+    font-size: 20px;
+  }
+  .press-a .pa-text {
+    font-size: 20px;
+  }
+  .pen-call .pen-h {
+    font-size: 26px;
+  }
+  .pen-keeper .arms {
+    width: 70px;
+  }
+  .pen-zone {
+    font-size: 18px;
+    padding-top: 5px;
+  }
+  .pen-zone span {
+    padding: 0 6px;
+  }
+  .pen-goal {
+    margin: 14px 4% 0;
+    aspect-ratio: 3 / 1.4;
+  }
+  .t-dots {
+    gap: 4px;
+  }
+  .t-dots i {
+    width: 14px;
+    height: 14px;
+  }
+  .wire-box {
+    flex-direction: column;
+  }
+  .wire-tag {
+    padding: 2px 10px;
+    justify-items: start;
+    font-size: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wall-lines .shot,
+  .press-stands img,
+  .wire-q {
+    animation: none;
+  }
+  .pen-keeper,
+  .pen-ball,
+  .wall-fig {
+    transition: none;
+  }
+}

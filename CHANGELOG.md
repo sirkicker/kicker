@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.0.0 · Club (2026-11-04)
+KICKER is now a manager game. Same felt, same brass, same stands.
+
+### Your club
+- Found a club with a name and a kit. You get 14 live vibe/vibe launches: eleven on the rods, three on the bench.
+- Every launch brings three numbers from its market: curve progress is Power, trades in 24h are Pace, holders are Grip. Each rod reads them its own way. Attack shoots, midfield links, defence stops, the keeper saves.
+- The squad screen: tap two players to swap them, pick a captain, set a tactic. Press beats Hold, Hold beats Counter, Counter beats Press.
+- The scout brings three launches every week. One signing a week.
+
+### The league
+- A league week runs Monday to Sunday, eight clubs to a group. Empty places go to house clubs, marked as such.
+- You play every club in your group once, up to three league matches a day. Whoever plays first hosts, and the other club sees the result in its table.
+- Matches play themselves on the table. You make three calls: at 30', at the hour (a substitution or a tactic answer) and with fifteen left (park it, push, all in).
+- The server keeps the match seed until full time, so no one can look ahead before deciding. At full time the seed is published and the match replays exactly.
+- Friendlies against any recent club cost nothing and count for nothing. A level friendly goes to penalties: read the taker, pick your spot, pick your dive.
+
+### Drills (two a day)
+- **Training:** a ball runs across one rod, faster each time, and you tap to stop it on a figure. Form for that rod in the next league match.
+- **The wall:** slide your keeper and defence to cover three shot lines. Each line covered makes them miss more.
+- **Press room:** one question from the wire, three answers. The stands get louder at home.
+
+### No wallet
+- Your club lives in this browser as a key. **Save key** keeps it, so you can bring the club to another device.
+- The server keeps the club and a hash of the key, nothing else.
+
+### The old table
+- The 3.0 season game stays at `/classic.html`. Old links and posted seasons work as before.
+
 ## 3.0.1 · Easy start (2026-11-03)
 - A gold tag on the table marks a good next touch: SLIDE, PASS, SHOOT, BLOCK or READY. New players see it for their first two matches; after that it comes back when you are stuck for a few seconds, or when you press **What now?** (was "Show me a touch").
 - The possession panel says what to do in plain words: open shot, open pass, or slide a rod to open a lane. On their ball: block the red line, then Ready.

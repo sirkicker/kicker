@@ -40,6 +40,6 @@ export default defineConfig({
   // real React only for the lazily loaded sign-in island (src/para/): no react -> preact/compat alias,
   // and the island is left out of Preact's dev transforms. Everything else imports preact directly.
   plugins: [preact({ reactAliasesEnabled: false, exclude: [/src[\/]para[\/]/, /node_modules/] }), devApi()],
-  build: { target: "es2022", chunkSizeWarningLimit: 1200, sourcemap: false },
+  build: { target: "es2022", chunkSizeWarningLimit: 1200, sourcemap: false, rollupOptions: { input: { main: "index.html", classic: "classic.html" } } },
   ssr: { external: ["@resvg/resvg-js"] },
 });
