@@ -731,6 +731,24 @@ function How() {
   return (
     <Modal title="How to play" wide>
       <div class="how3">
+        <section class="how-lead how-short">
+          <h3>In short</h3>
+          <ol>
+            <li>
+              Press <b>Kick off</b>. First to {GOALS_TO_WIN} goals wins the match.
+            </li>
+            <li>
+              Your ball: tap the <b>gold disc</b> in their goal to shoot, or a <b>ringed figure</b> to pass. No lane yet? Slide a rod with the arrows at
+              its handle.
+            </li>
+            <li>
+              Their ball: slide a rod onto a <b>red line</b> to block it, then press <b>Ready</b>.
+            </li>
+            <li>
+              Stuck? Press <b>What now?</b> and a gold tag marks a good touch.
+            </li>
+          </ol>
+        </section>
         <section class="how-lead">
           <p>
             Turn-based table football. You slide your rods and kick, one touch at a time, and the other side reacts to every touch. Every figure on your rods is
@@ -1883,10 +1901,10 @@ function News() {
 
 /** The first-match walkthrough: four prompts on the real table, each moves on when you do the thing. */
 export const TUT = [
-  "1 of 4 · Slide. Drag one of your rods a lane, or press a button at its handle. They react to every touch.",
-  "2 of 4 · Pass. A ring on one of your figures further up is a pass that gets through. Tap the ringed figure.",
-  "3 of 4 · Shoot. A gold disc in their goal mouth is a shot with a clear lane. Tap it. Red lines are blocked.",
-  "4 of 4 · Their ball. Red lines are shots, amber are passes. Slide a rod into a red lane to block it, then press Ready.",
+  "1 of 4 · Tap what the gold tag marks: it is always a good touch. First to 2 goals wins.",
+  "2 of 4 · Pass: tap a ringed figure. Shoot: tap the gold disc in their goal. The gold tag shows which.",
+  "3 of 4 · Keep following the gold tag. A gold disc in their goal is a shot: tap it to score.",
+  "4 of 4 · Their ball. Red lines are their shots: slide a rod onto one, then press Ready.",
 ];
 function Tutorial() {
   const u = useUi();

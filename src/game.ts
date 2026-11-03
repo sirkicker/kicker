@@ -12,7 +12,7 @@ import { bestBlock, bestTouch, botStep } from "../shared/bot.js";
 import { figureFacts } from "../shared/insight.js";
 import { lineFor } from "../shared/voice.js";
 import { setCrowdBed, setMood, sfx, type Mood } from "./audio.js";
-import { setUi, showTip, toast, ui } from "./store.js";
+import { local, setUi, showTip, toast, ui } from "./store.js";
 import { CoachView, FR, FigureView, ItemView, PH, PW, hslHex, tokenTexture, txt } from "./figures.js";
 import { crtFilter, setSwirlColors, swirlFilter, type FxFilter } from "./fx.js";
 import { BRASS, COL, NUM, TAPE, THEM, cssHex, kitOf } from "./theme.js";
@@ -191,8 +191,16 @@ export class Game {
   bestAtKickoff = 0;
   /** The empty-defence auto press: pending timer. */
   autoTimer = 0;
-  /** Seconds since the last frame, for the frame-driven layers. */
-
+  /** The pointer: a ring and a "Tap" tag on the next good touch. New players always see it, later only when stuck. */
+  point = new Container();
+  pointRing = new Graphics();
+  pointTag = new Container();
+  pointText = txt("", { fontSize: 20, fill: COL.ink });
+  pointAt: { x: number; y: number; below: boolean } | null = null;
+  /** When the player last did something on the table: the pointer comes back after a few idle seconds. */
+  idleAt = 0;
+  /** "What now?" was pressed: the pointer stays on until the next touch. */
+  asked = false;
 
   constructor(
     public app: Application,
@@ -203,8 +211,14 @@ export class Game {
     this.crt = crtFilter();
     this.bg.filters = [this.swirl];
     app.stage.addChild(this.bg, this.root);
-    this.root.addChild(this.hud, this.tbl, this.tapeLayer, this.benchLayer, this.stageLayer, this.tipLayer);
+    this.root.addChild(this.hud, this.tbl, this.tapeLayer, this.point, this.benchLayer, this.stageLayer, this.tipLayer);
     this.tapeLayer.eventMode = "none";
+    this.point.eventMode = "none";
+    this.point.visible = false;
+    const tagBg = new Graphics().roundRect(-56, -19, 112, 38, 10).fill(COL.money).stroke({ width: 3, color: COL.ink });
+    this.pointText.anchor.set(0.5);
+    this.pointTag.addChild(tagBg, this.pointText);
+    this.point.addChild(this.pointRing, this.pointTag);
     this.root.visible = false;
     this.rodLayer.mask = this.rodMask;
     this.dark.texture = lantern();
@@ -300,6 +314,7 @@ export class Game {
         m.g.alpha = 0.55 + 0.35 * Math.sin(this.t * 0.6 + m.ph * 2);
       }
     }
+    this.framePoint(rm);
     // the held ball rides with its figure
     if (!this.ballFree) this.placeBall();
     if (this.dark.visible) this.dark.position.set(this.ball.visible ? this.ball.x : (TX0 + TX1) / 2, this.ball.visible ? this.ball.y : LANE0 + PITCH_H / 2);
@@ -635,7 +650,7 @@ export class Game {
     const bw = port ? 280 : 300;
     this.btnReady = new Button("Ready", bw, port ? 76 : 68, COL.play, () => void this.doHold(), { size: 26 });
     this.btnReady.position.set(port ? L.W / 2 : L.btnX + 160, L.btnY);
-    this.btnHint = new Button("Show me a touch", port ? 260 : 240, port ? 70 : 58, COL.neutral, () => this.hint(), { size: 18 });
+    this.btnHint = new Button("What now?", port ? 260 : 240, port ? 70 : 58, COL.neutral, () => this.hint(), { size: 18 });
     this.btnHint.position.set(port ? L.W / 2 : L.btnX - 160, L.btnY);
     this.hud.addChild(this.btnReady, this.btnHint);
   }
@@ -1077,9 +1092,19 @@ export class Game {
       this.possText.text = "Goal";
       this.touchText.text = "Kick-off next";
     } else if (m && h.mode === "attack" && s.phase === "attack" && !this.hudNow) {
-      this.possText.text = `Your ball · possession ${m.poss[0]} of ${m.limit}`;
+      this.possText.text = `Your ball · ${m.touches} touch${m.touches === 1 ? "" : "es"} left`;
       const free = m.free.reduce((a, b) => a + b, 0) + m.freeAny;
-      const lines = [`${m.touches} touch${m.touches === 1 ? "" : "es"} left${free ? ` · ${free} free slide${free === 1 ? "" : "s"}` : ""}${m.dummy ? ` · they freeze for ${m.dummy}` : ""}`];
+      // what to do, in one plain line: the gold disc, the ringed figure, or a slide to open a lane
+      const ks = run.myKicks();
+      const doNow = ks.some((k) => k.open && k.kick.r === 4)
+        ? "Open shot: tap the gold disc"
+        : ks.some((k) => k.open)
+          ? "Open pass: tap the ringed figure"
+          : "No lane yet: slide a rod";
+      const lines = [doNow];
+      // a phone's panel has room for two lines, and the ghosts need the second
+      if ((free || m.dummy) && !(ghost && this.port))
+        lines.push([free ? `${free} free slide${free === 1 ? "" : "s"}` : "", m.dummy ? `they freeze for ${m.dummy}` : ""].filter(Boolean).join(" · "));
       if (ghost) {
         const mv = run.driftNow();
         const dir = mv ? (mv.d < 0 ? (this.port ? "left" : "up") : this.port ? "right" : "down") : "";
@@ -1102,7 +1127,7 @@ export class Game {
       }
     } else if (m && h.mode === "defend" && s.phase === "defend" && !this.hudNow) {
       this.possText.text = `Their ball · ${m.aiTouches} touch${m.aiTouches === 1 ? "" : "es"} left`;
-      this.touchText.text = `${m.blockSlides} block slide${m.blockSlides === 1 ? "" : "s"} left. Slide into the red lanes, then Ready.`;
+      this.touchText.text = `Red line = their shot. Block it with a rod, then Ready\n${m.blockSlides} block slide${m.blockSlides === 1 ? "" : "s"} left`;
       for (let i = 0; i < m.blockSlides; i++) g.roundRect((i - (m.blockSlides - 1) / 2) * 30 - 10, -10, 20, 20, 4).fill(COL.cyan).stroke({ width: 3, color: COL.ink });
     } else if (this.hudNow && (h.mode === "attack" || h.mode === "defend")) {
       // mid-playback: whose ball it is, the counts settle when the touch is done
@@ -1492,9 +1517,11 @@ export class Game {
       this.ctrlLayer.addChild(cap);
     }
     this.drawGhostMarks();
+    this.pointAt = null;
     if (this.busy) return;
     if (attack) this.drawKicks();
     else this.drawThreats();
+    this.aimPoint();
   }
 
   /** The ghost rules at their handles: the phasing rod's state, and the poltergeist's next drift. */
@@ -1916,6 +1943,7 @@ export class Game {
     this.afterPassBefore = !!run.s.match?.afterPass;
     this.lastSlide = a.t === "slide";
     if (!this.act(a)) return;
+    this.asked = false;
     this.busy = true;
     this.fast = fast;
     this.hudNow = before;
@@ -1944,6 +1972,9 @@ export class Game {
     const run = this.run;
     if (!run) return;
     const ph = run.s.phase;
+    this.idleAt = this.t;
+    // matches played on this device: after two, the pointer only comes when asked for or when the player is stuck
+    if (ph === "over" || ph === "won" || ph === "fulltime") local.set("kk.games", local.get<number>("kk.games", 0) + 1);
     if (ph === "over" || ph === "won") {
       this.syncHud();
       this.hooks.onOver(run);
@@ -3207,6 +3238,7 @@ export class Game {
   hint() {
     const run = this.run;
     if (!run || this.busy) return;
+    this.asked = true;
     if (run.s.phase === "attack") {
       const p = bestTouch(run);
       if (!p) return;
@@ -3223,6 +3255,37 @@ export class Game {
       showTip("hint", "table", b ? `Block: slide your ${RODS[b.r].name.toLowerCase()} ${b.d < 0 ? "up" : "down"}.` : "Nothing to block that helps. Press Ready.", "touch");
       if (b) this.pulseArrow(b.r, b.d);
     }
+  }
+
+  /** Puts the pointer on the coach's next touch. Called whenever the controls are redrawn. */
+  aimPoint() {
+    this.pointAt = null;
+    const c = this.coachTap();
+    if (!c) return;
+    const p = this.root.toLocal({ x: c.x, y: c.y });
+    const a = c.a;
+    const defend = this.run?.s.phase === "defend";
+    this.pointText.text = a.t === "kick" ? (a.r === 4 ? "SHOOT" : "PASS") : a.t === "hold" ? "READY" : defend ? "BLOCK" : "SLIDE";
+    // the tag sits off the side of the target it names, never over the other button of the same handle
+    this.pointAt = { x: p.x, y: p.y, below: a.t === "slide" && a.d === 1 && !this.port };
+    this.pointRing.clear();
+    const r = a.t === "hold" ? 0 : (a.t === "kick" ? FR + 16 : 40) * this.tbl.scale.x;
+    if (r) this.pointRing.circle(0, 0, r).stroke({ width: 5, color: COL.money }).circle(0, 0, r + 7).stroke({ width: 3, color: COL.ink, alpha: 0.6 });
+    this.pointTag.position.set(0, this.pointAt.below ? (r || 30) + 30 : -(r || 30) - 30);
+  }
+  /** Shows the pointer to a new player, to anyone who asked, and to anyone stuck for a few seconds. */
+  framePoint(rm: boolean) {
+    const at = this.pointAt;
+    const run = this.run;
+    const ph = run?.s.phase;
+    const novice = local.get<number>("kk.games", 0) < 2 || ui.tut !== null;
+    const want = !!at && !!run && !this.busy && !this.replaying && (ph === "attack" || ph === "defend") && (novice || this.asked || this.t - this.idleAt > 7);
+    this.point.visible = want;
+    if (!want || !at) return;
+    const k = rm ? 1 : 1 + 0.08 * Math.sin(this.t * 6);
+    this.pointRing.scale.set(k);
+    const bob = rm ? 0 : Math.abs(Math.sin(this.t * 4)) * 8;
+    this.point.position.set(at.x, at.y + (at.below ? bob : -bob));
   }
 
   pulseArrow(r: number, d: Dir) {

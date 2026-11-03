@@ -4811,3 +4811,48 @@ table.lg.mini td {
   left: 0;
   top: 0;
 }
+/* the four-line version of How to play, on top */
+.how-short {
+  background: rgba(255, 196, 61, 0.08);
+  border: 2px solid var(--money);
+  border-radius: 12px;
+  padding: 4px 16px 10px;
+  margin-bottom: 10px;
+}
+.how-short ol {
+  margin: 0;
+  padding-left: 24px;
+  font-size: 20px;
+  line-height: 1.45;
+  color: var(--linen);
+}
+.how-short li + li {
+  margin-top: 4px;
+}
+/* on a phone the walkthrough sits over the club header, never over the rods and their handles */
+@media (max-aspect-ratio: 105/100) {
+  .coach.tut.in-round {
+    top: 6px;
+    bottom: auto;
+    left: 8px;
+    width: calc(100% - 16px);
+    max-height: 22vh;
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+  .coach.tut .row .btn.small {
+    font-size: 13px;
+    padding: 4px 10px;
+  }
+}
+@media (max-aspect-ratio: 105/100) {
+  .coach.tut.in-round {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .coach.tut.in-round p {
+    margin: 0;
+    flex: 1;
+  }
+}

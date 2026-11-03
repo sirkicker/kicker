@@ -114,7 +114,7 @@ async function startRun(seed: string, edition: Edition, trail: Action[] = [], mo
   setUrl();
   save(run);
   if (run.s.phase === "fixture" && run.trail.length === 0)
-    coach(0, "matchday", "Your eleven are live vibe/vibe launches. Curve progress gives a figure Power, trades give Pace, holders give Grip. Press Kick off.");
+    coach(0, "matchday", "Your eleven are live vibe/vibe launches. First to 2 goals wins. Press Kick off, then tap what the gold tag marks.");
 }
 
 async function loadDaily(): Promise<Daily | null> {

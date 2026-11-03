@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.1 · Easy start (2026-11-03)
+- A gold tag on the table marks a good next touch: SLIDE, PASS, SHOOT, BLOCK or READY. New players see it for their first two matches; after that it comes back when you are stuck for a few seconds, or when you press **What now?** (was "Show me a touch").
+- The possession panel says what to do in plain words: open shot, open pass, or slide a rod to open a lane. On their ball: block the red line, then Ready.
+- The first-match walkthrough is shorter and follows the gold tag. On a phone it sits over the club header, clear of the rods and their handles.
+- How to play opens with a four-line version.
+
 ## 3.0.0 · Matchday (2026-11-03)
 
 ### The season (rules 3)
