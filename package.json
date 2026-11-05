@@ -1,15 +1,27 @@
 {
   "name": "kicker",
   "private": true,
-  "version": "4.0.0",
+  "version": "6.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json && vite build",
     "preview": "vite preview",
-    "test": "tsx scripts/test.ts && tsx scripts/club-test.ts && tsx scripts/club-api-test.ts",
-    "vibers": "node scripts/vibers.mjs"
+    "test": "tsx scripts/test.ts && tsx scripts/club-test.ts && tsx scripts/club-api-test.ts && tsx scripts/side-test.ts && tsx scripts/kicker-test.ts && tsx scripts/k52-test.ts && tsx scripts/k6-test.ts",
+    "k6:sheet": "tsx scripts/k6-sheet.ts",
+    "k62:qa": "node scripts/k62-qa.mjs",
+    "k62:pics": "tsx scripts/k62-pics.ts",
+    "k62:gold-qa": "node scripts/k62-gold-qa.mjs",
+    "k62:tints": "tsx scripts/k62-tints.ts",
+    "k6:brand": "tsx scripts/k6-brand.ts",
+    "side:brand": "tsx scripts/side-brand.ts",
+    "side:qa": "node scripts/side-qa.mjs",
+    "kicker:qa": "node scripts/kicker-qa.mjs",
+    "k52:qa": "node scripts/k52-qa.mjs",
+    "kicker:brand": "tsx scripts/kicker-brand.ts",
+    "vibers": "node scripts/vibers.mjs",
+    "kicker:atlas": "node scripts/kicker-atlas.mjs"
   },
   "dependencies": {
     "@getpara/react-sdk": "^3.23.0",

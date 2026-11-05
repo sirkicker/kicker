@@ -6,11 +6,16 @@
   "functions": {
     "api/*.ts": {
       "maxDuration": 30,
-      "includeFiles": "{api/_fonts/**,node_modules/harfbuzzjs/*.wasm}"
+      "includeFiles": "{api/_fonts/**,public/vibers/*.png,node_modules/harfbuzzjs/*.wasm}"
     }
   },
   "rewrites": [
-    { "source": "/c/:id", "destination": "/api/felt?id=:id&view=page" }
+    { "source": "/c/:id", "destination": "/api/felt?id=:id&view=page" },
+    { "source": "/m/:id", "destination": "/api/k6?view=m&id=:id" },
+    { "source": "/k/:no", "destination": "/api/k6?view=k&no=:no" },
+    { "source": "/l/:token", "destination": "/api/k6?view=l&t=:token" },
+    { "source": "/club", "destination": "/club.html" },
+    { "source": "/privacy", "destination": "/privacy.html" }
   ],
   "headers": [
     { "source": "/assets/(.*)", "headers": [{ "key": "cache-control", "value": "public, max-age=31536000, immutable" }] },

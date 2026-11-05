@@ -3,6 +3,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Launch } from "../shared/data.js";
 import {
+  DECIDE_AT,
   DRILLS_PER_DAY,
   FIXTURES_PER_DAY,
   GROUP,
@@ -385,8 +386,15 @@ export async function kickoff(c: ClubRec, input: { slot?: unknown }): Promise<Ma
   const kk = koKey(w, c.group, pair);
   const open = await getJson<Kickoff>(kk);
   if (open) {
-    // only the side that kicked it off carries it on
-    if (open.a !== c.slot) throw new ClubError("They are playing this one right now. Try another fixture.", 409);
+    // only the side that kicked it off carries it on; a match they walked away from plays out on its own
+    if (open.a !== c.slot) {
+      if (Date.now() - open.at < STALE_MS) throw new ClubError("They are playing this one right now. Try another fixture.", 409);
+      const choices = open.choices.slice();
+      while (choices.length < DECIDE_AT.length) choices.push(0);
+      const st = simulate(open.home, open.away, open.seed, choices);
+      await storeFixture({ ...open, choices }, st, kk, w);
+      throw new ClubError(`${open.home.name} left this one at the bench. It played out ${st.score[0]}-${st.score[1]}: see the table.`, 409);
+    }
     return view(open, simulate(open.home, open.away, open.seed, open.choices));
   }
   if (c.played >= FIXTURES_PER_DAY) throw new ClubError("Three league matches a day. More tomorrow.");
@@ -423,14 +431,22 @@ export async function decide(c: ClubRec, input: { slot?: unknown; choice?: unkno
     await setJson(kk, k, { ex: 60 * 60 * 24 * 8 });
     return view(k, st);
   }
-  // full time: store the fixture once; the open match is cleared
+  const fixture = await storeFixture(k, st, kk, w);
+  return view(k, st, fixture);
+}
+
+/** An open match left this long at a decision is played out with no more calls when the other club wants the fixture. */
+export const STALE_MS = 30 * 60_000;
+/** Full time: store the fixture once; the open match is cleared. */
+async function storeFixture(k: Kickoff, st: MatchState, kk: string, w: number): Promise<Fixture> {
+  const pair = pairKey(k.a, k.b);
   const fixture: Fixture = { a: k.a, b: k.b, sa: st.score[0], sb: st.score[1], seed: k.seed, choices: k.choices, at: Date.now(), scorers: scorersOf(st, k.home, k.away) };
   if (k.w === w || k.w === w - 1) await kv("HSETNX", fixturesKey(k.w, k.g), pair, JSON.stringify(fixture));
   await kvMany([
     ["EXPIRE", fixturesKey(k.w, k.g), 60 * 60 * 24 * 21],
     ["DEL", kk],
   ]);
-  return view(k, st, fixture);
+  return fixture;
 }
 
 /** A friendly: any recent club, played on the client (nothing is stored). */

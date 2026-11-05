@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import type { Edition } from "../shared/data.js";
 import { DECIDE_AT, autoPlay, houseSide, minutesOf, shootout, shootoutPlan, simulate, table, weekOf, weekStart, sideProblem, scoutOffers, firstSquad, KICKS } from "../shared/club.js";
-import { lineFor, fullTimeLine, decisionLine } from "../shared/club-voice.js";
+import { lineFor, fullTimeLine, decisionLine, callLine, CLUB_LINES } from "../shared/club-voice.js";
 const ed = JSON.parse(readFileSync("scripts/edition.json", "utf8")) as Edition;
 const pool = ed.pool.flat();
 let fails = 0;
@@ -52,5 +52,15 @@ ok(off.length === 3 && off.every((l) => !sq.some((x) => x.t === l.t)), "scout of
 let goals = 0;
 for (let i = 0; i < 500; i++) { const st = autoPlay(houseSide(pool, 9, i, 0), houseSide(pool, 9, i, 1), "g" + i); goals += st.score[0] + st.score[1]; }
 ok(goals / 500 > 2 && goals / 500 < 3.6, "goals per match " + (goals / 500).toFixed(2));
+// 4.1: every wire template, and the call lines with real tactic names, fit the rail and keep the voice
+const BANNED = /(card|deck|hand|chip|bet|odds|jackpot|spin|roll|loot|multiplier|payout|rarity|graduation|official|partner|sponsor|reward|earn|prize|guarantee|download)/i;
+for (const l of CLUB_LINES) ok(!l.includes("!") && !BANNED.test(l), "wire template voice: " + l);
+const beats = (x: string, y: string) => (x === "press" && y === "hold") || (x === "hold" && y === "counter") || (x === "counter" && y === "press");
+for (const [id, label] of [["keep", "Stay Counter"], ["t:hold", "Switch to Hold"], ["t:press", "Switch to Press"], ["s:4:12", "$ABCDEFGH on for $XYZ"], ["park", "Park it"], ["allin", "All in"], ["next", "Push"], ["fresh", "Rotate"], ["keep", "Change nothing"]])
+  for (const theirs of ["press", "counter", "hold"]) {
+    const l = callLine(id, label, id.startsWith("t:") ? id.slice(2) : "counter", theirs, beats);
+    ok(l.length <= 72 && !l.includes("!") && !l.includes("{"), "call line fits: " + l);
+  }
+ok(callLine("t:hold", "Switch to Hold", "hold", "counter", beats).includes("beats their Counter"), "call line names the matchup");
 console.log(fails ? `${fails} FAILED` : "club rules: all ok");
 process.exit(fails ? 1 : 0);

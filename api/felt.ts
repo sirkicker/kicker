@@ -383,12 +383,12 @@ function page(rec: Result | null, id: string): string {
       ? `${rec.won ? `Won all ${ROUNDS} rounds` : `Round ${rec.round}`} with a best goal of ${rec.best.total.toLocaleString("en-US")} (${rec.best.style}). Same squad, same rivals: your turn.`
       : "Same squad, same rivals: your turn.";
   const imgUrl = `${SITE}/api/felt?id=${id}`;
-  const to = `/?c=${id}`;
+  const to = `/classic.html?c=${id}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><meta name="description" content="${esc(desc)}">
 <meta property="og:type" content="website"><meta property="og:url" content="${SITE}/c/${id}"><meta property="og:title" content="${title}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${imgUrl}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:site" content="@kyriektnrv"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${imgUrl}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:site" content="@kicker_art"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${imgUrl}">
 <meta http-equiv="refresh" content="0;url=${to}"><style>body{background:#160611;color:#fff1dc;font-family:monospace;display:grid;place-items:center;height:100vh;margin:0}a{color:#ffc23d}</style>
 </head><body><a href="${to}">Take the challenge</a><script>location.replace(${JSON.stringify(to)})</script></body></html>`;
 }

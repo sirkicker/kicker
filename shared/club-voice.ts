@@ -164,5 +164,28 @@ export function fullTimeLine(score: [number, number], homeName: string, awayName
   return fill(pickOf(pool, `ft|${h}|${a}|${homeName}|${awayName}|${n}`), { home: homeName, away: awayName, h, a });
 }
 
+/** What a call did, for the wire and the note under the score. {x} the tactic, {y} theirs, {on} the substitute. */
+const CALL: Keyed<string, string> = {
+  keep: "No change. The bench sits on its hands.",
+  beats: "{x} now. It beats their {y}. Their chances thin out.",
+  beaten: "{x} now. Their {y} beats it. Brave.",
+  even: "{x} now. Same as theirs. A flat market.",
+  sub: "{on} on. Fresh legs, same club.",
+  park: "Parked. Defence up, attack down, Hold.",
+  allin: "All in. Attack up, the back door open.",
+  next: "Pushing. Attack up a step, defence down a step.",
+  fresh: "Midfield rotated. The link keeps its legs.",
+};
+/** One line for a call the manager just made. `id` is the option id from shared/club.ts. */
+export function callLine(id: string, label: string, mine: string, theirs: string, beats: (a: string, b: string) => boolean): string {
+  if (id.startsWith("t:") || (id === "keep" && label.startsWith("Stay"))) {
+    const k = mine === theirs ? "even" : beats(mine, theirs) ? "beats" : beats(theirs, mine) ? "beaten" : "even";
+    return fill(CALL[k], { x: cap(mine), y: cap(theirs) });
+  }
+  if (id.startsWith("s:")) return fill(CALL.sub, { on: label.split(" on for ")[0] });
+  return CALL[id] || CALL.keep;
+}
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
 /** Every line template, for the length and punctuation checks. */
-export const CLUB_LINES: string[] = [...Object.values(POOLS).flat(), ...DECIDE.flat(), ...Object.values(FULL).flat()];
+export const CLUB_LINES: string[] = [...Object.values(POOLS).flat(), ...DECIDE.flat(), ...Object.values(FULL).flat(), ...Object.values(CALL)];

@@ -1,0 +1,1000 @@
+/* KICKER 6.2 "Own line": the home page. KICKER is a meme. One typeface (Fraunces, self-hosted, a soft carved serif
+   with optical sizes) and one house palette, a walnut table world: dark oiled wood for the page, billiard felt for the
+   rod, polished brass and cream for type. The page runs: one meme (the cover), the meme panels, put your launch on the
+   rod (with today's rod), who he is. Motion lives in motion.ts. */
+@font-face {
+  font-family: "Fraunces K";
+  src: url("/fonts/fraunces-k.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  --walnut: #22170f;
+  --walnut-hi: #2f2117;
+  --walnut-deep: #170f0a;
+  --cream: #f1e5cc;
+  --cream-2: rgba(241, 229, 204, 0.74);
+  --cream-3: rgba(241, 229, 204, 0.2);
+  --brass: #c9a254;
+  --brass-hi: #e8cf8e;
+  --ink: #1d1916;
+  --felt: #1f4a41;
+  --felt-deep: #163830;
+  --err: #f2a48c;
+  --tint: #443931;
+  --font: "Fraunces K", "Iowan Old Style", Georgia, serif;
+  --pad: clamp(20px, 4.4vw, 72px);
+  --max: 1280px;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html {
+  background: var(--walnut);
+  color: var(--cream);
+  font: 400 17px/1.55 var(--font);
+  font-optical-sizing: auto;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body.k6 {
+  margin: 0;
+  min-height: 100vh;
+  overflow-x: clip;
+  /* oiled walnut: the faintest long grain */
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 236, 200, 0.014) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.07) 0 2px, transparent 2px 23px),
+    var(--walnut);
+}
+p,
+h1,
+h2,
+h3,
+ol,
+ul,
+dl,
+dd {
+  margin: 0;
+}
+h1,
+h2 {
+  font-weight: 400;
+}
+a {
+  color: inherit;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--brass-hi);
+  outline-offset: 3px;
+}
+.num {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 60;
+  padding: 10px 14px;
+  background: var(--cream);
+  color: var(--walnut);
+}
+.skip:focus {
+  top: 12px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--brass-hi);
+  color: var(--walnut);
+  font: 600 16px/1 var(--font);
+  letter-spacing: 0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.btn:hover {
+  background: var(--cream);
+}
+.btn[aria-busy="true"] {
+  opacity: 0.7;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 16px/1 var(--font);
+  text-decoration: underline;
+  text-decoration-color: var(--cream-3);
+  text-underline-offset: 6px;
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration-color: currentColor;
+}
+.chev {
+  width: 9px;
+  height: 15px;
+  fill: currentColor;
+  shape-rendering: crispEdges;
+}
+.ne {
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+}
+.arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--cream-3);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--cream);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.arrow:hover {
+  border-color: var(--cream);
+}
+.arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* brass, lit from above */
+.rod {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  background: linear-gradient(180deg, #f6e3a8 0 20%, #e3c47c 20% 40%, #c49c4f 40% 60%, #9b763a 60% 80%, #6b4f22 80% 100%);
+}
+
+/* ------------------------------------------------------------------ the cover: one meme */
+.hero {
+  position: relative;
+  overflow: clip;
+}
+.bar {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 24px;
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 20px var(--pad) 0;
+}
+.mark {
+  justify-self: start;
+  font: 650 26px/1 var(--font);
+  letter-spacing: 0.08em;
+  color: var(--cream);
+  text-decoration: none;
+}
+.nav {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 16px;
+  color: var(--cream-2);
+  text-decoration: none;
+}
+.nl:hover {
+  color: var(--cream);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+.nav .btn {
+  min-height: 44px;
+  font-size: 15px;
+  padding: 0 20px;
+  margin-left: 8px;
+}
+.hero-in {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  align-items: center;
+  gap: 28px clamp(32px, 5vw, 88px);
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: clamp(22px, 3vw, 40px) var(--pad) clamp(40px, 5vw, 72px);
+}
+/* the meme itself: a square panel on the kicker's stain, captions over and under him */
+.hero-meme {
+  position: relative;
+  margin: 0;
+  aspect-ratio: 1;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  justify-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--tint);
+  box-shadow: 0 40px 70px -40px #000, 0 0 0 1px rgba(232, 207, 142, 0.16);
+  container-type: inline-size;
+}
+.cap {
+  position: relative;
+  z-index: 2;
+  max-width: 94%;
+  text-align: center;
+  color: var(--cream);
+  letter-spacing: -0.02em;
+}
+.cap-top {
+  padding-top: 5.5cqw;
+  font: 400 6.4cqw/1.1 var(--font);
+  opacity: 0.88;
+}
+.cap-bot {
+  padding-bottom: max(7.4cqw, 30px);
+  font: 600 11.2cqw/1 var(--font);
+}
+.hero-mk {
+  position: absolute;
+  left: 4.4cqw;
+  right: 4.4cqw;
+  bottom: 2.6cqw;
+  display: flex;
+  justify-content: space-between;
+  font-size: max(11px, 2.1cqw);
+  color: var(--cream-2);
+}
+.hero-mk span:first-child {
+  font-weight: 600;
+}
+.hero-fig {
+  position: relative;
+  align-self: end;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  height: var(--fh, 336px);
+}
+.hero-slide {
+  position: relative;
+  z-index: 1;
+  will-change: transform;
+}
+/* the floor he stands over: the stain, a shade toward the walnut, from his feet down */
+.hero-fig::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: -50%;
+  right: -50%;
+  top: calc(var(--fh, 336px) * 0.955);
+  height: 100vh;
+  background: rgba(23, 15, 10, 0.3);
+  pointer-events: none;
+}
+.cap-bot,
+.hero-mk {
+  z-index: 2;
+}
+.hero-fig canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+.hero-rod {
+  top: calc(var(--y, 217px) - var(--t, 28px) / 2);
+  height: var(--t, 28px);
+  left: calc(var(--t, 28px) * 0.9);
+  right: calc(var(--t, 28px) * 0.9);
+  box-shadow: 0 10px 14px -10px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.hero-rod::before,
+.hero-rod::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: calc(var(--t, 28px) * 1.5);
+  height: calc(var(--t, 28px) * 1.5);
+  /* a pixel brass knob at each end: he is skewered through the middle */
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' shape-rendering='crispEdges'%3E%3Cg fill='%235a3f1a'%3E%3Crect x='3' width='4' height='10'/%3E%3Crect x='1' y='1' width='8' height='8'/%3E%3Crect y='3' width='10' height='4'/%3E%3C/g%3E%3Cg fill='%239b763a'%3E%3Crect x='3' y='1' width='4' height='8'/%3E%3Crect x='1' y='3' width='8' height='4'/%3E%3Crect x='2' y='2' width='6' height='6'/%3E%3C/g%3E%3Cg fill='%23c49c4f'%3E%3Crect x='2' y='2' width='5' height='5'/%3E%3Crect x='1' y='3' width='1' height='3'/%3E%3Crect x='3' y='1' width='3' height='1'/%3E%3C/g%3E%3Crect x='2' y='2' width='3' height='3' fill='%23e3c47c'/%3E%3Crect x='3' y='3' width='1' height='1' fill='%23f6e3a8'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  image-rendering: pixelated;
+  transform: translateY(-50%);
+}
+.hero-rod::before {
+  left: calc(var(--t, 28px) * -0.75);
+}
+.hero-rod::after {
+  right: calc(var(--t, 28px) * -0.75);
+}
+.hero.on .hero-rod {
+  opacity: 1;
+}
+.hc-lead {
+  font: 400 clamp(40px, 4.3vw, 64px) / 1.02 var(--font);
+  letter-spacing: -0.035em;
+}
+.hc-lead span {
+  display: block;
+  color: var(--brass-hi);
+}
+.hc-line {
+  margin-top: 22px;
+  max-width: 30em;
+  font-size: clamp(17px, 1.35vw, 20px);
+  line-height: 1.5;
+  color: var(--cream-2);
+}
+.hc-line a {
+  color: var(--cream);
+  font-weight: 600;
+}
+.hc-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-top: 30px;
+}
+
+/* ------------------------------------------------------------------ the memes */
+.memes {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: clamp(40px, 5vw, 72px) 0 0;
+}
+.memes .sec-h {
+  display: block;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(14px, 1.6vw, 22px);
+  margin: 0;
+  padding: 0 var(--pad);
+  list-style: none;
+}
+.mm figure {
+  margin: 0;
+}
+.mm img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  background: var(--walnut-hi);
+  box-shadow: 0 0 0 1px rgba(232, 207, 142, 0.12);
+}
+.mm figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 15px;
+}
+.mm figcaption span {
+  min-width: 0;
+  font-style: italic;
+  color: var(--cream-2);
+}
+.sv {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--cream-3);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.sv:hover {
+  border-color: var(--brass-hi);
+  color: var(--brass-hi);
+}
+.motion .grid .mm {
+  opacity: 0;
+}
+.motion .grid .mm.in {
+  animation: slidein 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+@keyframes slidein {
+  0% {
+    opacity: 0;
+    transform: translateX(-36px);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ today's rod */
+.rodsec {
+  padding-top: clamp(48px, 5.6vw, 84px);
+}
+.sec-h {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 20px 48px;
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0 var(--pad) clamp(24px, 3vw, 36px);
+}
+.sec-h h2 {
+  font: 400 clamp(38px, 4.4vw, 64px) / 1 var(--font);
+  letter-spacing: -0.03em;
+}
+.sec-h h2 .num {
+  color: var(--brass-hi);
+}
+.sep {
+  color: var(--cream-3);
+}
+.meme {
+  margin-top: 10px;
+  font-size: 17px;
+  color: var(--cream-2);
+}
+.find {
+  display: grid;
+  gap: 6px;
+  width: min(100%, 440px);
+}
+.find-k {
+  font-size: 15px;
+  font-style: italic;
+  color: var(--cream-2);
+}
+.find-f {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--walnut-hi);
+  box-shadow: 0 0 0 1px var(--cream-3);
+}
+.find-f:focus-within {
+  box-shadow: 0 0 0 1px var(--brass-hi);
+}
+.find input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cream);
+  font-size: 16px;
+}
+.find input::placeholder {
+  color: rgba(241, 229, 204, 0.46);
+}
+.find input:focus-visible {
+  outline: none;
+}
+.find .btn {
+  min-height: 44px;
+  padding: 0 20px;
+}
+.find-err {
+  font-size: 14px;
+  color: var(--err);
+}
+.rod-h {
+  max-width: var(--max);
+  margin: 0 auto 14px;
+  padding: 0 var(--pad);
+  font-size: 15px;
+  color: var(--cream-2);
+}
+.rod-h span:first-child {
+  font-style: italic;
+  color: var(--cream);
+}
+.rod-h .num {
+  color: var(--brass-hi);
+}
+.rod-h .sep {
+  margin: 0 4px;
+}
+.band {
+  position: relative;
+  overflow: clip;
+  background: var(--felt);
+  /* the felt, quietly: a fine nap and the light falling off toward both cushions */
+  background-image:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.22), transparent 16%, transparent 82%, rgba(0, 0, 0, 0.26)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.016) 0 2px, transparent 2px 5px);
+  box-shadow: 0 -1px 0 rgba(232, 207, 142, 0.18), 0 1px 0 rgba(232, 207, 142, 0.18);
+  --pt: clamp(28px, 3.4vw, 48px);
+}
+.band-rod {
+  left: 0;
+  right: 0;
+  top: calc(var(--pt) + var(--ry, 246px) - var(--rt, 18px) / 2);
+  height: var(--rt, 18px);
+  z-index: 0;
+  box-shadow: 0 calc(var(--rt, 18px) * 0.9) calc(var(--rt, 18px) * 0.7) -4px rgba(4, 20, 16, 0.5);
+}
+.band-sc {
+  position: relative;
+  z-index: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  cursor: grab;
+}
+.band-sc::-webkit-scrollbar {
+  display: none;
+}
+.band-sc.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.band-sc:focus-visible {
+  outline: 3px solid var(--brass-hi);
+  outline-offset: -3px;
+}
+.row {
+  display: flex;
+  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  padding: var(--pt) clamp(24px, 4vw, 64px) 0;
+  list-style: none;
+}
+.row li {
+  flex: none;
+  width: calc(var(--s, 4) * var(--pitch, 44px));
+}
+a.fig {
+  color: inherit;
+  text-decoration: none;
+}
+.fig {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 0 0 20px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.fig canvas {
+  display: block;
+  margin: 0;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+/* a soft shadow on the felt, under the foot */
+.fig::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(var(--fh, 354px) - 6px);
+  width: 46%;
+  height: 12px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(3, 18, 14, 0.45), transparent);
+}
+.tag {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 4px 11px 5px;
+  border-radius: 999px;
+  color: var(--cream);
+  font-size: 14px;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s;
+}
+.tag .num {
+  color: var(--brass-hi);
+}
+.tag .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag .h {
+  font-style: italic;
+  opacity: 0.8;
+}
+.fig:hover .tag,
+.fig:focus-visible .tag {
+  background: var(--cream);
+  color: var(--walnut);
+}
+.fig:hover .tag .num,
+.fig:focus-visible .tag .num {
+  color: #7a4d0c;
+}
+.fig:focus-visible {
+  outline: none;
+}
+.band-prev,
+.band-next {
+  position: absolute;
+  z-index: 3;
+  top: calc(var(--pt) + var(--ry, 246px) - 24px);
+  width: 48px;
+  height: 48px;
+  border: 0;
+  background: var(--cream);
+  color: var(--walnut);
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+}
+.band-prev:hover,
+.band-next:hover {
+  background: var(--brass-hi);
+}
+.band-prev {
+  left: clamp(12px, 2vw, 28px);
+}
+.band-next {
+  right: clamp(12px, 2vw, 28px);
+}
+.band-prev:disabled,
+.band-next:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+/* the ball that rolls across the felt once (motion.ts) */
+.ball-run {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  height: 0;
+  top: calc(var(--pt) + var(--fh, 192px) + 2px);
+  pointer-events: none;
+  transform: translateX(-40px);
+}
+.ball {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------------ who he is */
+.lore {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: clamp(80px, 9vw, 128px) var(--pad);
+}
+.lore h2 {
+  font: 400 clamp(38px, 4.4vw, 64px) / 1 var(--font);
+  letter-spacing: -0.03em;
+  margin-bottom: 28px;
+}
+.lines {
+  display: grid;
+  gap: 14px;
+  max-width: 34em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: l;
+}
+.lines li {
+  position: relative;
+  padding: 14px 0 0 40px;
+  border-top: 1px solid var(--cream-3);
+  font-size: clamp(19px, 1.6vw, 23px);
+  line-height: 1.4;
+  counter-increment: l;
+}
+.lines li::before {
+  content: counter(l);
+  position: absolute;
+  left: 0;
+  top: 14px;
+  color: var(--brass-hi);
+  font-variant-numeric: lining-nums;
+}
+
+/* ------------------------------------------------------------------ footer */
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 32px;
+  padding: 28px var(--pad) 30px;
+  background: var(--walnut-deep);
+  color: var(--cream-2);
+  font-size: 15px;
+}
+.foot-mark {
+  font: 650 20px/1 var(--font);
+  letter-spacing: 0.08em;
+  color: var(--cream);
+  text-decoration: none;
+}
+.foot-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 26px;
+}
+.foot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  text-decoration: none;
+}
+.foot a:hover {
+  color: var(--brass-hi);
+}
+.gold-line {
+  flex-basis: 100%;
+  order: 3;
+  margin: 0;
+  font-size: 14px;
+  color: rgba(241, 229, 204, 0.6);
+}
+.gold-line button {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+  color: var(--cream);
+  text-decoration: underline;
+  text-decoration-color: var(--cream-3);
+  text-underline-offset: 5px;
+  cursor: pointer;
+}
+.gold-line button:hover {
+  color: var(--brass-hi);
+}
+/* $KICKER holders: the gold rod and a gold-leaf edge on the cover meme */
+.gold .rod {
+  background: linear-gradient(180deg, #fff6cf 0 20%, #f6d572 20% 40%, #d19b2a 40% 60%, #a8741a 60% 80%, #7a4d0c 80% 100%);
+}
+.gold .hero-rod::before,
+.gold .hero-rod::after {
+  filter: saturate(1.6) brightness(1.12);
+}
+.gold .hero-meme {
+  box-shadow: 0 40px 70px -40px #000, 0 0 0 2px #d19b2a, 0 0 0 5px rgba(246, 213, 114, 0.25);
+}
+.nojs {
+  padding: 40px;
+}
+
+/* ------------------------------------------------------------------ the toast ("no spinning.") */
+.toast {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  margin: 0;
+  padding: 12px 22px 13px;
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--walnut);
+  font-size: 17px;
+  font-style: italic;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 12px);
+  transition: opacity 0.2s, transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.toast:empty {
+  visibility: hidden;
+}
+.toast.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ------------------------------------------------------------------ scroll moments (html.motion is set by motion.ts
+   only when motion is allowed; transforms and opacity only, nothing moves the layout) */
+.motion .band .row li {
+  opacity: 0;
+}
+.motion .band.go .row li {
+  animation: onrod 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes onrod {
+  0% {
+    opacity: 0;
+    transform: translateX(-64px);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.band.go .ball-run {
+  animation: roll 2.8s cubic-bezier(0.3, 0.2, 0.45, 1) 0.6s both;
+}
+.band.go .ball {
+  animation: spinball 2.8s cubic-bezier(0.3, 0.2, 0.45, 1) 0.6s both;
+}
+@keyframes roll {
+  0% {
+    transform: translateX(-40px);
+  }
+  100% {
+    transform: translateX(calc(100% + 40px));
+  }
+}
+@keyframes spinball {
+  to {
+    transform: rotate(1080deg);
+  }
+}
+
+/* ------------------------------------------------------------------ narrower */
+@media (max-width: 1100px) {
+  .sec-h {
+    grid-template-columns: 1fr;
+  }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .nl.tk {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .hero-in {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .hero-meme {
+    width: min(100%, 520px);
+  }
+  .hero-say {
+    width: min(100%, 520px);
+  }
+}
+@media (max-width: 760px) {
+  .nl {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  html {
+    font-size: 16px;
+  }
+  .mark {
+    font-size: 22px;
+  }
+  .bar {
+    padding-top: 14px;
+  }
+  .nav .btn {
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+  .hero-in {
+    padding-top: 16px;
+    padding-bottom: 40px;
+    gap: 24px;
+  }
+  .hc-lead {
+    font-size: clamp(38px, 11vw, 48px);
+  }
+  .hc-line {
+    margin-top: 14px;
+  }
+  .hc-acts {
+    margin-top: 22px;
+  }
+  .hc-acts .btn {
+    flex: 1 1 100%;
+  }
+  .grid {
+    gap: 12px;
+  }
+  .mm figcaption {
+    flex-wrap: wrap;
+  }
+  .mm figcaption span {
+    flex-basis: 100%;
+    font-size: 14px;
+  }
+  .sv {
+    width: 100%;
+    justify-content: center;
+  }
+  .find {
+    width: 100%;
+  }
+  .band-sc {
+    scroll-snap-type: x mandatory;
+    scroll-padding: 0 24px;
+  }
+  .row li {
+    scroll-snap-align: center;
+    --pitch: 40px;
+  }
+  .band-prev,
+  .band-next {
+    display: none;
+  }
+  .foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .foot-nav {
+    gap: 0 20px;
+  }
+}
+@media (hover: none) {
+  .band-sc {
+    cursor: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

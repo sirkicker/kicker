@@ -219,8 +219,8 @@ export const tokenUrl = (t: string) => `https://testnet.vibevibe.fun/token/${t}`
 /** The game's own launch on vibe/vibe. */
 export const GAME_TOKEN = {
   symbol: "KICKER",
-  address: "0x0e76e43c28E1094dD0912c33BFf34004E110c323",
-  url: tokenUrl("0x0e76e43c28E1094dD0912c33BFf34004E110c323"),
+  address: "0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4",
+  url: tokenUrl("0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4"),
 };
 
 /** Where the game's source lives. */

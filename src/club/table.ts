@@ -28,6 +28,12 @@ const REST = [
 ];
 const MID_LANE = (MOUTH[0] + MOUTH[1]) / 2;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+/** The lighter of a kit's two colours (cream if both are dark), so a club's name reads on the dark plate. */
+export function nameInk(kit: [number, number]): number {
+  const lum = (c: number) => 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+  const c = lum(kit[1]) >= lum(kit[0]) ? kit[1] : kit[0];
+  return lum(c) < 90 ? COL.cream : c;
+}
 const kitOfSide = (s: Side): Kit => ({ main: s.kit[0], hi: s.kit[1], trim: darken(s.kit[0], 0.42) });
 /** Hue in degrees (or -1 for a grey) and lightness 0..1 of a colour. */
 function hueOf(c: number): [number, number] {
@@ -60,9 +66,13 @@ export function awayKit(home: Side, away: Side): [number, number] {
 
 interface RodView {
   c: Container;
+  /** The figures ride above the rails (so the end men on a five-man rod are not cut off by them); fc follows c. */
+  fc: Container;
   bar: Graphics;
   figs: FigureView[];
 }
+/** Figures on the club table are a touch smaller than the season table's, so a five-man rod reads without crowding. */
+const FIG_K = 0.88;
 
 /** A tween or a pause the table is running now: skip() finishes them at once. */
 interface Live {
@@ -80,6 +90,7 @@ export class ClubTable {
   mark = new Container();
   rodMask = new Graphics();
   rodLayer = new Container();
+  figLayer = new Container();
   rail = new Graphics();
   knobLayer = new Container();
   boardLayer = new Container();
@@ -102,6 +113,10 @@ export class ClubTable {
   xi: [number[], number[]] = [[], []];
   rect = { x: 0, y: 0, w: 800, h: 600 };
   private portMode = false;
+  /** Bumped whenever the sides are re-dressed: a chance played for an older dressing stops touching the table. */
+  private gen = 0;
+  private playGen = 0;
+  private built = false;
   t = 0;
   shake = 0;
   heat = 0;
@@ -119,6 +134,8 @@ export class ClubTable {
   private skipping = false;
   private live = new Set<Live>();
   private pauses = new Set<() => void>();
+  /** While a drill runs, only this rod of yours shows (kept through a re-fit). */
+  private only: number | null = null;
   // training
   private drill: {
     rod: number;
@@ -142,14 +159,17 @@ export class ClubTable {
     this.root.addChild(this.tbl, this.screen);
     this.screen.eventMode = "none";
     this.rodLayer.mask = this.rodMask;
-    this.tbl.addChild(this.crowdV, this.pitch, this.mark, this.rodMask, this.rodLayer, this.rail, this.knobLayer, this.desk, this.boardLayer, this.ballLayer, this.fxLayer);
-    for (const l of [this.fxLayer, this.boardLayer, this.ballLayer]) l.eventMode = "none";
+    this.tbl.addChild(this.crowdV, this.pitch, this.mark, this.rodMask, this.rodLayer, this.rail, this.knobLayer, this.figLayer, this.desk, this.boardLayer, this.ballLayer, this.fxLayer);
+    for (const l of [this.fxLayer, this.boardLayer, this.ballLayer, this.figLayer]) l.eventMode = "none";
     this.ballLayer.addChild(this.trailG, this.ball);
     this.fxLayer.addChild(this.netG);
     app.stage.filters = [this.crt];
     this.crt.resolution = Math.min(2, window.devicePixelRatio || 1);
     app.stage.eventMode = "static";
-    app.stage.on("pointerdown", () => this.drillTap());
+    // a tap anywhere stops the drill ball, except on a button (Back)
+    window.addEventListener("pointerdown", (e) => {
+      if (this.drill && !(e.target instanceof Element && e.target.closest("button, a, input"))) this.drillTap();
+    });
     window.addEventListener("keydown", (e) => {
       if (this.drill && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
@@ -160,6 +180,23 @@ export class ClubTable {
     this.drawBall();
     this.fit({ x: 0, y: 0, w: app.screen.width, h: app.screen.height });
     setTimeout(() => void loadCrowd(), 1200);
+  }
+
+  /** The table as it stands now, for the result image. */
+  snapshot(): HTMLCanvasElement | null {
+    try {
+      const r = this.rect;
+      const res = this.app.renderer.resolution;
+      const full = this.app.renderer.extract.canvas({ target: this.app.stage, frame: new Rectangle(0, 0, this.app.screen.width, this.app.screen.height) }) as HTMLCanvasElement;
+      const c = document.createElement("canvas");
+      c.width = Math.round(r.w * res);
+      c.height = Math.round(r.h * res);
+      const k = full.width / this.app.screen.width;
+      c.getContext("2d")!.drawImage(full, r.x * k, r.y * k, r.w * k, r.h * k, 0, 0, c.width, c.height);
+      return c;
+    } catch {
+      return null;
+    }
   }
 
   get port() {
@@ -176,10 +213,16 @@ export class ClubTable {
     this.app.stage.filterArea = new Rectangle(0, 0, sw, sh);
     this.app.stage.hitArea = new Rectangle(0, 0, sw, sh);
     const port = rect.h > rect.w * 1.05;
+    // a re-fit in the same orientation only moves and scales the table: rebuilding the rods mid-chance would pull
+    // the figures out from under a running animation
+    const turned = port !== this.portMode || !this.built;
     this.portMode = port;
-    this.buildTable();
-    this.buildRods();
-    this.drawBoard();
+    this.built = true;
+    if (turned) {
+      this.buildTable();
+      this.buildRods();
+      this.drawBoard();
+    }
     const spanY = TS_H + STAND_T;
     const spanX = TS_W + (port ? DESK_P : 0);
     const tw = port ? spanY : spanX;
@@ -206,6 +249,9 @@ export class ClubTable {
 
   // ================================================================ dressing
   setSides(home: Side, away: Side | null, xiHome?: number[], xiAway?: number[]) {
+    // a chance still running on the old sides finishes at once and leaves the new figures alone
+    this.gen++;
+    if (this.playing) this.skip();
     this.home = home;
     this.away = away;
     this.awayDress = away ? { ...away, kit: awayKit(home, away) } : null;
@@ -231,10 +277,18 @@ export class ClubTable {
   setScore(score: [number, number], min: number | null) {
     this.board = { score: [score[0], score[1]], min };
     this.drawBoard();
+    this.onScore?.(this.board.score);
   }
+  /** Told whenever the plate's score changes (a goal goes up the moment the ball is in). */
+  onScore: ((score: [number, number]) => void) | null = null;
 
+  /** Listeners for the wire (a phone shows the line as text too). */
+  sayers = new Set<(line: string, tone: Tone) => void>();
+  lastSay: [string, Tone] = ["", "flat"];
   say(line: string, tone: Tone = "flat") {
     this.desk.say(line, tone);
+    this.lastSay = [line, tone];
+    for (const f of this.sayers) f(line, tone);
   }
 
   crowd(level: number, mood?: "idle" | "cheer" | "quiet") {
@@ -315,6 +369,8 @@ export class ClubTable {
     this.crowdV.build(this.port, false);
     this.crowdV.setKit(hk.main, hk.hi);
     if (!this.crowdV.want) this.crowdV.level(18);
+    // upright on a phone the rail is too thin to read: the screens show the wire as text there instead
+    this.desk.visible = !this.port;
     if (this.port) {
       const len = CAB_B - CAB_T - 8;
       this.desk.layout(len, DESK_P - 8, 27, false);
@@ -379,6 +435,7 @@ export class ClubTable {
 
   private buildRods() {
     this.rodLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.figLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.rods = [[], []];
     const at = Date.now() / 1000;
     for (const side of [0, 1] as SideId[]) {
@@ -396,27 +453,45 @@ export class ClubTable {
         bar.rect(2, -span, 3, span * 2).fill({ color: BRASS.lo, alpha: 0.7 });
         c.addChild(bar);
         const figs: FigureView[] = [];
+        const fc = new Container();
+        fc.position.copyFrom(c.position);
+        fc.zIndex = c.zIndex;
+        if (!club && side === 1 && this.home) {
+          // no rival yet (the club office): their rods hold blank, dimmed men, so the far half reads as waiting
+          for (let f = 0; f < d.n; f++) {
+            const fv = new FigureView(1, null, f, "them", { main: 0x3a2034, hi: 0x6a4060, trim: COL.ink });
+            fv.position.set(0, (f * d.gap + 0.5) * LH);
+            fv.scale.set(FIG_K);
+            fv.alpha = 0.32;
+            fv.eventMode = "none";
+            fc.addChild(fv);
+          }
+        }
         if (club) {
           for (let f = 0; f < d.n; f++) {
             const slot = ROD_SLOTS[r][f];
             const l: Launch | null = club.squad[this.xi[side][slot]] || null;
             const fv = new FigureView(side, l, f, "them", kit);
             fv.position.set(0, (f * d.gap + 0.5) * LH);
+            fv.scale.set(FIG_K);
             fv.eventMode = "none";
             if (l) fv.setTrait(traitsOf(l, at).filter((t) => t !== "ghost"), false);
             if (fv.tag) {
               this.upright(fv.tag);
               if (this.port) fv.tag.visible = false;
             }
-            c.addChild(fv);
+            fc.addChild(fv);
             figs.push(fv);
           }
         }
+        if (this.only !== null) c.visible = fc.visible = side === 0 && r === this.only;
         this.rodLayer.addChild(c);
-        this.rods[side].push({ c, bar, figs });
+        this.figLayer.addChild(fc);
+        this.rods[side].push({ c, fc, bar, figs });
       }
     }
     this.rodLayer.sortableChildren = true;
+    this.figLayer.sortableChildren = true;
   }
 
   /** The brass plate under the table, between the near stands: crests, names, score, minute. */
@@ -444,11 +519,15 @@ export class ClubTable {
     L.addChild(box);
     // upright on a phone the plate is h wide and w tall on screen
     const bw = this.port ? h : w;
+    if (!this.away && !this.boardNote) {
+      this.drawIdleBoard(box, w, h);
+      return;
+    }
     const centre = this.boardNote || (this.away ? `${this.board.score[0]} : ${this.board.score[1]}` : "KICKER");
     const small = centre.length > 7;
     const name = (s: Side | null, right: boolean) => {
       const label = s ? s.name : "Awaiting a rival";
-      const t = txt(label.toUpperCase(), { fontFamily: NUM, fontSize: this.port ? 22 : 30, fill: s ? s.kit[1] : COL.dim, letterSpacing: 1 });
+      const t = txt(label.toUpperCase(), { fontFamily: NUM, fontSize: this.port ? 22 : 30, fill: s ? nameInk(s.kit) : COL.dim, letterSpacing: 1 });
       t.anchor.set(right ? 1 : 0, 0.5);
       return t;
     };
@@ -503,6 +582,72 @@ export class ClubTable {
     }
   }
 
+  /** The plate with no rival on the table (the club office): your crest and name, the tactic and captain, and who is next. */
+  private drawIdleBoard(box: Container, w: number, h: number) {
+    const home = this.home!;
+    const info = this.idle;
+    const cap = home.squad[home.captain];
+    const sub = `${home.tactic.toUpperCase()}${cap ? ` · CAPTAIN $${cap.s.slice(0, 8)}` : ""}`;
+    if (this.port) {
+      // upright: the plate is h wide and w tall on screen
+      const bw = h - 20;
+      const nm = txt(home.name.toUpperCase(), { fontFamily: NUM, fontSize: 30, fill: nameInk(home.kit), letterSpacing: 1 });
+      nm.anchor.set(0.5);
+      nm.position.set(0, 40);
+      const sb = txt(sub, { fontFamily: NUM, fontSize: 16, fill: COL.dim, letterSpacing: 1 });
+      sb.anchor.set(0.5);
+      sb.position.set(0, 72);
+      const ch = kitShield(home.kit, home.name, 30);
+      ch.position.set(0, -10);
+      box.addChild(ch, nm, sb);
+      if (info.next) {
+        const nl = txt("NEXT UP", { fontFamily: NUM, fontSize: 16, fill: COL.dim, letterSpacing: 2 });
+        nl.anchor.set(0.5);
+        nl.position.set(0, -w / 2 + 40);
+        const nn = txt(info.next.toUpperCase(), { fontFamily: NUM, fontSize: 24, fill: info.nextKit ? nameInk(info.nextKit) : COL.cream, letterSpacing: 1 });
+        nn.anchor.set(0.5);
+        nn.position.set(0, -w / 2 + 64);
+        box.addChild(nl, nn);
+        if (nn.width > bw) nn.scale.set(bw / nn.width);
+      }
+      for (const t of [nm, sb]) if (t.width > bw) t.scale.set(bw / t.width);
+      return;
+    }
+    const ch = kitShield(home.kit, home.name, 30);
+    ch.position.set(-w / 2 + 48, 0);
+    box.addChild(ch);
+    const left = -w / 2 + 88;
+    const half = info.next ? w * 0.52 - 88 : w - 120;
+    const nm = txt(home.name.toUpperCase(), { fontFamily: NUM, fontSize: 40, fill: nameInk(home.kit), letterSpacing: 1 });
+    nm.anchor.set(0, 0.5);
+    nm.position.set(left, -12);
+    const sb = txt(sub, { fontFamily: NUM, fontSize: 18, fill: COL.dim, letterSpacing: 2 });
+    sb.anchor.set(0, 0.5);
+    sb.position.set(left, 22);
+    for (const t of [nm, sb]) if (t.width > half) t.scale.set(half / t.width);
+    box.addChild(nm, sb);
+    if (info.next) {
+      const right = w / 2 - 24;
+      const room = w * 0.42 - 40;
+      const nl = txt(info.nextLabel || "NEXT UP", { fontFamily: NUM, fontSize: 18, fill: COL.dim, letterSpacing: 2 });
+      nl.anchor.set(1, 0.5);
+      nl.position.set(right, -16);
+      const nn = txt(info.next.toUpperCase(), { fontFamily: NUM, fontSize: 28, fill: info.nextKit ? nameInk(info.nextKit) : COL.cream, letterSpacing: 1 });
+      nn.anchor.set(1, 0.5);
+      nn.position.set(right, 14);
+      if (nn.width > room) nn.scale.set(room / nn.width);
+      const div = new Graphics().rect(w * 0.06, -24, 2, 48).fill({ color: BRASS.hi, alpha: 0.35 });
+      box.addChild(div, nl, nn);
+    }
+  }
+
+  /** What the idle plate says about the next fixture. */
+  idle: { next: string | null; nextKit?: [number, number]; nextLabel?: string } = { next: null };
+  setIdle(info: { next: string | null; nextKit?: [number, number]; nextLabel?: string }) {
+    this.idle = info;
+    this.drawBoard();
+  }
+
   private drawBall() {
     const g = this.ball;
     g.clear();
@@ -539,6 +684,7 @@ export class ClubTable {
     if (this.root.renderable) {
       this.crowdV.frame(this.t, sec);
       this.desk.frame(sec);
+      for (const side of this.rods) for (const rv of side) if (!rv.c.destroyed) rv.fc.position.copyFrom(rv.c.position);
       if (!rm) for (const side of this.rods) for (const rv of side) for (const f of rv.figs) f.idle(this.t, sec);
       if (this.ballFree && this.ball.visible) this.trail.push({ x: this.ball.x, y: this.ball.y, t: this.t });
       this.drawTrail();
@@ -577,13 +723,25 @@ export class ClubTable {
 
   // ================================================================ skippable animation
   private tw(target: object, to: Keyed<string, number>, dur: number, e = ease.outCubic): Promise<void> {
+    if (this.playing && this.playGen !== this.gen) return Promise.resolve();
     if (this.skipping) {
-      Object.assign(target, to);
+      try {
+        Object.assign(target, to);
+      } catch {
+        /* its view has gone */
+      }
       return Promise.resolve();
     }
     const rec: Live = { target, to };
+    let run: Promise<void>;
+    try {
+      run = tween(target, to, dur, e);
+    } catch {
+      // the view went away under a chained tween (a kick's follow-through after the rods were re-dressed)
+      return Promise.resolve();
+    }
     this.live.add(rec);
-    return tween(target, to, dur, e).finally(() => this.live.delete(rec));
+    return run.finally(() => this.live.delete(rec));
   }
   private pause(ms: number): Promise<void> {
     if (this.skipping) return Promise.resolve();
@@ -603,9 +761,14 @@ export class ClubTable {
     this.skipping = true;
     setTimeScale(1);
     for (const rec of [...this.live]) {
-      // a 1 ms tween to the same end cancels the running one (its promise resolves) and lands the value
-      void tween(rec.target, rec.to, 1);
-      Object.assign(rec.target, rec.to);
+      // a 1 ms tween to the same end cancels the running one (its promise resolves) and lands the value;
+      // a target whose view has gone (the rods were rebuilt) is left alone
+      try {
+        void tween(rec.target, rec.to, 1);
+        Object.assign(rec.target, rec.to);
+      } catch {
+        /* destroyed */
+      }
     }
     this.live.clear();
     for (const p of [...this.pauses]) p();
@@ -650,6 +813,7 @@ export class ClubTable {
     if (this.playing) this.skip();
     this.playing = true;
     this.skipping = false;
+    this.playGen = this.gen;
     try {
       await this.playChance(m);
     } finally {
@@ -659,8 +823,10 @@ export class ClubTable {
       this.skipping = false;
       this.live.clear();
       this.pauses.clear();
-      if (wasSkip) this.settle(m);
-      this.setScore(m.score, m.min);
+      if (this.playGen === this.gen) {
+        if (wasSkip) this.settle(m);
+        this.setScore(m.score, m.min);
+      }
     }
   }
 
@@ -673,7 +839,7 @@ export class ClubTable {
         if (rv?.c.destroyed) continue;
         for (const f of rv?.figs || []) {
           if (f.destroyed) continue;
-          f.scale.set(1);
+          f.scale.set(FIG_K);
           f.rotation = 0;
           f.foot.x = 0;
           f.body.scale.x = 1;
@@ -714,8 +880,8 @@ export class ClubTable {
     if (fv0) {
       fv0.setGlow(A === 0 ? kitOfSide(this.home!).hi : kitOfSide(this.awayDress!).hi);
       if (!this.skipping) {
-        fv0.scale.set(1.15);
-        void this.tw(fv0.scale, { x: 1, y: 1 }, 220, ease.outBack);
+        fv0.scale.set(1.15 * FIG_K);
+        void this.tw(fv0.scale, { x: FIG_K, y: FIG_K }, 220, ease.outBack);
       }
     }
     await this.pause(160);
@@ -742,8 +908,8 @@ export class ClubTable {
       if (rv) {
         rv.setGlow(A === 0 ? kitOfSide(this.home!).hi : kitOfSide(this.awayDress!).hi);
         if (!this.skipping) {
-          rv.scale.set(1.18);
-          void this.tw(rv.scale, { x: 1, y: 1 }, 220, ease.outBack);
+          rv.scale.set(1.18 * FIG_K);
+          void this.tw(rv.scale, { x: FIG_K, y: FIG_K }, 220, ease.outBack);
         }
       }
       await this.pause(140);
@@ -854,8 +1020,8 @@ export class ClubTable {
         if (m.out === "save") sfx.glove();
         this.shake = Math.min(1, this.shake + 0.3);
         if (meet) {
-          meet.scale.set(1.3);
-          void this.tw(meet.scale, { x: 1, y: 1 }, 280, ease.outBack);
+          meet.scale.set(1.3 * FIG_K);
+          void this.tw(meet.scale, { x: FIG_K, y: FIG_K }, 280, ease.outBack);
         }
         const fl = new Graphics().circle(0, 0, 24).fill({ color: 0xffffff, alpha: 0.7 });
         fl.position.set(end.x, end.y);
@@ -1064,8 +1230,8 @@ export class ClubTable {
   async training(rod: number, side: Side): Promise<number> {
     rod = clamp(Math.floor(rod), 0, 3);
     if (this.home !== side) this.setSides(side, null);
-    const restore = this.rods.map((sd) => sd.map((rv) => rv.c.visible));
-    this.rods.forEach((sd, s) => sd.forEach((rv, r) => (rv.c.visible = s === 0 && r === rod)));
+    this.only = rod;
+    this.rods.forEach((sd, s) => sd.forEach((rv, r) => (rv.c.visible = rv.fc.visible = s === 0 && r === rod)));
     this.ball.visible = false;
     this.boardNote = "TRAINING";
     this.drawBoard();
@@ -1081,7 +1247,7 @@ export class ClubTable {
     const x = colX(colOf(0, rod)) + 30;
     const d = RODS[rod];
     let hits = 0;
-    this.desk.say(`Training: ${["keeper", "defence", "midfield", "attack"][rod]} rod. Tap to stop the ball on a figure.`, "flat");
+    this.say(`Training: ${["keeper", "defence", "midfield", "attack"][rod]} rod. Tap to stop the ball on a figure.`, "flat");
     for (let n = 0; n < 5; n++) {
       counter.text = `BALL ${n + 1}/5 · ${hits} HIT${hits === 1 ? "" : "S"}`;
       // the rod sets itself somewhere new, so the spot can't be learned
@@ -1123,9 +1289,15 @@ export class ClubTable {
         hitStop(60);
         const f = fig as FigureView | null;
         if (f) {
-          f.swing(tween, ease.outBack);
-          f.scale.set(1.25);
-          void tween(f.scale, { x: 1, y: 1 }, 260, ease.outBack);
+          f.swing((o, to, ms, e) => {
+            try {
+              return tween(o, to, ms, e);
+            } catch {
+              return Promise.resolve();
+            }
+          }, ease.outBack);
+          f.scale.set(1.25 * FIG_K);
+          void tween(f.scale, { x: FIG_K, y: FIG_K }, 260, ease.outBack);
         }
         this.floatText("Hit", sp, COL.good, 36);
         this.burst(sp, COL.money, 10);
@@ -1139,13 +1311,14 @@ export class ClubTable {
       this.ball.visible = false;
     }
     this.drill = null;
-    this.desk.say(`Training done. ${hits} of 5.`, hits >= 3 ? "up" : hits ? "flat" : "down");
+    this.say(`Training done. ${hits} of 5.`, hits >= 3 ? "up" : hits ? "flat" : "down");
     if (hits >= 4) this.crowdV.react("cheer");
     await wait(500);
     pill.destroy({ children: true });
     this.boardNote = null;
     this.drawBoard();
-    this.rods.forEach((sd, s) => sd.forEach((rv, r) => (rv.c.visible = restore[s][r])));
+    this.only = null;
+    this.rods.forEach((sd) => sd.forEach((rv) => (rv.c.visible = rv.fc.visible = true)));
     this.ball.visible = !!this.away;
     this.ball.position.set(this.ballRest.x, this.ballRest.y);
     return hits;

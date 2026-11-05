@@ -10,6 +10,7 @@ export const kvOn = () => !!(url() && tok());
 const mem = new Map<string, string>();
 const hmem = new Map<string, Map<string, string>>();
 const ttl = new Map<string, number>();
+const lmem = new Map<string, string[]>();
 const alive = (k: string) => {
   const t = ttl.get(k);
   if (t && t < Date.now()) {
@@ -35,7 +36,7 @@ function memRun(cmd: Val[]): unknown {
       return "OK";
     }
     case "DEL":
-      return a.reduce((n, key) => n + (mem.delete(key as string) || hmem.delete(key as string) ? 1 : 0), 0);
+      return a.reduce((n, key) => n + (mem.delete(key as string) || hmem.delete(key as string) || lmem.delete(key as string) ? 1 : 0), 0);
     case "INCR": {
       const v = Number(mem.get(k) || 0) + 1;
       mem.set(k, String(v));
@@ -100,6 +101,23 @@ function memRun(cmd: Val[]): unknown {
         }
       });
       return n;
+    }
+    // lists (KICKER 5: one list of man ids per day)
+    case "RPUSH": {
+      const l = lmem.get(k) || [];
+      lmem.set(k, l);
+      l.push(...(a.slice(1) as string[]));
+      return l.length;
+    }
+    case "LLEN":
+      return lmem.get(k)?.length || 0;
+    case "LRANGE": {
+      const l = lmem.get(k) || [];
+      let lo = Number(a[1]);
+      let hi = Number(a[2]);
+      if (lo < 0) lo = Math.max(0, l.length + lo);
+      if (hi < 0) hi += l.length;
+      return l.slice(lo, hi + 1);
     }
     default:
       throw new Error("kv: unsupported " + op);

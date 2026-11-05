@@ -34,8 +34,7 @@ import { hash32, newSeed } from "../../shared/rng.js";
 import { Head } from "../kit.js";
 import { ApiError, api, cred, keyLine, parseKey, type Club, type GroupView, type Me, type MatchView } from "./state.js";
 import { awayKit, type ClubTable } from "./table.js";
-import { decisionLine, fullTimeLine, lineFor } from "../../shared/club-voice.js";
-import { PressRoom, Shootout, WallDrill } from "./drills.js";
+import { callLine, decisionLine, fullTimeLine, lineFor } from "../../shared/club-voice.js";
 import { sfx, unlock } from "../audio.js";
 import "./club.css";
 
@@ -70,9 +69,14 @@ function set(p: Partial<AppState>) {
 }
 function useApp() {
   const [, tick] = useState(0);
-  useEffect(() => {
+  const seen = useRef(S);
+  seen.current = S;
+  // subscribe in the layout pass, and catch up on any change made before it (a fast /me on a reload landed first
+  // and the office never opened)
+  useLayoutEffect(() => {
     const f = () => tick((n) => n + 1);
     subs.add(f);
+    if (seen.current !== S) f();
     return () => void subs.delete(f);
   }, []);
   return S;
@@ -129,6 +133,46 @@ function TableSlot(props: { class?: string }) {
     };
   }, []);
   return <div ref={ref} class={"table-slot " + (props.class || "")} aria-hidden="true" />;
+}
+
+// ---------------------------------------------------------------- loaded when first needed
+// The drills (the wall, the press room, the shootout) and the result image stay out of the first load.
+type DrillsMod = typeof import("./drills.js");
+let drillsMod: DrillsMod | null = null;
+const loadDrills = () => import("./drills.js").then((m) => (drillsMod = m));
+function useDrills(): DrillsMod | null {
+  const [m, setM] = useState(drillsMod);
+  useEffect(() => {
+    if (!m) void loadDrills().then(setM);
+  }, []);
+  return m;
+}
+/** Warms the drills chunk once the office is up, so the first drill opens at once. */
+const warmDrills = () => {
+  if (drillsMod) return;
+  const ric = (window as unknown as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback || ((f: () => void) => setTimeout(f, 1500));
+  ric(() => void loadDrills());
+};
+function LazyShootout(p: { home: Side; away: Side; seed: string; onDone: (picks: [Spot, Spot][], won: boolean) => void }) {
+  const D = useDrills();
+  return D ? <D.Shootout {...p} /> : <Busy text="Penalties" />;
+}
+
+// ---------------------------------------------------------------- the wire as text (phones)
+function Wire(props: { class?: string }) {
+  const [w, setW] = useState<[string, string]>(table.lastSay);
+  useEffect(() => {
+    const f = (line: string, tone: string) => setW([line, tone]);
+    table.sayers.add(f);
+    return () => void table.sayers.delete(f);
+  }, []);
+  if (!w[0]) return null;
+  return (
+    <div class={"mwire " + w[1] + " " + (props.class || "")} aria-live="polite">
+      <span class="wtag">WIRE</span>
+      <span>{w[0]}</span>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------- small parts
@@ -246,9 +290,10 @@ function Found() {
   const preview = name.trim() || "Your Club";
   return (
     <div class="found">
+      <FoundDemo />
       <div class="found-box">
         <div class="logo">
-          KICKER <b>Club</b>
+          KICKER{" "}<b>Club</b>
         </div>
         <p class="lede">Run a club of live vibe/vibe launches. Eight clubs a week, real managers, one table.</p>
         <ol class="how3">
@@ -306,6 +351,52 @@ function Found() {
   );
 }
 
+/**
+ * The first thing a visitor sees: two real clubs already playing on the table behind the form, so the idea (launches
+ * on brass rods, a match that plays itself) is there before a word is read. Two friendly-rival reads, nothing stored.
+ */
+function FoundDemo() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const a = await api.friendly("");
+        let b = await api.friendly(a.id || "");
+        if (b.side.name === a.side.name) b = await api.friendly(a.id || "");
+        if (stop || b.side.name === a.side.name) return;
+        const home = a.side;
+        const away = b.side;
+        setOn(true);
+        table.cover(false);
+        let round = 0;
+        while (!stop) {
+          const st = simulate(home, away, `demo|${home.name}|${away.name}|${round++}`, [0, 0, 0]);
+          table.setSides(home, away);
+          table.setScore([0, 0], 0);
+          table.crowd(0.6, "idle");
+          for (const m of st.moments) {
+            if (stop) return;
+            await table.play(m, home, away);
+            if (stop) return;
+            table.say(lineFor(m, home, away, m.i), m.out === "goal" ? (m.side === 0 ? "up" : "down") : "flat");
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          table.setScore(st.score, null);
+          await new Promise((r) => setTimeout(r, 2500));
+        }
+      } catch {
+        /* no demo: the form stands alone */
+      }
+    })();
+    return () => {
+      stop = true;
+      table.skip();
+    };
+  }, []);
+  return <div class={"found-demo" + (on ? " on" : "")}>{on && <TableSlot class="found-table" />}</div>;
+}
+
 // ---------------------------------------------------------------- the club office
 function fixtureFor(g: GroupView, a: number, b: number): Fixture | undefined {
   const key = pairKey(a, b);
@@ -317,6 +408,11 @@ function scoreFor(f: Fixture, you: number): { us: number; them: number } {
 
 function Hq() {
   const { me } = useApp();
+  // the group moves while you are away (another manager plays you): read it fresh on every visit
+  useEffect(() => {
+    void refreshMe();
+    warmDrills();
+  }, []);
   if (!me) return <Busy />;
   const { club, group } = me;
   const you = club.slot;
@@ -343,6 +439,7 @@ function Hq() {
           Key
         </button>
       </header>
+      <Wire class="hq-wire" />
       <TableSlot class="hq-table" />
       <section class="hq-panel">
         <div class="hq-acts">
@@ -700,6 +797,9 @@ function Match(props: { slot: number | null }) {
   const [min, setMin] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [pens, setPens] = useState<{ won: boolean; a: number; b: number } | null>(null);
+  /** The calls made in this match, in order: minute, what, and the line that says what it did. */
+  const [calls, setCalls] = useState<{ min: number; label: string; line: string }[]>([]);
+  const [fx, setFx] = useState<string | null>(null);
   const friendly = props.slot === null;
   const fr = useRef<{ side: Side; seed: string; choices: number[] } | null>(null);
   const stop = useRef(false);
@@ -719,8 +819,11 @@ function Match(props: { slot: number | null }) {
       if (stop.current) return;
       const m = ms[i];
       setMin(m.min);
-      table.say(lineFor(m, v.home, v.away, i), m.out === "goal" ? (m.side === 0 ? "up" : "down") : "flat");
+      // the wire calls the build-up, and only says how it ended once the table has shown it
+      table.say(`${m.min}'. ${(m.side === 0 ? v.home : v.away).name} on the ball.`, "flat");
       await table.play(m, v.home, v.away);
+      if (stop.current) return;
+      table.say(lineFor(m, v.home, v.away, i), m.out === "goal" ? (m.side === 0 ? "up" : "down") : "flat");
       await new Promise((r) => setTimeout(r, 60));
       if (m.out === "goal") table.crowd(0.6 + club.mood * 0.1, m.side === 0 ? "cheer" : "quiet");
       setScore([m.score[0], m.score[1]]);
@@ -748,6 +851,8 @@ function Match(props: { slot: number | null }) {
 
   useEffect(() => {
     stop.current = false;
+    // the score over the table goes up with the net, not after the replay of the chance
+    table.onScore = (sc) => setScore([sc[0], sc[1]]);
     (async () => {
       try {
         let v: MatchView;
@@ -779,12 +884,15 @@ function Match(props: { slot: number | null }) {
     })();
     return () => {
       stop.current = true;
+      table.onScore = null;
       table.skip();
     };
   }, []);
 
   const choose = async (i: number) => {
-    if (!view) return;
+    if (!view || !view.state.pending) return;
+    const d = view.state.pending;
+    const o = d.options[i];
     setPhase("sending");
     sfx.click();
     try {
@@ -799,6 +907,15 @@ function Match(props: { slot: number | null }) {
       setView(v);
       table.setXi(0, v.state.live.xi[0]);
       table.setXi(1, v.state.live.xi[1]);
+      // show what the call did before the match goes on: a note under the score and the wire
+      const mine = o.id.startsWith("t:") ? o.id.slice(2) : v.state.live.tactic[0];
+      const line = callLine(o.id, o.label, mine, v.state.live.tactic[1], (a, b) => TACTIC[a as Tactic]?.beats === b);
+      setCalls((c) => [...c, { min: d.min, label: o.label, line }]);
+      setFx(`${d.min}' · ${line}`);
+      table.say(line, "flat");
+      table.crowd(0.55, "cheer");
+      await new Promise((r) => setTimeout(r, 1400));
+      setFx(null);
       await playFrom(v, shown);
     } catch (e) {
       setErr(errMsg(e));
@@ -818,14 +935,25 @@ function Match(props: { slot: number | null }) {
         </span>
         <span class="score">
           {score[0]}–{score[1]}
-          <small>{phase === "full" ? "FT" : `${min}'`}</small>
+          <small>{phase === "full" ? "FULL TIME" : phase === "loading" ? "KICKOFF" : `${min} MIN`}</small>
         </span>
         <span class="team away">
           <b>{away?.name || "…"}</b>
           {away && view && <ClubCrest name={away.name} kit={awayKit(view.home, away)} size={30} />}
         </span>
       </header>
+      <Wire />
+      {calls.length > 0 && phase !== "full" && (
+        <div class="callstrip" aria-label="Your calls">
+          {calls.map((c) => (
+            <span class="callnote">
+              <b>{c.min}'</b> {c.label}
+            </span>
+          ))}
+        </div>
+      )}
       <TableSlot class="match-table" />
+      {fx && <div class="callfx">{fx}</div>}
       {phase === "playing" && (
         <button class="btn small skip" onClick={() => table.skip()}>
           Skip
@@ -838,12 +966,18 @@ function Match(props: { slot: number | null }) {
             {st.pending.min}' · {st.pending.title}
           </h3>
           <div class="opts">
-            {st.pending.options.map((o, i) => (
-              <button class={"opt" + (i === 0 ? "" : " alt")} onClick={() => choose(i)}>
-                <b>{o.label}</b>
-                <small>{o.text}</small>
-              </button>
-            ))}
+            {st.pending.options.map((o, i) => {
+              const t = o.id.startsWith("t:") ? (o.id.slice(2) as Tactic) : o.id === "keep" && st.pending!.n === 0 ? st.live.tactic[0] : null;
+              const their = st.live.tactic[1];
+              const edge = t ? (TACTIC[t].beats === their ? "beats" : TACTIC[their].beats === t ? "beaten" : null) : null;
+              return (
+                <button class={"opt" + (i === 0 ? "" : " alt")} onClick={() => choose(i)}>
+                  <b>{o.label}</b>
+                  <small>{o.text}</small>
+                  {edge && <em class={"edge " + edge}>{edge === "beats" ? `Beats their ${TACTIC[their].name}` : `Their ${TACTIC[their].name} beats it`}</em>}
+                </button>
+              );
+            })}
           </div>
           <p class="their">
             They play {TACTIC[st.live.tactic[1]].name}. You play {TACTIC[st.live.tactic[0]].name}.
@@ -853,7 +987,7 @@ function Match(props: { slot: number | null }) {
       {phase === "sending" && <Busy text="Word to the bench" />}
       {phase === "shootout" && view && (
         <div class="shoot-wrap">
-          <Shootout
+          <LazyShootout
             home={view.home}
             away={view.away}
             seed={fr.current!.seed}
@@ -885,9 +1019,31 @@ function Match(props: { slot: number | null }) {
               ))}
             </p>
           )}
-          {st.notes.length > 0 && <p class="notes">Your calls: {st.notes.join(" · ")}</p>}
+          {calls.length > 0 ? (
+            <ul class="ft-calls">
+              {calls.map((c) => {
+                const after = st.moments.filter((m) => m.min > c.min && m.out === "goal");
+                const f = after.filter((m) => m.side === 0).length;
+                const a = after.filter((m) => m.side === 1).length;
+                return (
+                  <li>
+                    <b>{c.min}'</b> {c.label}
+                    <span class={f > a ? "up" : f < a ? "down" : ""}>
+                      {" "}
+                      {f}–{a} after
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            st.notes.length > 0 && <p class="notes">Your calls: {st.notes.join(" · ")}</p>
+          )}
           {!friendly && <p class="notes">The result is in the group table. {view.away.house ? "" : `${view.away.name} will see it too.`}</p>}
           <div class="row">
+            <button class="btn big" onClick={() => void import("./share.js").then(({ saveResult }) => saveResult({ home: view.home, away: { ...view.away, kit: awayKit(view.home, view.away) }, score: st.score, scorers, friendly, pens, calls: calls.map((c) => `${c.min}' ${c.label}`) }, table.snapshot()))}>
+              Save image
+            </button>
             <button class="btn gold big" onClick={() => go({ k: "hq" })}>
               Back to the club
             </button>
@@ -950,6 +1106,7 @@ function Training() {
           </div>
         </div>
       )}
+      <Wire />
       <TableSlot class="train-table" />
       {hits !== null && rod !== null && (
         <div class="fulltime">
@@ -970,6 +1127,7 @@ function Training() {
 
 function DrillWrap(props: { kind: "wall" | "press" }) {
   const { me } = useApp();
+  const D = useDrills();
   const club = me!.club;
   const seed = `${club.id}|${club.day}|${props.kind}`;
   const done = async (v: number) => {
@@ -983,10 +1141,12 @@ function DrillWrap(props: { kind: "wall" | "press" }) {
   };
   return (
     <div class="drillscreen panelled">
-      {props.kind === "wall" ? (
-        <WallDrill seed={seed} home={sideOfClub(club)} onDone={(w: number) => void done(w)} onClose={() => go({ k: "hq" })} />
+      {!D ? (
+        <Busy text="Setting up" />
+      ) : props.kind === "wall" ? (
+        <D.WallDrill seed={seed} home={sideOfClub(club)} onDone={(w: number) => void done(w)} onClose={() => go({ k: "hq" })} />
       ) : (
-        <PressRoom seed={seed} club={club.name} onDone={(m: number) => void done(m)} onClose={() => go({ k: "hq" })} />
+        <D.PressRoom seed={seed} club={club.name} onDone={(m: number) => void done(m)} onClose={() => go({ k: "hq" })} />
       )}
     </div>
   );
@@ -1039,14 +1199,45 @@ function KeyScreen() {
   );
 }
 
+// ---------------------------------------------------------------- the office wire
+const ORD = (n: number) => n + (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
+/** The next club you have not played this week, if any. */
+function nextRival(me: Me) {
+  const g = me.group;
+  return g.members.find((m) => m.slot !== me.club.slot && !fixtureFor(g, me.club.slot, m.slot)) || null;
+}
+/** One line for the wire when you walk into the office: where you stand and what to do next. */
+function officeLine(me: Me): [string, "up" | "down" | "flat"] {
+  const c = me.club;
+  const g = me.group;
+  const played = g.fixtures.filter((f) => f.a === c.slot || f.b === c.slot).length;
+  const row = g.table.findIndex((r) => r.slot === c.slot) + 1;
+  const left = FIXTURES_PER_DAY - c.played;
+  const nx = nextRival(me);
+  if (played === 0) return [`${nx ? nx.name + " first. " : ""}Seven fixtures this week, three a day. Press Play.`, "flat"];
+  if (!nx) return [`All seven played. ${ORD(row)} of 8 until the books close on Sunday.`, row <= 2 ? "up" : "flat"];
+  if (left <= 0) return [`${ORD(row)} of 8. League closed for today. Drills and friendlies stay open.`, "flat"];
+  const tone = row <= 2 ? "up" : row >= 6 ? "down" : "flat";
+  return [`${ORD(row)} of 8 after ${played}. ${nx.name} next, ${left} more today.`, tone];
+}
+
 // ---------------------------------------------------------------- root
 function App() {
   const s = useApp();
   const scr = s.screen;
   // the table shows your eleven whenever no match or drill owns it
   useEffect(() => {
-    if (s.me && (scr.k === "hq" || scr.k === "scout" || scr.k === "league" || scr.k === "key")) table.setSides(sideOfClub(s.me.club), null);
-    table.cover(scr.k === "found");
+    if (s.me && (scr.k === "hq" || scr.k === "scout" || scr.k === "league" || scr.k === "key")) {
+      table.setSides(sideOfClub(s.me.club), null);
+      const nx = nextRival(s.me);
+      table.setIdle({ next: nx ? nx.name : null, nextKit: nx?.kit });
+      if (scr.k === "hq") {
+        const [line, tone] = officeLine(s.me);
+        table.say(line, tone);
+      }
+    }
+    if (scr.k !== "found") table.cover(false);
+    else if (!document.querySelector(".found-demo.on")) table.cover(true);
   }, [scr.k, s.me?.club]);
   let body;
   if (scr.k === "found" || !s.me) body = cred.get() && !s.error ? <Busy text="Opening the club office" /> : <Found />;

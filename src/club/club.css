@@ -9,8 +9,9 @@
 .club-app * {
   pointer-events: auto;
 }
-/* the layout boxes let taps through to the table; their panels and buttons take them */
-.club-app,
+/* the layout boxes let taps through to the table; their panels and buttons take them
+   (#ui > .club-app outranks style.css's #ui > * rule, which would otherwise swallow every tap meant for the table) */
+#ui > .club-app,
 .club-app .table-slot,
 .club-app .hq,
 .club-app .match,
@@ -129,6 +130,7 @@
 }
 .found .logo b {
   font-weight: 400;
+  margin-left: 0.22em;
   color: var(--money);
 }
 .found .lede {
@@ -204,6 +206,29 @@
   transform: translateY(-2px);
 }
 
+/* the demo match behind the form: right of it on a wide screen, above it on a phone */
+.found-demo {
+  display: none;
+}
+.found-demo.on {
+  display: block;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: min(580px, 44vw);
+  pointer-events: none;
+}
+.found-demo .table-slot {
+  position: absolute;
+  inset: 8px;
+}
+.found-demo.on ~ .found-box {
+  margin: auto auto auto max(16px, calc(min(580px, 44vw) - 548px));
+  position: relative;
+  z-index: 1;
+}
+
 /* ---------------------------------------------------------- club office */
 .hq {
   position: absolute;
@@ -260,6 +285,9 @@
 }
 .hq-table {
   grid-area: table;
+}
+.hq-wire {
+  grid-area: wire;
 }
 .hq-panel {
   grid-area: panel;
@@ -766,12 +794,109 @@
 }
 .scorebar .score small {
   display: block;
-  font-size: 17px;
-  color: var(--dim);
-  margin-top: 2px;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  color: var(--linen2);
+  margin-top: 4px;
 }
+
 .match-table {
   flex: 1;
+}
+/* the calls made so far, small under the score; the last one large over the table for a moment */
+.callstrip {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 20px);
+  z-index: 3;
+  pointer-events: none;
+}
+.callnote {
+  font-size: 15px;
+  color: var(--linen);
+  background: rgba(26, 8, 22, 0.88);
+  border: 2px solid var(--edge);
+  border-radius: 8px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.callnote b {
+  font-weight: 400;
+  color: var(--money);
+}
+.callfx {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  width: min(620px, calc(100% - 28px));
+  text-align: center;
+  font-size: 28px;
+  line-height: 1.1;
+  color: var(--night);
+  background: var(--money);
+  border: 3px solid var(--night);
+  border-radius: 14px;
+  padding: 12px 18px;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.5);
+  z-index: 4;
+  pointer-events: none;
+  animation: fxin 0.22s ease-out;
+}
+@keyframes fxin {
+  from {
+    transform: translate(-50%, -50%) scale(0.85);
+    opacity: 0;
+  }
+}
+.opt .edge {
+  font-style: normal;
+  font-size: 14px;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+.opt .edge.beats {
+  background: #1d6b4a;
+  color: #dfffee;
+}
+.opt .edge.beaten {
+  background: #6b1d2a;
+  color: #ffe0e4;
+}
+.ft-calls {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 17px;
+  color: var(--linen2);
+}
+.ft-calls b {
+  font-weight: 400;
+  color: var(--money);
+}
+.ft-calls .up {
+  color: var(--good);
+}
+.ft-calls .down {
+  color: #ff8a80;
+}
+.fulltime .row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 .skip {
   position: absolute;
@@ -971,10 +1096,43 @@
 
 /* ---------------------------------------------------------- phones */
 @media (max-aspect-ratio: 105/100) {
+  .found-demo.on {
+    left: 0;
+    bottom: auto;
+    height: 34vh;
+  }
+  .found-demo.on ~ .found-box {
+    margin: calc(34vh - 8px) auto 0;
+  }
+  .ctoast {
+    bottom: auto;
+    top: 12px;
+  }
+  .club-app .mwire {
+    display: flex;
+  }
+  .callstrip {
+    position: static;
+    transform: none;
+    margin: 6px auto 0;
+  }
+  .btn.small,
+  .club-app .link {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .pl .cap {
+    width: 44px;
+    height: 44px;
+  }
+  .quiet a {
+    display: inline-block;
+    padding: 12px 0;
+  }
   .hq {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 34vh 1fr;
-    grid-template-areas: "top" "table" "panel";
+    grid-template-rows: auto auto 34vh 1fr;
+    grid-template-areas: "top" "wire" "table" "panel";
   }
   .hq-panel {
     border-right: 0;
@@ -1040,4 +1198,38 @@
   .scorebar .team .ccrest {
     display: none;
   }
+}
+
+/* the wire as text on a phone, where the rail on the turned table is too small to read */
+.mwire {
+  display: none;
+  flex: none;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px;
+  padding: 5px 8px;
+  min-height: 34px;
+  background: #0b0309;
+  border: 2px solid #7a5a1c;
+  border-radius: 8px;
+  font-size: 17px;
+  line-height: 1.05;
+  color: var(--money);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.mwire .wtag {
+  flex: none;
+  background: var(--money);
+  color: var(--night);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 14px;
+}
+.mwire.up {
+  color: #bff5d8;
+}
+.mwire.down {
+  color: #ffc2bd;
 }

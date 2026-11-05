@@ -21,7 +21,7 @@ import { Fig, PAIR_HEX, PAIR_SHAPE, PathFelt, fmt, hex, useUi } from "./kit.js";
 import { BossIntro, LeagueTable, Programme, Stage, bindScreens } from "./screens.js";
 
 export const VERSION = "3.0.0";
-export const X_URL = "https://x.com/kyriektnrv";
+export const X_URL = "https://x.com/kicker_art";
 
 export interface Shared {
   id: string;
@@ -693,7 +693,7 @@ function Title() {
               Source ↗
             </a>
             <a href={X_URL} target="_blank" rel="noopener">
-              @kyriektnrv ↗
+              @kicker_art ↗
             </a>
           </nav>
           <p class="foot-note">Robinhood Chain testnet. Test tokens, no real value. KICKER never asks for a seed phrase, a key or funds.</p>
@@ -947,7 +947,7 @@ function How() {
             </a>
             . News:{" "}
             <a href={X_URL} target="_blank" rel="noopener">
-              @kyriektnrv on X ↗
+              @kicker_art on X ↗
             </a>
           </p>
           <Privacy />
@@ -1806,7 +1806,7 @@ function Table() {
           <ol class="mybest">
             {mine.slice(0, 10).map((h) => (
               <li>
-                <b class="m">{fmt(h.total)}</b> {h.style} · round {h.round} <a href={`/?s=${h.seed}&e=${h.edition}`}>play this seed ↗</a>
+                <b class="m">{fmt(h.total)}</b> {h.style} · round {h.round} <a href={`/classic.html?s=${h.seed}&e=${h.edition}`}>play this seed ↗</a>
               </li>
             ))}
           </ol>
@@ -1822,7 +1822,7 @@ function Table() {
               {p.recent.map((r) => (
                 <li>
                   <span class="d">{dayLabel(r.at.slice(0, 10))}</span> {r.won ? "won the season" : `round ${r.round}`} · <b class="m">{fmt(r.total)}</b> {r.style}
-                  {r.daily ? " · Daily Match" : ""} <a href={`/c/${r.id}`}>replay ↗</a> <a href={`/?s=${r.seed}&e=${r.edition}`}>same seed ↗</a>
+                  {r.daily ? " · Daily Match" : ""} <a href={`/c/${r.id}`}>replay ↗</a> <a href={`/classic.html?s=${r.seed}&e=${r.edition}`}>same seed ↗</a>
                 </li>
               ))}
             </ol>

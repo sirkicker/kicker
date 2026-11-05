@@ -2,31 +2,124 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <title>KICKER Club · run a club of live vibe/vibe launches</title>
-    <meta name="description" content="Run a club of eleven live vibe/vibe launches on a felt table. A weekly league of eight clubs run by real managers, three calls in every match, and drills between them. Curve progress is Power, trades are Pace, holders are Grip." />
-    <meta name="theme-color" content="#12060f" />
-    <link rel="icon" type="image/png" href="/brand/token-512.png" />
+    <script>
+      // links from the 3.0 game (?c=<challenge>, ?s=<seed>) still open the 3.0 game
+      (function () {
+        var q = new URLSearchParams(location.search);
+        if (q.has("c") || q.has("s")) location.replace("/classic.html" + location.search);
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>KICKER · a meme. he only moves sideways.</title>
+    <meta name="description" content="KICKER is a meme: a wooden football man bolted to a brass rod. He only moves sideways. No spinning. Put your vibe/vibe launch on the rod." />
+    <meta name="theme-color" content="#22170f" />
+    <link rel="icon" type="image/png" href="/brand/k6/favicon-64.png" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://kickerhq.vercel.app/" />
-    <meta property="og:title" content="KICKER Club · run a club of live vibe/vibe launches" />
-    <meta property="og:description" content="Eleven live launches on brass rods. A league of eight real managers every week, three calls in every match, drills between them." />
-    <meta property="og:image" content="https://kickerhq.vercel.app/brand/og-1200x630.png" />
+    <meta property="og:title" content="KICKER · we only move sideways" />
+    <meta property="og:description" content="KICKER is a meme. He only moves sideways. No spinning." />
+    <meta property="og:image" content="https://kickerhq.vercel.app/brand/k6/og-1200x630.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="a pixel table-football man bolted to a brass rod, giving the side-eye: we only move sideways. no spinning." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@kyriektnrv" />
-    <meta name="twitter:image" content="https://kickerhq.vercel.app/brand/og-1200x630.png" />
-    <meta property="og:image:alt" content="KICKER: five figures on a brass rod over the felt" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" rel="stylesheet" />
+    <meta name="twitter:site" content="@kicker_art" />
+    <meta name="twitter:image" content="https://kickerhq.vercel.app/brand/k6/og-1200x630.png" />
+    <link rel="preload" href="/fonts/fraunces-k.woff2" as="font" type="font/woff2" crossorigin />
   </head>
-  <body>
-    <div id="stage" aria-hidden="true"></div>
-    <div id="ui"></div>
-    <div class="crt-lines" aria-hidden="true"></div>
-    <noscript>KICKER needs JavaScript and WebGL.</noscript>
-    <script type="module" src="/src/club/main.ts"></script>
+  <body class="k6">
+    <a class="skip" href="#memes">skip to the memes</a>
+    <header class="hero" id="hero">
+      <div class="bar">
+        <a class="mark" href="/" aria-label="KICKER, home">KICKER</a>
+        <nav class="nav" aria-label="KICKER">
+          <a class="nl" href="#memes">the memes</a>
+          <a class="nl" href="#rod">today's rod</a>
+          <a class="nl" href="https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4" rel="noopener">$KICKER <svg class="ne" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 0h6v6H6V3.4L1.4 8 0 6.6 4.6 2H2z"/></svg></a>
+          <a class="btn" href="#put" data-put>Put your launch on the rod</a>
+        </nav>
+      </div>
+      <div class="hero-in">
+        <figure class="hero-meme" id="hero-meme">
+          <p class="cap cap-top" aria-hidden="true">we only move sideways.</p>
+          <div class="hero-fig" id="hero-fig">
+            <i class="rod hero-rod" id="hero-rod" aria-hidden="true"></i>
+            <div class="hero-slide" id="hero-slide">
+              <canvas id="hero-cv" role="img" aria-label="the kicker: a carved table-football man bolted to a brass rod, giving the side-eye. we only move sideways. no spinning."></canvas>
+            </div>
+          </div>
+          <p class="cap cap-bot" aria-hidden="true">no spinning.</p>
+          <p class="hero-mk" aria-hidden="true"><span>$KICKER</span><span>kickerhq.vercel.app</span></p>
+        </figure>
+        <div class="hero-say">
+          <h1 class="hc-lead">KICKER is a meme. <span>he only moves sideways.</span></h1>
+          <p class="hc-line">a wooden football man, bolted through the chest to a brass rod. he never spins. <a href="https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4" rel="noopener">$KICKER</a> is his coin, on vibe/vibe.</p>
+          <div class="hc-acts">
+            <a class="btn" href="#put" data-put>Put your launch on the rod</a>
+            <a class="link" href="#memes">the memes</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="memes" id="memes" aria-labelledby="memes-h">
+        <header class="sec-h">
+          <h2 id="memes-h">The memes</h2>
+          <p class="meme">dry ones, for replies. save any of them.</p>
+        </header>
+        <ul class="grid" id="grid"></ul>
+      </section>
+
+      <section class="rodsec" id="rod" aria-labelledby="put-h">
+        <header class="sec-h put" id="put">
+          <div>
+            <h2 id="put-h">Put your launch on the rod</h2>
+            <p class="meme">paste a vibe/vibe token link. its kicker turns up in its colours, its picture on his chest, in one meme.</p>
+          </div>
+          <form class="find" id="find" autocomplete="off">
+            <label class="sr" for="find-in">a vibe/vibe token link or 0x address</label>
+            <span class="find-f">
+              <input id="find-in" name="find" type="text" inputmode="url" spellcheck="false" placeholder="testnet.vibevibe.fun/token/0x…" maxlength="200" />
+              <button type="submit" class="btn" id="find-go">Put it on</button>
+            </span>
+            <span class="find-err" id="find-err" role="alert" hidden></span>
+          </form>
+        </header>
+        <p class="rod-h"><span>today's rod</span> <span class="sep" aria-hidden="true">&middot;</span> <span class="num" id="rod-day">&nbsp;</span> <span class="sep" aria-hidden="true">&middot;</span> <span id="rod-count">&nbsp;</span></p>
+        <div class="band" id="band">
+          <i class="rod band-rod" aria-hidden="true"></i>
+          <div class="band-sc" id="band-sc" tabindex="0" role="region" aria-label="the launches on today's rod">
+            <ul class="row" id="row"></ul>
+          </div>
+          <button type="button" class="arrow band-prev" id="band-prev" aria-label="along the rod, to the left" hidden><svg class="chev" viewBox="0 0 6 10" aria-hidden="true"><path d="M4 0h2v2H4zM2 2h2v2H2zM0 4h2v2H0zM2 6h2v2H2zM4 8h2v2H4z"/></svg></button>
+          <button type="button" class="arrow band-next" id="band-next" aria-label="along the rod, to the right" hidden><svg class="chev" viewBox="0 0 6 10" aria-hidden="true"><path d="M0 0h2v2H0zM2 2h2v2H2zM4 4h2v2H4zM2 6h2v2H2zM0 8h2v2H0z"/></svg></button>
+        </div>
+      </section>
+
+      <section class="lore" aria-labelledby="lore-h">
+        <h2 id="lore-h">Who he is</h2>
+        <ol class="lines">
+          <li>he is a wooden football man, bolted through the chest to a brass rod.</li>
+          <li>the rod only goes sideways, so he only goes sideways. he only looks sideways too.</li>
+          <li>spinning is against the rules. he has never spun. he never will.</li>
+          <li>the table moves. the crowd shouts. he holds the rod.</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <a class="foot-mark" href="#hero" aria-label="KICKER, back to the top">KICKER</a>
+      <p class="gold-line" data-gold><span class="gold-say">holding $KICKER?</span> <button type="button">sign in for the gold rod</button></p>
+      <nav class="foot-nav" aria-label="elsewhere">
+        <a href="https://x.com/kicker_art" rel="noopener">@kicker_art</a>
+        <a href="https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4" rel="noopener">$KICKER <svg class="ne" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 0h6v6H6V3.4L1.4 8 0 6.6 4.6 2H2z"/></svg></a>
+        <a href="https://github.com/sirkicker/kicker" rel="noopener">Source</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+    </footer>
+    <p class="toast" id="toast" role="status" aria-live="polite"></p>
+    <noscript><p class="nojs">the table needs JavaScript to draw the kicker.</p></noscript>
+    <script type="module" src="/src/k6/main.ts"></script>
   </body>
 </html>

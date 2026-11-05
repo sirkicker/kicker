@@ -59,15 +59,14 @@ function save(run: Run) {
 /** The address bar stays bare during play: a reload or a bookmark always lands on the title (with Continue). */
 function setUrl() {
   const u = new URL(location.href);
-  if (!u.search && u.pathname === "/") return;
-  u.search = "";
-  u.pathname = "/";
+  if (!u.search) return;
+  u.search = ""; // the 3.0 game lives at /classic.html since 5.0: keep the path
   history.replaceState(null, "", u.toString());
 }
 
 /** The share link for a seed. Opening it shows the seed on the title; it never starts by itself. */
 export function seedUrl(seed: string, edition: number, mode: RunMode = "season") {
-  return `${location.origin}/?s=${seed}&e=${edition}${mode === "haunt" ? "&m=haunt" : ""}`;
+  return `${location.origin}/classic.html?s=${seed}&e=${edition}${mode === "haunt" ? "&m=haunt" : ""}`;
 }
 
 /** The first-match walkthrough: four prompts, each moves on when the player does the thing. Shown once, skippable. */

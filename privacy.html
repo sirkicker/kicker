@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Privacy · KICKER</title>
+    <meta name="description" content="What KICKER keeps: launches put on today's rod, a one-way hash of an IP for a day's limit, and an optional sign-in address for the gold rod." />
+    <meta name="theme-color" content="#22170f" />
+    <link rel="icon" type="image/png" href="/brand/k6/favicon-64.png" />
+    <link rel="preload" href="/fonts/fraunces-k.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      @font-face { font-family: "Fraunces K"; src: url(/fonts/fraunces-k.woff2) format("woff2"); font-weight: 300 800; font-display: swap }
+      * { box-sizing: border-box }
+      html { background: #22170f; color: #f1e5cc; font: 400 17px/1.6 "Fraunces K", Georgia, serif; font-optical-sizing: auto; -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; color-scheme: dark }
+      body { margin: 0; min-height: 100vh; display: flex; flex-direction: column }
+      a { color: inherit; text-underline-offset: 4px; text-decoration-thickness: 1px }
+      a:hover { color: #e8cf8e }
+      :focus-visible { outline: 2px solid #e8cf8e; outline-offset: 3px }
+      header { display: flex; justify-content: space-between; align-items: center; gap: 20px; max-width: 1240px; width: 100%; margin: 0 auto; padding: 20px clamp(20px, 5vw, 56px) }
+      .mark { font-weight: 650; font-size: 24px; line-height: 1; letter-spacing: .08em; text-decoration: none }
+      .tag { font-size: 15px; color: rgba(241, 229, 204, .72) }
+      .tag em { font-style: normal; color: #e8cf8e }
+      main { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: clamp(28px, 6vw, 72px) clamp(20px, 5vw, 56px) 80px }
+      .kick { font-size: 15px; font-style: italic; color: rgba(241, 229, 204, .72); margin: 0 0 8px }
+      h1 { font-weight: 400; font-size: clamp(44px, 6vw, 72px); line-height: 1; letter-spacing: -.03em; margin: 0 0 30px }
+      h1 em { font-style: normal; color: #e8cf8e }
+      h2 { font-weight: 400; font-size: 24px; letter-spacing: -.01em; margin: 38px 0 8px; padding-top: 18px; border-top: 1px solid rgba(241, 229, 204, .18) }
+      p, li { color: rgba(241, 229, 204, .84) }
+      p { margin: 0 0 10px }
+      ul { padding-left: 1.2em; margin: 0 }
+      li { margin: 4px 0 }
+      footer { background: #170f0a; padding: 22px clamp(20px, 5vw, 56px) 28px; font-size: 14px; color: rgba(241, 229, 204, .78); display: flex; flex-wrap: wrap; gap: 4px 24px }
+      footer a { display: inline-flex; align-items: center; min-height: 40px; text-decoration: none }
+    </style>
+  </head>
+  <body>
+    <header><a class="mark" href="/" aria-label="KICKER, home">KICKER</a><span class="tag">we only move sideways. <em>no spinning.</em></span></header>
+    <main>
+      <p class="kick">privacy</p>
+      <h1>what KICKER <em>keeps.</em></h1>
+      <p>Very little. KICKER is a meme site: the memes are drawn on request and nothing about you is needed to see or save them.</p>
+      <h2>launches put on the rod</h2>
+      <p>When someone puts a vibe/vibe launch on the rod, its token address goes on today's rod for three days. Its name, symbol and picture are read from vibe/vibe to draw its meme, and kept for a day so the meme draws quickly. Nothing about the person who put it there is kept with it.</p>
+      <h2>a one-way hash of your IP, for a day's limit</h2>
+      <p>To keep the rod from being flooded, the server counts how many launches one place puts on it each day. It keeps a one-way hash of your IP address, mixed with the day, for two days. The IP itself is not stored.</p>
+      <h2>your address, only if you sign in</h2>
+      <p>Signing in is optional and nothing on the site needs it. It is for $KICKER holders who want the gold rod. Sign-in is handled by Para and loads only when you press "sign in for the gold rod". The address you sign in with stays in your own browser; the server reads its $KICKER balance with one balance check and remembers the yes or no for ten minutes. Nothing is sent and nothing is signed.</p>
+      <h2>nothing else</h2>
+      <ul>
+        <li>no accounts, no email, no tracking cookies, no analytics;</li>
+        <li>the old club game at /club keeps its own club key in your browser, as before.</li>
+      </ul>
+      <h2>taking a launch off the rod</h2>
+      <p>Write to <a href="https://x.com/kicker_art" rel="noopener">@kicker_art</a> on X with the launch's link. It comes off today's rod. Launches that break the site's manners are taken off without asking.</p>
+    </main>
+    <footer>
+      <a href="/">KICKER</a>
+      <a href="https://x.com/kicker_art" rel="noopener">@kicker_art</a>
+      <a href="https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4" rel="noopener">$KICKER</a>
+      <a href="https://github.com/sirkicker/kicker" rel="noopener">Source</a>
+      <a href="/privacy">Privacy</a>
+    </footer>
+  </body>
+</html>

@@ -1,5 +1,98 @@
 # Changelog
 
+## 6.2.0 · Own line (2026-11-05)
+KICKER is a meme, not a collection.
+- The cover is one meme: the kicker bolted through the middle of his rod, "we only move sideways." / "no spinning.", $KICKER. First line: "KICKER is a meme. he only moves sideways."
+- Eight finished meme panels, one Save each. Put your launch on the rod: one meme in its colours at /l/<token>, one Save, the same meme as og:image. Today's rod stays, without numbers. Four lines of lore.
+- Gone: the reaction desk, zip, stickers, Copy, recent-launch chips, numbers, traits, the set wall, the kicker of the day. Old /k/, /m/, /?t= and reaction links still land on a meme.
+- New palette: a walnut table (dark wood, felt, brass, cream). New brand/k6 assets. X is @kicker_art.
+
+## 5.2.0 · The set (2026-11-05)
+A redesign of the home page after Nouns, Nakamigos and the CryptoPunks wall, in KICKER's own wine, teal felt, brass and cream.
+
+- The cover: one big kicker on his rod, on a flat tint taken from his own colours, with his card beside him: his number, his name, his kit, his line, "Field him" and his plate. The arrows walk the set; the tint cross-fades and he slides in sideways. The man of the day when there is one, otherwise a pick of the day from the set.
+- Today's rod: one long brass rod across a band of felt, the day's kickers standing on it, large. A short day is topped up to seven with the house line-up of the day, marked "house". Arrows, drag, keys or a swipe move it; the page wheel is never taken. Hover and he kicks; tap for his plate. Yesterday's rod one click away.
+- The set: all 222 in full colour as one wall on felt, a rod through every row. Fielded ones on lighter felt with a brass corner, open ones a little dimmed. Filter by fielded or open, and by family. One atlas, loaded when the wall comes near.
+- How it works in three steps, then the footer.
+- Text is Archivo now; Jersey 10 stays for the wordmark and the numbers. The crowd band, the dark table and the album of silhouettes are gone.
+- New X assets in `brand/kickers/` and a new home og:image.
+
+## 5.1.0 · Kickers (2026-11-05)
+Every kicker is a viber. The generic little men are gone; the page goes back to KICKER's own look, wine, teal felt, brass and Jersey 10, and is laid out as a matchday programme with a sticker album inside.
+
+### The kickers
+- All 222 vibers are the set, No. 001 to No. 222. Any of them becomes a foosball figure: the viber himself is kept as he is, and a jersey, arms, shorts and a pair of cast boots go on under him. A brass rod goes through his middle: hidden behind him, a socket on each flank, a pin on the front.
+- Kits are two colours and a pattern: hoops, stripes, halves, sash, pin, quarters, band or plain. Each day has a home kit and an away kit.
+- Men made in 5.0 are kickers now too: each gets a viber of his own and a kit taken from the shirt he painted.
+
+### The programme
+- The cover: the issue number, the date, "kickers for the vibe/vibe crowd", today's fixture with both kits, and the man of the day as the cover star.
+- The table, with the crowd of vibers in the stands. Point at a kicker and he kicks.
+- The album: a numbered slot for every viber. The first one to field a viber gets his sticker into the album; the other slots wait with a printed outline. A checklist at the back. No prices.
+- Plate pages for the whole set at `/k/<number>`, with the ones before and after, and "field him".
+
+### Field a kicker
+- Pick a viber from the set, step through it, or have one drawn. Pick today's home kit, today's away kit, or your own colours and pattern, or a vibe/vibe launch's colours from its token link. A name and a line, then put him on the rod.
+- Save image gives his plate: the kicker on brass in a felt well, printed on programme stock, with his number, his line and his kit.
+- The 16 by 16 shirt grid is retired.
+
+### Pictures
+- New plates (1080 x 1350) and pictures for X (1200 x 630) for every kicker and every number of the set.
+- New X banner, avatar, launch post and two plates in `brand/kickers/`.
+
+## 5.0.0 · Sideways (2026-11-05)
+KICKER stops being a game and becomes a table. The little foosball man is bolted to a brass rod for good. He can only move sideways, like the market. No spinning.
+
+### The table
+- The home page is an endless foosball table you walk sideways: wheel, trackpad, drag, the arrow keys, or a swipe on a phone.
+- One stretch of rod per day (UTC), two rods, two kits of the day. Today is at the right end, by the handles, with an empty place that says "you?".
+- Hover or tap a man for his wall label: his number, his name, his line, his day. Click him for his page.
+- The rods lag a little behind the camera and settle. Each man shifts his weight now and then, and lifts his arms when you point at him. With reduced motion, nothing moves on its own.
+- Only the days near the camera are loaded; older days arrive as you walk left, back to the first day of the table.
+
+### Make your man
+- Paint his shirt on a 16 by 16 grid, or start from a pattern: hoops, stripes, halves, sash, chevron, quarters, pin, plain. Pick a head (crop, part, curls, long, bald, cap, beanie, bucket), a hair or hat colour and a skin tone.
+- A name (16 characters) and a line (60). A man nobody bothers with still looks good: every visit starts from a well dressed default and a palette that suits the felt.
+- Optional: paste a vibe/vibe token link to dress him in that launch's colours, with its picture as a small badge on his chest. Only the name, symbol and picture are read.
+- **Put him on the rod** adds him to today's rod. **Save image** keeps a 1080 x 1350 portrait of him on brass, with his line, his day and his number.
+
+### Man of the day
+- Each day one man from yesterday's rod is picked, the same for everyone. He gets a page at `/m/<id>` (and `/m/today`) with his portrait and a picture for X.
+
+### $KICKER
+- Holders of $KICKER stand on a gold stretch of the rod. It is paint and nothing else. Signing in is optional and never needed to make a man; the sign-in island loads only when asked for, and the page never touches a wallet itself.
+
+### Manners
+- Names and lines are checked for slurs, sexual words, links, @handles, tickers and promo words.
+- Three men a day from one place.
+- Men can be taken off the table; they disappear everywhere, pictures included.
+- A short privacy page says what is kept.
+
+### The old tables
+- The 4.x club game moved to `/club`, with 4.1 as it was. Club keys stay in the browser and keep working.
+- The 3.0 game stays at `/classic.html`. Challenge links (`/c/<id>`), posted seasons and seed links open it as before.
+
+## 4.1.0 · Final whistle (2026-11-05)
+The 4.0 club, tidied for the first full week. Same felt, fewer surprises.
+
+### Fixed
+- Coming back to the club on a fast connection no longer leaves the office stuck on "Opening the club office".
+- Training taps land. The screens over the table were taking every tap, so the ball only ever stopped on the 7 second timeout.
+- The table no longer rebuilds itself mid-chance when the screen resizes, so a skip or a re-fit cannot break the match screen.
+- The end men on the five-man rod stand on the felt, not under the rails, and the figures are a size smaller so their names stop crowding.
+- The office plate shows your crest, tactic, captain and who is next, instead of your name running into the KICKER mark.
+- The wire says the result of a chance after the table shows it, not before.
+- The office reads the group fresh on every visit, so a fixture someone else just played is not offered again.
+- Phone tap targets are 44 px: Back, Save, Key, Play, Skip, the captain's C.
+
+### New
+- The front door plays a real match on the table behind the form, so you see the idea before you read it.
+- Each call shows what it did: a line over the table, a note under the score for the rest of the match, and at full time the score after each call.
+- Tactic calls say up front whether they beat theirs or lose to it.
+- The office wire tells you where you stand and who is next. Their half of the table waits in grey until kickoff.
+- **Save image** at full time: the table, both crests, the score, the scorers and your calls, 1200 x 675.
+- On a phone the wire also runs as text over the table, where the rail is too small to read.
+
 ## 4.0.0 · Club (2026-11-04)
 KICKER is now a manager game. Same felt, same brass, same stands.
 

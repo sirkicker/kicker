@@ -1,17 +1,83 @@
 <p align="center">
-  <img src="docs/banner.png" alt="KICKER: five figures on a brass rod" width="100%">
+  <img src="brand/kickers/banner-1500x500.png" alt="KICKER: voxel vibers cast as foosball kickers on a brass rod. Every kicker is a viber." width="100%">
 </p>
 
-<h3 align="center">Turn-based table football where every figure on your rods is a live vibe/vibe launch.</h3>
+<h3 align="center">Kickers for the vibe/vibe crowd. Every kicker is a viber. One brass rod a day. We only move sideways.</h3>
 
 <p align="center">
-  <a href="https://kickerhq.vercel.app"><b>Play now → kickerhq.vercel.app</b></a>
-  &nbsp;·&nbsp; <a href="https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323">$KICKER on vibe/vibe</a>
-  &nbsp;·&nbsp; <a href="https://x.com/kyriektnrv">@kyriektnrv on X</a>
-  &nbsp;·&nbsp; Robinhood Chain testnet &nbsp;·&nbsp; PixiJS + WebGL
+  <a href="https://kickerhq.vercel.app"><b>kickerhq.vercel.app</b></a>
+  &nbsp;·&nbsp; <a href="https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4">$KICKER on vibe/vibe</a>
+  &nbsp;·&nbsp; <a href="https://x.com/kicker_art">@kicker_art on X</a>
 </p>
 
 ---
+
+## the kickers
+
+Take a viber. Cut him off at the knees, cast him a jersey and a pair of boots in one piece, and put a brass rod through his middle. Now he is a kicker. He can move left and he can move right, and that is the whole of his range, which puts him in the same position as most charts. Spinning the rod is bad form. He does not spin.
+
+There are 222 of them: the set. Every one has a number, No. 001 to No. 222, and a plate at `/k/<number>`.
+
+## the programme
+
+The home page is printed matter. On the cover: the issue number (one a day), today's fixture (the home and away kits of the day) and the cover star, who is the man of the day. Inside: the table. At the back: the album.
+
+<p align="center">
+  <img src="docs/kickers-home.png" alt="The cover of the programme and the table" width="100%">
+</p>
+
+## the table
+
+One long table you walk sideways: wheel, trackpad, drag, the arrow keys, or a swipe. Every day (UTC) gets its own stretch of rod, and whoever comes by that day stands on it. Today is at the right end, by the handles, with an empty place that says "you?". The crowd watches from the stands. Point at a kicker and he kicks; his wall label shows his number, his name and his line.
+
+## field a kicker
+
+Pick a viber from the set, or have one drawn for you. Pick his kit: today's home, today's away, or your own two colours and a pattern (hoops, stripes, halves, sash, pin, quarters, band, plain). A launch from [vibe/vibe](https://testnet.vibevibe.fun) can lend him its colours: paste its token link. Give him a name and one line, put him on the rod, then **Save image** for his plate.
+
+<p align="center">
+  <img src="docs/kickers-make.png" alt="Fielding a kicker: the set, the kit, a name and a line" width="64%">
+  <img src="docs/kickers-phone.png" alt="The programme on a phone" width="24%">
+</p>
+
+## the album
+
+At the back of the programme, every viber of the set has a numbered slot. The first time somebody fields a viber, his sticker goes in, with the name of whoever fielded him. The rest of the slots wait, printed with a pale outline. The checklist at the end ticks them off. There is no price on anything: the album fills as people play.
+
+<p align="center">
+  <img src="docs/kickers-album.png" alt="The album: numbered slots, stuck stickers and open ones" width="100%">
+</p>
+
+## man of the day
+
+Every day one kicker from yesterday's rod is picked, the same pick for everyone. He is the cover star, and he gets a page at `/m/<id>` (or `/m/today`) with a plate made for X.
+
+<p align="center">
+  <img src="brand/kickers/plate-1-1080x1350.png" alt="A man of the day plate" width="36%">
+  <img src="docs/kickers-plate.png" alt="A plate page" width="60%">
+</p>
+
+## $KICKER
+
+Holders of [$KICKER](https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4) stand on a gold stretch of the rod. That is all it does. Signing in is optional, goes through Para, and is never needed to field a kicker.
+
+## manners
+
+No links, no @handles, no tickers, no promo, nothing nasty. Three kickers a day from one place. Kickers who break the manners are taken off the table, and their album slot opens again. What is kept is on [/privacy](https://kickerhq.vercel.app/privacy). KICKER is a fan table for the vibe/vibe crowd, not affiliated with it.
+
+## how it is made
+
+- Vite, TypeScript and Preact. Every kicker is composed from a viber sprite in `public/vibers` by `shared/kicker.ts`: the same pixel arithmetic runs in the browser (canvas) and on the server (sharp and resvg), so a kicker looks the same everywhere. The viber is kept untouched; the jersey, the arms, the boots and the bore for the rod are cast under him.
+- The table is one canvas under a native scroller, drawn at whole-number scales. No Pixi on the home page; its first load is about 23 KB gzip of code and styles. The album reads one atlas picture (`public/vibers/set.png`, `npm run kicker:atlas`) when you scroll to it.
+- Vercel functions in `api/`, Upstash Redis (`api/_kv.ts`, keys under `side:`). Plates and X pictures are drawn on request with resvg (`api/_sidecard.ts`) and cached; nothing is uploaded.
+- `npm test` runs the old games' tests, the table's (`scripts/side-test.ts`) and the kickers' (`scripts/kicker-test.ts`). `npm run kicker:brand` draws the brand pictures from a demo table in memory; `SIDE_SEED=1 npx vite` seeds that demo table on a dev server only; `npm run kicker:qa` screenshots it.
+
+## the old tables
+
+The 4.x club game, a manager game with live launches on the rods, lives at [`/club`](https://kickerhq.vercel.app/club). Club keys keep working.
+
+## The old table (3.0)
+
+The turn-based season game stays at [`/classic.html`](https://kickerhq.vercel.app/classic.html). Everything below describes it; old links, posted seasons and challenge links keep working.
 
 ## What it is
 
@@ -157,7 +223,7 @@ Hold any `$KICKER` on Robinhood Chain testnet and your side can change shirts: *
 
 ## The token
 
-[`$KICKER`](https://testnet.vibevibe.fun/token/0x0e76e43c28E1094dD0912c33BFf34004E110c323) is the game's own launch on vibe/vibe, on Robinhood Chain testnet: a test token with no real value. It is **cosmetic only**. It never changes a figure, a rival or a result. The engine doesn't know the token exists.
+[`$KICKER`](https://testnet.vibevibe.fun/token/0x7e1be1573fD7Fe434a53Abb38356AcfFDF15c1C4) is the game's own launch on vibe/vibe, on Robinhood Chain testnet: a test token with no real value. It is **cosmetic only**. It never changes a figure, a rival or a result. The engine doesn't know the token exists.
 
 ## Under the hood
 
@@ -181,7 +247,7 @@ Sign-in needs a Para API key at build time: `VITE_PARA_API_KEY`, and `VITE_PARA_
 
 ## Notes
 
-News and updates: [@kyriektnrv on X](https://x.com/kyriektnrv).
+News and updates: [@kicker_art on X](https://x.com/kicker_art).
 
 Testnet only. Fans, goals and ratings are a game: they are not money and don't stand for anything you own. KICKER is an independent project built on public vibe/vibe data, and it is not made by the vibe/vibe team.
 
