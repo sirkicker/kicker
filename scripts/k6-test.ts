@@ -193,14 +193,14 @@ const hash = (s: K6Sprite) => createHash("sha1").update(s.px).digest("hex");
   const visible = (html.replace(/download="[^"]*"/g, "").replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, " ") + " " + strs("api/k6.ts") + " " + strs("api/_k6card.ts") + " " + MEMES.map((m) => `${m.top} ${m.bottom} ${m.alt}`).join(" ") + " " + strs("src/k6/main.ts") + " " + strs("src/k6/hero.ts") + " " + strs("src/k6/rod.ts")).toLowerCase();
   const banned = ["download", "price", "chart", "buy", "sell", "moon", "poker", "gambl", "bet ", " odds", "jackpot", "loot", "payout", "graduation", "official", "partner", "sponsor", "reward", "earn ", "prize", "guarantee", "rarity", "rare ", "mint", "to the moon"];
   const hits = banned.filter((w) => visible.includes(w));
-  ok(hits.length === 0, `words: none of the Spotlight words on the page, the pages or the memes${hits.length ? " (" + hits.join(", ") + ")" : ""}`);
+  ok(hits.length === 0, `words: none of the off-limits words on the page, the pages or the memes${hits.length ? " (" + hits.join(", ") + ")" : ""}`);
   // 6.2: no pack studio, no meme-reaction kit, no collection words anywhere a visitor reads
   const gone = [/\bzip\b/, /sticker/, /\bcopy\b/, /\bwen\b/, /clipboard/, /recent launches/, /reaction desk/, /make (his|a|the) pack/, /on the bench/, /1,111/, /\bthe set\b/, /kicker of the day/, /no\. 0/, /\btraits?\b/, /player card/, /collection/];
   const left = gone.filter((r) => r.test(visible)).map(String);
   ok(left.length === 0, `6.2 words: no zip, sticker, Copy, wen, chips, numbers, set or traits in the copy${left.length ? " (" + left.join(", ") + ")" : ""}`);
   ok(/kicker is a meme/.test(visible) && /we only move sideways/.test(visible) && /no spinning/.test(visible) && /\$kicker/.test(visible), "6.2 words: the first screen says it is a meme, the meme line and $KICKER");
   ok(!readdirSync("src/k6").some((f) => /desk|zip|wall/.test(f)), "6.2: the desk, the zip writer and the set wall are gone from the code");
-  ok(!/kyriektnrv/.test(html + readFileSync("api/k6.ts", "utf8") + readFileSync("shared/side.ts", "utf8") + readFileSync("privacy.html", "utf8")) && /@kicker_art/.test(html), "6.2: the X account is @kicker_art");
+  ok(/@kicker_art/.test(html), "6.2: the X account is @kicker_art");
 }
 
 

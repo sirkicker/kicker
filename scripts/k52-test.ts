@@ -73,7 +73,7 @@ const ok = (c: boolean, m: string) => {
   ok(worstWine >= 4.5, `cover: the wine number is AA on every tint (worst ${worstWine.toFixed(2)})`);
   ok(tints.size >= 12, `cover: the tint follows the viber (${tints.size} different tints)`);
   const words = readFileSync("index.html", "utf8").replace(/<[^>]+>/g, " ");
-  ok(!/\b(card|poker|bet|odds|jackpot|loot|payout|graduation|official|partner|sponsor|reward|earn|prize|guarantee|download|mint|rarity)\b/i.test(words), "copy: no Spotlight words on the home page");
+  ok(!/\b(card|poker|bet|odds|jackpot|loot|payout|graduation|official|partner|sponsor|reward|earn|prize|guarantee|download|mint|rarity)\b/i.test(words), "copy: no off-limits words on the home page");
   ok(!/!/.test(words.replace(/<!--[\s\S]*?-->/g, "").replace(/!doctype/i, "").replace(/!==|!=/g, "")), "copy: no exclamation marks");
 }
 
